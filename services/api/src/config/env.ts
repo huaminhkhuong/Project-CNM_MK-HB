@@ -39,10 +39,32 @@ if (!parsedEnv.success) {
   throw new Error(`Invalid environment configuration: ${parsedEnv.error.message}`);
 }
 
+let dbHost = process.env.DB_HOST || "127.0.0.1";
+let dbPort = Number(process.env.DB_PORT || 3306);
+let dbUser = process.env.DB_USER || "root";
+let dbPassword = process.env.DB_PASSWORD || "";
+let dbName = process.env.DB_NAME || "cnm_ecommerce";
+
+if (parsedEnv.data.DATABASE_URL) {
+  try {
+    const parsedDbUrl = new URL(parsedEnv.data.DATABASE_URL);
+    dbHost = parsedDbUrl.hostname || dbHost;
+    dbPort = parsedDbUrl.port ? Number(parsedDbUrl.port) : dbPort;
+    dbUser = decodeURIComponent(parsedDbUrl.username || dbUser);
+    dbPassword = decodeURIComponent(parsedDbUrl.password || dbPassword);
+    dbName = parsedDbUrl.pathname.replace(/^\//, "") || dbName;
+  } catch {}
+}
+
 export const env = {
   nodeEnv: parsedEnv.data.NODE_ENV,
   port: parsedEnv.data.PORT,
   databaseUrl: parsedEnv.data.DATABASE_URL,
+  dbHost,
+  dbPort,
+  dbUser,
+  dbPassword,
+  dbName,
   frontendUrl: parsedEnv.data.FRONTEND_URL,
   jwtAccessSecret: parsedEnv.data.JWT_ACCESS_SECRET,
   jwtRefreshSecret: parsedEnv.data.JWT_REFRESH_SECRET,

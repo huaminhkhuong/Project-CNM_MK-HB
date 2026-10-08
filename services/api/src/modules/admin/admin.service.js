@@ -60,7 +60,7 @@ async function ensureCompatibilityRuleNameColumn() {
     `
       SELECT COLUMN_NAME
       FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA = ?
+      WHERE TABLE_SCHEMA = COALESCE(DATABASE(), ?)
         AND TABLE_NAME = 'compatibility_rules'
         AND COLUMN_NAME = 'name'
       LIMIT 1
@@ -92,7 +92,7 @@ async function getRoleIdentifierColumn() {
     `
       SELECT COLUMN_NAME
       FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA = ?
+      WHERE TABLE_SCHEMA = COALESCE(DATABASE(), ?)
         AND TABLE_NAME = 'roles'
         AND COLUMN_NAME IN ('name', 'code', 'slug')
     `,

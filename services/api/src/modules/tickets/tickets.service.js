@@ -57,7 +57,7 @@ async function resolveTableNames() {
     `
       SELECT TABLE_NAME
       FROM INFORMATION_SCHEMA.TABLES
-      WHERE TABLE_SCHEMA = ?
+      WHERE TABLE_SCHEMA = COALESCE(DATABASE(), ?)
         AND TABLE_NAME IN (?, ?, ?, ?)
     `,
     [
@@ -88,7 +88,7 @@ async function getRoleIdentifierColumn() {
     `
       SELECT COLUMN_NAME
       FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA = ?
+      WHERE TABLE_SCHEMA = COALESCE(DATABASE(), ?)
         AND TABLE_NAME = 'roles'
         AND COLUMN_NAME IN ('name', 'code', 'slug')
     `,

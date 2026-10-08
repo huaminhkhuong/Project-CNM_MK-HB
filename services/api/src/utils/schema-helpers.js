@@ -23,7 +23,7 @@ async function getTableColumns(tableName) {
     `
       SELECT COLUMN_NAME
       FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA = ?
+      WHERE TABLE_SCHEMA = COALESCE(DATABASE(), ?)
         AND TABLE_NAME = ?
     `,
     [env.dbName, tableName]

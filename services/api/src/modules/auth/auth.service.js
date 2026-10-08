@@ -1,4 +1,4 @@
-﻿const bcrypt = require("bcryptjs");
+const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
 const { query } = require("../../config/database");
@@ -69,7 +69,7 @@ async function getRoleIdentifierColumn() {
     `
       SELECT COLUMN_NAME
       FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA = ?
+      WHERE TABLE_SCHEMA = COALESCE(DATABASE(), ?)
         AND TABLE_NAME = 'roles'
         AND COLUMN_NAME IN ('name', 'code', 'slug')
     `,
