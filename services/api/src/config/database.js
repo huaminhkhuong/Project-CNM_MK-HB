@@ -3,13 +3,40 @@ const { env } = require("./env");
 
 let pool;
 
+function getPoolConfig() {
+  const dbUrl = process.env.DATABASE_URL || env.databaseUrl;
+  if (dbUrl) {
+    try {
+      const parsed = new URL(dbUrl);
+      return {
+        host: parsed.hostname || "127.0.0.1",
+        port: Number(parsed.port || 3306),
+        user: decodeURIComponent(parsed.username || "root"),
+        password: decodeURIComponent(parsed.password || ""),
+        database: parsed.pathname.replace(/^\//, "") || "cnm_ecommerce"
+      };
+    } catch {
+      // fallback to env properties if URL parsing fails
+    }
+  }
+
+  return {
+    host: process.env.DB_HOST || env.dbHost || "127.0.0.1",
+    port: Number(process.env.DB_PORT || env.dbPort || 3306),
+    user: process.env.DB_USER || env.dbUser || "root",
+    password: process.env.DB_PASSWORD ?? env.dbPassword ?? "",
+    database: process.env.DB_NAME || env.dbName || "cnm_ecommerce"
+  };
+}
+
 function createPool() {
+  const config = getPoolConfig();
   const nextPool = mysql.createPool({
-    host: env.dbHost || "127.0.0.1",
-    port: Number(env.dbPort || 3306),
-    user: env.dbUser || "root",
-    password: env.dbPassword ?? "",
-    database: env.dbName || "cnm_ecommerce",
+    host: config.host,
+    port: config.port,
+    user: config.user,
+    password: config.password,
+    database: config.database,
     charset: "utf8mb4",
     waitForConnections: true,
     connectionLimit: 10,

@@ -25,6 +25,11 @@ jobs:
 
     env:
       DATABASE_URL: mysql://root:root@127.0.0.1:3306/cnm_mk_hb
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_NAME: cnm_mk_hb
       JWT_ACCESS_SECRET: ci_access_secret
       JWT_REFRESH_SECRET: ci_refresh_secret
       JWT_ACCESS_EXPIRES_IN: 15m
