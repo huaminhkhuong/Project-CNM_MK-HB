@@ -62,4 +62,4 @@ jobs:
         run: npm run build
 
       - name: Test API
-        run: npm run test:api
+        run: npm test -w services/api
