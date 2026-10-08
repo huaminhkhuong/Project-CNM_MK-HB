@@ -285,7 +285,7 @@ async function getProducts(params = {}) {
           MIN(ps.price) AS minPrice
         FROM products p
         INNER JOIN categories c ON c.id = p.category_id
-        INNER JOIN brands b ON b.id = p.brand_id
+        LEFT JOIN brands b ON b.id = p.brand_id
         LEFT JOIN product_skus ps ON ps.product_id = p.id
         ${whereSql}
         GROUP BY p.id
@@ -299,7 +299,7 @@ async function getProducts(params = {}) {
         SELECT COUNT(*) AS totalItems
         FROM products p
         INNER JOIN categories c ON c.id = p.category_id
-        INNER JOIN brands b ON b.id = p.brand_id
+        LEFT JOIN brands b ON b.id = p.brand_id
         ${whereSql}
       `,
       queryParams
@@ -320,7 +320,7 @@ async function getProducts(params = {}) {
       },
       brand: {
         id: row.brandId,
-        name: row.brandName
+        name: row.brandName || "Chưa phân loại"
       },
       status: row.status || (row.isActive === null ? null : row.isActive ? "ACTIVE" : "INACTIVE") || "ACTIVE",
       createdAt: row.createdAt,

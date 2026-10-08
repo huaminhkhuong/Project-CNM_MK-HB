@@ -16,8 +16,8 @@ export const SPEC_ALIASES = {
   ramType: ["memory type", "ram type", "chuẩn ram", "loại ram"],
   psuWattage: ["watt", "power", "công suất"],
   tdp: ["tdp", "công suất tỏa nhiệt"],
-  gpuLength: ["length", "chiều dài gpu", "vga length", "length clearance"],
-  caseGpuClearance: ["gpu clearance", "vga clearance", "hỗ trợ vga tối đa"],
+  gpuLength: ["gpu_length", "gpu length", "vga length", "chiều dài gpu", "chiều dài vga"],
+  caseGpuClearance: ["gpu clearance", "vga clearance", "hỗ trợ vga tối đa", "vga dài tối đa"],
   coolingCapacity: ["cooling capacity", "tdp tản", "công suất tản"],
   radiatorSize: ["radiator", "kích thước radiator"],
   caseRadiatorSupport: ["radiator support", "hỗ trợ radiator"],
@@ -190,7 +190,9 @@ export function calculateBuilderInsights(selectedItems = {}, selectedCount = 0, 
   };
 
   const gpuLength      = parseNumber(findSpec(gpu, SPEC_ALIASES.gpuLength), 0);
-  const caseClearance  = parseNumber(findSpec(caseProduct, SPEC_ALIASES.caseGpuClearance), 0);
+  let rawCaseClearance  = parseNumber(findSpec(caseProduct, SPEC_ALIASES.caseGpuClearance), 0);
+  // Failsafe: If extracted clearance is < 250mm, it's likely a CPU Cooler height clearance value (e.g., 160mm), not GPU length. Standard ATX cases accommodate 340-400mm GPUs.
+  const caseClearance  = rawCaseClearance > 250 ? rawCaseClearance : caseProduct ? 360 : 0;
 
   const temp  = Math.min(88, Math.round(48 + power / 18 - (coolingSelected ? (coolingFitOk ? 10 : 5) : 0)));
 

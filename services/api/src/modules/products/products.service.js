@@ -476,7 +476,7 @@ async function getProducts(params = {}) {
     ]);
 
     const totalItems = Number(totalRows[0]?.total_items || 0);
-    if (items && items.length > 0) {
+    if (Array.isArray(items)) {
       const normalizedItems = items.map((item) => ({
         ...item,
         image_url: normalizeProductImageUrl(item.image_url, item.category_name, item.product_name)

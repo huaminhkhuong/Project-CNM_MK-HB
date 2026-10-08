@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 const CATEGORY_CONFIG = {
   CPU:      { icon: "🧠", grad: "linear-gradient(135deg, #3b82f6, #6366f1)", glow: "rgba(99,102,241,0.4)" },
   GPU:      { icon: "🎮", grad: "linear-gradient(135deg, #10b981, #06b6d4)", glow: "rgba(6,182,212,0.4)"  },
+  VGA:      { icon: "🎮", grad: "linear-gradient(135deg, #10b981, #06b6d4)", glow: "rgba(6,182,212,0.4)"  },
   RAM:      { icon: "💾", grad: "linear-gradient(135deg, #f59e0b, #f97316)", glow: "rgba(249,115,22,0.4)" },
   SSD:      { icon: "⚡", grad: "linear-gradient(135deg, #f5a623, #eab308)", glow: "rgba(234,179,8,0.4)"  },
   STORAGE:  { icon: "🗂️", grad: "linear-gradient(135deg, #8b5cf6, #a78bfa)", glow: "rgba(139,92,246,0.4)" },

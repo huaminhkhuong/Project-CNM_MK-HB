@@ -2,6 +2,7 @@ import { Footer } from "../components/marketplace/Footer";
 import { MainHeader } from "../components/marketplace/MainHeader";
 import { TopBar } from "../components/marketplace/TopBar";
 import { CustomCursor } from "../components/common/CustomCursor";
+import { AiChatWidget } from "../components/chat/AiChatWidget";
 import { Outlet, useLocation } from "react-router-dom";
 
 export function PublicLayout() {
@@ -21,6 +22,8 @@ export function PublicLayout() {
         </div>
       </main>
       <Footer />
+      {/* 🤖 Floating AI Widget — ẩn trên PC Builder vì đã có AIAdvisorPanel nhúng trong sidebar */}
+      {!isBuilder && <AiChatWidget />}
     </div>
   );
 }

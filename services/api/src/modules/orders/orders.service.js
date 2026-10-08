@@ -280,10 +280,11 @@ async function getAddressById(userId, addressId, connection = null) {
   return rows[0] || null;
 }
 
-async function getCartItemsForCheckout(cartId, connection = null) {
+async function getCartItemsForCheckout(cartId, connection = null, options = {}) {
   const config = await getSchemaConfig();
   const executor = connection || getDbPool();
   const stockExpression = config.variants.stock ? `pv.${config.variants.stock}` : "0";
+  const lockClause = options.lock ? " FOR UPDATE" : "";
   const [rows] = await executor.execute(
     `
       SELECT
@@ -302,7 +303,7 @@ async function getCartItemsForCheckout(cartId, connection = null) {
       WHERE ci.${config.cartItems.cartId} = ?
         AND ${config.variants.activeCondition}
         AND ${config.products.activeCondition}
-      ORDER BY ci.${config.cartItems.id} ASC
+      ORDER BY ci.${config.cartItems.id} ASC${lockClause}
     `,
     [cartId]
   );
@@ -651,7 +652,7 @@ async function createOrderFromCart(userId, payload = {}) {
       throw createError("Address not found", 404);
     }
 
-    const cartItems = await getCartItemsForCheckout(cart.id, connection);
+    const cartItems = await getCartItemsForCheckout(cart.id, connection, { lock: true });
 
     if (cartItems.length === 0) {
       throw createError("Cart is empty", 400);
@@ -659,7 +660,26 @@ async function createOrderFromCart(userId, payload = {}) {
 
     for (const item of cartItems) {
       if (item.stock < item.quantity) {
-        throw createError(`Not enough stock for variant ${item.sku}`, 400);
+        throw createError(`Sản phẩm ${item.productName || item.sku} không còn đủ tồn kho (chỉ còn ${item.stock})`, 400);
+      }
+    }
+
+    // Atomic stock decrement inside transaction with conditional WHERE check
+    for (const item of cartItems) {
+      if (config.variants.stock) {
+        const [updateResult] = await connection.execute(
+          `
+            UPDATE ${config.variants.table}
+            SET ${config.variants.stock} = ${config.variants.stock} - ?
+            WHERE ${config.variants.id} = ?
+              AND ${config.variants.stock} >= ?
+          `,
+          [item.quantity, item.variantId, item.quantity]
+        );
+
+        if (updateResult.affectedRows === 0) {
+          throw createError(`Sản phẩm ${item.productName || item.sku} vừa hết hàng hoặc không đủ số lượng`, 400);
+        }
       }
     }
 

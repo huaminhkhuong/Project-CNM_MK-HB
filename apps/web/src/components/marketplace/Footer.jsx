@@ -82,7 +82,7 @@ export function Footer() {
       <div className="market-footer__bottom">
         <div className="market-container" style={{ textAlign: 'center' }}>
           <p style={{ margin: 0, fontSize: '16px', color: '#ffffff', letterSpacing: '0.02em' }}>
-            © {new Date().getFullYear()} PC Mall. Phát triển bởi: <span style={{ color: "var(--market-primary)" }}>Hứa Minh Khương</span> & <span style={{ color: "var(--market-primary)" }}>Đặng Hoài Bảo</span>.
+            © {new Date().getFullYear()} PC Mall. Phát triển bởi: <span style={{ color: "var(--market-primary)" }}>Hứa Minh Khương</span> & <span style={{ color: "var(--market-primary)" }}>Trịnh Công Tuyền</span>.
           </p>
           <div style={{ 
             marginTop: 20, 

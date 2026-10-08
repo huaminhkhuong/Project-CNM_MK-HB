@@ -79,25 +79,19 @@ export function useAuth() {
     return user;
   }, []);
 
-  const loginAsDemo = useCallback(() => {
-    const demoUser = {
-      id: 1,
-      fullName: "Demo User",
-      role: "CUSTOMER"
-    };
-
-    setAuthState({
-      accessToken: "demo-access-token",
-      refreshToken: "",
-      user: demoUser
-    });
-
-    return {
-      accessToken: "demo-access-token",
-      user: demoUser,
-      redirectPath: "/profile"
-    };
-  }, []);
+  const loginAsDemo = useCallback(async () => {
+    try {
+      return await login({
+        email: "customer@pcmall.vn",
+        password: "password123"
+      });
+    } catch (_err) {
+      // If default demo credentials don't exist on server, fallback to customer login path
+      return {
+        redirectPath: "/login"
+      };
+    }
+  }, [login]);
 
   const logout = useCallback(() => {
     clearAuthState();

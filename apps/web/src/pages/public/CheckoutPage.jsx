@@ -1,6 +1,5 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import axios from "axios";
 
 import { useAuth } from "../../hooks/useAuth";
 import { getCart } from "../../services/cart.service";
@@ -654,15 +653,7 @@ export function CheckoutPage() {
       navigate("/orders", { replace: true, state: { createdOrderId: order.id, paymentMethod: formValues.paymentMethod } });
     } catch (error) {
       console.error("LỖI ĐẶT HÀNG:", error);
-      let errMsg = "Đặt hàng thất bại. Vui lòng thử lại.";
-      if (error.response?.data?.message) {
-         errMsg += ` (Chi tiết: ${error.response.data.message})`;
-         if (error.response.data.errors) {
-             errMsg += ` - ${JSON.stringify(error.response.data.errors)}`;
-         }
-      } else if (error.message) {
-         errMsg += ` (Chi tiết: ${error.message})`;
-      }
+      let errMsg = error?.response?.data?.message || error?.message || "Đặt hàng thất bại. Vui lòng kiểm tra lại thông tin và thử lại.";
       setErrorMessage(errMsg);
     } finally {
       setIsSubmitting(false);

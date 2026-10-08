@@ -1,5 +1,6 @@
 import React from "react";
 import { resolveProductImage } from "../../utils/productImage";
+import { extractSmartSpecs, calculateCategoryAiScores, inspectSuperiorSpecs } from "../../utils/smartSpecExtractor";
 
 const formatCurrency = (v) => Number(v || 0).toLocaleString("vi-VN");
 
@@ -18,25 +19,39 @@ export function CompareDrawer({
 }) {
   if (!isOpen || compareList.length === 0) return null;
 
-  // Extract all unique technical spec keys across all products in compare list
-  const specKeysMap = new Map();
-  compareList.forEach((prod) => {
-    const techSpecs = prod?.technicalSpecs || prod?.compareSpecs || {};
-    Object.keys(techSpecs).forEach((key) => specKeysMap.set(key, key));
+  // Extract superior specs map for green highlighting
+  const superiorMap = inspectSuperiorSpecs(compareList);
 
-    const attrs = Array.isArray(prod?.attributes) ? prod.attributes : [];
-    attrs.forEach((a) => {
-      const k = a.key || a.name || a.attribute_name;
-      if (k) specKeysMap.set(k, k);
+  // Extract smart specs & AI scores for each product in compare list
+  const smartSpecsList = compareList.map((prod) => ({
+    product: prod,
+    specs: extractSmartSpecs(prod),
+    scores: calculateCategoryAiScores(prod, activeComponent)
+  }));
+
+  // Aggregate all unique spec keys across all products in compare list
+  const specKeysMap = new Map();
+  smartSpecsList.forEach(({ specs }) => {
+    Object.keys(specs).forEach((k) => {
+      if (k !== "category") specKeysMap.set(k, k);
     });
   });
 
   const allSpecKeys = Array.from(specKeysMap.values());
   if (allSpecKeys.length === 0) {
-    allSpecKeys.push("Bảo hành", "Thương hiệu", "Xuất xứ", "Tình trạng");
+    allSpecKeys.push("Bảo hành chính hãng", "Thương hiệu", "Xuất xứ", "Tình trạng");
   }
 
+  // ✅ Build lookup map từ smartSpecsList đã tính sẵn — tránh gọi lại extractSmartSpecs() trong getSpecVal
+  const smartSpecsMap = Object.fromEntries(
+    smartSpecsList.map(({ product, specs }) => [product.product_id || product.id, specs])
+  );
+
   const getSpecVal = (prod, key) => {
+    // Dùng specs đã pre-compute thay vì gọi extractSmartSpecs() lại
+    const smartSpecs = smartSpecsMap[prod.product_id || prod.id] || {};
+    if (smartSpecs[key]) return String(smartSpecs[key]);
+
     const techSpecs = prod?.technicalSpecs || prod?.compareSpecs || {};
     if (techSpecs[key]) return String(techSpecs[key]);
 
@@ -44,13 +59,7 @@ export function CompareDrawer({
     const found = attrs.find((a) => (a.key || a.name || a.attribute_name || "").toLowerCase() === key.toLowerCase());
     if (found) return String(found.value || found.attribute_value);
 
-    const name = (prod?.product_name || prod?.name || "").toLowerCase();
-    if (key.toLowerCase().includes("socket")) {
-      return name.includes("lga1700") ? "LGA1700" : name.includes("am5") ? "AM5" : name.includes("am4") ? "AM4" : "N/A";
-    }
-    if (key.toLowerCase().includes("ram")) {
-      return name.includes("ddr5") ? "DDR5" : name.includes("ddr4") ? "DDR4" : "N/A";
-    }
+    // ✅ Fix: dùng "—" thay vì "Chính hãng" khi spec không có dữ liệu
     return "—";
   };
 
@@ -133,27 +142,32 @@ export function CompareDrawer({
                 ))}
               </tr>
 
-              {/* Row 2: Price Diff */}
+              {/* Row 2: Price Diff — so sánh tương đối: chỉ badge khi giá thực sự khác nhau */}
               <tr>
                 <td style={styles.tdLabel}>💰 Mức Giá</td>
-                {compareList.map((prod) => {
-                  const price = Number(prod.price || 0);
-                  const minPrice = Math.min(...compareList.map((p) => Number(p.price || 0)));
-                  const isCheapest = price === minPrice && compareList.length > 1;
-
-                  return (
-                    <td key={prod.product_id || prod.id} style={styles.tdVal}>
-                      <span style={{ fontSize: "14px", fontWeight: "800", color: "#1d4ed8" }}>
-                        {formatCurrency(price)}đ
-                      </span>
-                      {isCheapest && (
-                        <span style={styles.cheapestBadge}>
-                          🏷️ Rẻ nhất
+                {(() => {
+                  const allPrices = compareList.map((p) => Number(p.price || 0)).filter((v) => v > 0);
+                  const minPrice = allPrices.length > 0 ? Math.min(...allPrices) : 0;
+                  const maxPrice = allPrices.length > 0 ? Math.max(...allPrices) : 0;
+                  // Chỉ hiện badge "Rẻ nhất" khi các giá THỰC SỰ khác nhau
+                  const pricesDiffer = minPrice > 0 && minPrice !== maxPrice;
+                  return compareList.map((prod) => {
+                    const price = Number(prod.price || 0);
+                    const isCheapest = pricesDiffer && price === minPrice;
+                    return (
+                      <td key={prod.product_id || prod.id} style={styles.tdVal}>
+                        <span style={{ fontSize: "14px", fontWeight: "800", color: "#1d4ed8" }}>
+                          {price > 0 ? `${formatCurrency(price)}đ` : "Liên hệ"}
                         </span>
-                      )}
-                    </td>
-                  );
-                })}
+                        {isCheapest && (
+                          <span style={styles.cheapestBadge}>
+                            🏷️ Rẻ nhất
+                          </span>
+                        )}
+                      </td>
+                    );
+                  });
+                })()}
               </tr>
 
               {/* Row 3: Rating */}
@@ -161,7 +175,11 @@ export function CompareDrawer({
                 <td style={styles.tdLabel}>⭐ Đánh Giá Người Dùng</td>
                 {compareList.map((prod) => (
                   <td key={prod.product_id || prod.id} style={styles.tdVal}>
-                    ★ {Number(prod.rating || 4.8).toFixed(1)} / 5.0
+                    {/* ✅ Fix: chỉ hiện rating thực tế, không hardcode 4.8 cho tất cả */}
+                    {prod.rating
+                      ? `★ ${Number(prod.rating).toFixed(1)} / 5.0`
+                      : <span style={{ color: "#94a3b8", fontSize: "11px" }}>— Chưa có đánh giá</span>
+                    }
                   </td>
                 ))}
               </tr>
@@ -171,10 +189,28 @@ export function CompareDrawer({
                 <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? "#f8fafc" : "#ffffff" }}>
                   <td style={styles.tdLabel}>⚙️ {specKey}</td>
                   {compareList.map((prod) => {
+                    const pId = prod.product_id || prod.id;
                     const val = getSpecVal(prod, specKey);
+                    const superiorInfo = superiorMap[pId];
+                    // ✅ Fix Bug #2: chỉ dùng so sánh tương đối, XÓA fallback tuyệt đối
+                    const isSuperior = superiorInfo?.superiorKeys?.has(specKey) === true;
+
                     return (
-                      <td key={prod.product_id || prod.id} style={styles.tdVal}>
+                      <td
+                        key={pId}
+                        style={{
+                          ...styles.tdVal,
+                          backgroundColor: isSuperior ? "#ecfdf5" : "transparent",
+                          color: isSuperior ? "#047857" : "#0f172a",
+                          fontWeight: isSuperior ? "800" : "500"
+                        }}
+                      >
                         {val}
+                        {isSuperior && (
+                          <span style={{ marginLeft: 6, padding: "2px 6px", borderRadius: 999, background: "#bbf7d0", color: "#047857", fontSize: "10px", fontWeight: "800" }}>
+                            ✨ Vượt trội
+                          </span>
+                        )}
                       </td>
                     );
                   })}

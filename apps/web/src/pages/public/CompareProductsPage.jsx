@@ -7,6 +7,7 @@ import { addItemToCart } from "../../services/cart.service";
 import { useAuth } from "../../hooks/useAuth";
 import { getStoredCompareIds, MAX_COMPARE_ITEMS, normalizeCompareIds, storeCompareIds } from "../../utils/compare";
 import { resolveProductImage } from "../../utils/productImage";
+import { extractSmartSpecs, calculateCategoryAiScores, getCategoryMetricDefinitions, inspectSuperiorSpecs } from "../../utils/smartSpecExtractor";
 
 function formatCurrency(value) {
   return Number(value || 0).toLocaleString("vi-VN");
@@ -467,24 +468,52 @@ export function CompareProductsPage() {
   );
   const isCpuCompare = useMemo(() => (
     comparedItems.length >= 2 &&
-    comparedItems.some((item) => {
-      const haystack = `${getCategoryName(item)} ${getProductName(item)} ${Object.keys(normalizeSpecs(item)).join(" ")}`;
-      return /cpu|processor|bộ xử lý|bo xu ly|core|ryzen|socket/i.test(haystack);
+    comparedItems.every((item) => {
+      const cat = getCategoryName(item).toLowerCase();
+      const name = getProductName(item).toLowerCase();
+      return (cat.includes("cpu") || cat.includes("bộ xử lý") || name.includes("i5-") || name.includes("i7-") || name.includes("ryzen")) &&
+             !cat.includes("tản") && !cat.includes("cool") && !name.includes("aio") && !name.includes("ls720") && !name.includes("kraken");
     })
   ), [comparedItems]);
+
+  const isCoolingCompare = useMemo(() => (
+    comparedItems.length >= 2 &&
+    comparedItems.some((item) => {
+      const cat = getCategoryName(item).toLowerCase();
+      const name = getProductName(item).toLowerCase();
+      return cat.includes("tản") || cat.includes("cool") || name.includes("aio") || name.includes("ls720") || name.includes("kraken") || name.includes("ak620");
+    })
+  ), [comparedItems]);
+
   const cpuAnalysis = useMemo(() => (
     isCpuCompare ? buildCpuAnalysis(comparedItems) : {}
   ), [comparedItems, isCpuCompare]);
 
-  // Merge all specs rows
+  // Merge all specs rows across all products with Smart Extractor fallback
   const allSpecKeys = useMemo(() => {
     const keys = new Set();
     comparedItems.forEach(item => {
+      const smartSpecs = extractSmartSpecs(item);
+      Object.keys(smartSpecs).forEach(k => {
+        if (k !== "category") keys.add(k);
+      });
       const specs = normalizeSpecs(item);
       Object.keys(specs).forEach(k => keys.add(k));
     });
     return Array.from(keys);
   }, [comparedItems]);
+
+  // ✅ Pre-compute extractSmartSpecs() một lần cho mỗi sản phẩm (tránh gọi lại N×M lần trong spec rows)
+  const smartSpecsMap = useMemo(() => {
+    const map = {};
+    comparedItems.forEach(item => {
+      map[getProductId(item)] = extractSmartSpecs(item);
+    });
+    return map;
+  }, [comparedItems]);
+
+  // ✅ Fix Bug #2+5: Tính superiorMap một lần duy nhất (không gọi lại N lần trong .map())
+  const superiorSpecMap = useMemo(() => inspectSuperiorSpecs(comparedItems), [comparedItems]);
 
   return (
     <div style={{ background: "#f8fafc", minHeight: "100vh", paddingBottom: 80 }}>
@@ -718,86 +747,125 @@ export function CompareProductsPage() {
           </div>
         )}
 
-        {!loadingCompare && isCpuCompare && comparedItems.length >= 2 ? (
-          <section style={{ marginBottom: 24, borderRadius: 28, overflow: "hidden", background: "linear-gradient(135deg, #020617, #111827)", border: "1px solid rgba(148, 163, 184, 0.24)", boxShadow: "0 24px 60px rgba(15,23,42,0.24)" }}>
-            <div style={{ padding: 24, color: "#fff", display: "grid", gap: 8 }}>
-              <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.12em", color: "#93c5fd", fontWeight: 900 }}>CPU performance lab</div>
-              <h2 style={{ margin: 0, fontSize: 30, lineHeight: 1.1 }}>So sánh CPU chuyên sâu</h2>
-              <p style={{ margin: 0, color: "#cbd5e1", lineHeight: 1.6 }}>Các điểm đánh giá được tính từ thông số sản phẩm hiện có: nhân/luồng, xung nhịp, cache, TDP, benchmark hoặc FPS nếu dữ liệu có trong specs.</p>
-            </div>
-            <div style={{ overflowX: "auto" }}>
-              <div style={{ display: "grid", gridTemplateColumns: `220px repeat(${comparedItems.length}, minmax(240px, 1fr))`, minWidth: 220 + comparedItems.length * 240, background: "#fff" }}>
-                <div style={{ padding: 18, background: "#f8fafc", fontWeight: 900, color: "#475569" }}>Đánh giá</div>
-                {comparedItems.map((item) => {
-                  const itemId = getProductId(item);
-                  const analysis = cpuAnalysis[itemId] || { scores: {}, badges: [] };
-                  const badges = [...analysis.badges, itemId === bestPriceId ? "Best Value" : null].filter(Boolean);
-                  const audience = getCpuAudience(analysis.scores || {});
-                  return (
-                    <div key={itemId} style={{ padding: 18, borderLeft: "1px solid #e2e8f0", display: "grid", gap: 14 }}>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        {(badges.length > 0 ? badges : ["Recommended"]).map((badge) => (
-                          <span key={badge} style={{ padding: "5px 9px", borderRadius: 999, background: badge === "Power Efficient" ? "#dcfce7" : badge === "Gaming Best" ? "#fef3c7" : badge === "Best Value" ? "#dbeafe" : "#ede9fe", color: badge === "Power Efficient" ? "#047857" : badge === "Gaming Best" ? "#b45309" : badge === "Best Value" ? "#1d4ed8" : "#6d28d9", fontSize: 11, fontWeight: 950 }}>{badge}</span>
-                        ))}
-                      </div>
-                      <div style={{ fontWeight: 900, color: "#0f172a", minHeight: 40 }}>{getProductName(item)}</div>
-                      <div style={{ display: "grid", gap: 10 }}>
-                        {CPU_SCORE_METRICS.map((metric) => {
-                          const score = analysis.scores?.[metric.key] || 0;
-                          return (
-                            <div key={metric.key} style={{ display: "grid", gap: 5 }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, color: "#475569", fontWeight: 800 }}>
-                                <span>{metric.label}</span>
-                                <span>{score}/100</span>
-                              </div>
-                              <div style={{ height: 9, borderRadius: 999, background: "#e2e8f0", overflow: "hidden" }}>
-                                <div style={{ width: `${score}%`, height: "100%", borderRadius: 999, background: `linear-gradient(90deg, ${metric.tone}, ${metric.tone}aa)` }} />
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <div style={{ display: "grid", gap: 8 }}>
-                        <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: "#64748b", fontWeight: 900 }}>Phù hợp cho ai</div>
+        {!loadingCompare && comparedItems.length >= 2 ? (() => {
+          // ✅ Fix 1: Dùng smartSpecsMap[item].category làm nguồn chính xác nhất
+          // extractSmartSpecs() có logic nhận diện tên sản phẩm (AIO, KRAKEN, LS720...)
+          // mạnh hơn getCategoryName() vốn chỉ đọc field category từ DB
+          const item0Id = getProductId(comparedItems[0] || {});
+          const detectedCategory = smartSpecsMap[item0Id]?.category
+            || getCategoryName(comparedItems[0] || {});
+          const defs = getCategoryMetricDefinitions(detectedCategory);
+
+          // ✅ Fix 2: Pre-compute TẤT CẢ scores trước khi render
+          // Để tìm giá trị MAX cho từng metric → so sánh tương đối
+          const allProductScores = comparedItems.map(item => ({
+            id: getProductId(item),
+            scores: calculateCategoryAiScores(item, detectedCategory)
+          }));
+
+          // Với mỗi metric: tìm giá trị TỐT NHẤT trong tất cả sản phẩm
+          const metricMaxScores = {};
+          defs.metrics.forEach(metric => {
+            metricMaxScores[metric.key] = Math.max(
+              ...allProductScores.map(s => s.scores[metric.key] || 0), 0
+            );
+          });
+
+          return (
+            <section style={{ marginBottom: 24, borderRadius: 28, overflow: "hidden", background: "linear-gradient(135deg, #020617, #111827)", border: "1px solid rgba(148, 163, 184, 0.24)", boxShadow: "0 24px 60px rgba(15,23,42,0.24)" }}>
+              <div style={{ padding: 24, color: "#fff", display: "grid", gap: 8 }}>
+                <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.12em", color: "#93c5fd", fontWeight: 900 }}>
+                  {detectedCategory.toUpperCase()} PERFORMANCE LAB
+                </div>
+                <h2 style={{ margin: 0, fontSize: 30, lineHeight: 1.1 }}>{defs.title}</h2>
+                <p style={{ margin: 0, color: "#cbd5e1", lineHeight: 1.6 }}>{defs.subtitle}</p>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <div style={{ display: "grid", gridTemplateColumns: `240px repeat(${comparedItems.length}, minmax(240px, 1fr))`, minWidth: 240 + comparedItems.length * 240, background: "#fff" }}>
+                  <div style={{ padding: 18, background: "#f8fafc", fontWeight: 900, color: "#475569" }}>
+                    Chỉ số Đánh Giá AI
+                    <div style={{ fontSize: 11, color: "#64748b", fontWeight: 500, marginTop: 4 }}>Dựa trên thông số phần cứng thực tế</div>
+                  </div>
+                  {comparedItems.map((item) => {
+                    const itemId = getProductId(item);
+                    // ✅ Fix 3: Dùng superiorSpecMap từ useMemo, không gọi lại inspectSuperiorSpecs
+                    const superior = superiorSpecMap[itemId] || { badges: [] };
+                    // Lấy scores từ allProductScores đã tính sẵn
+                    const productScoreEntry = allProductScores.find(s => s.id === itemId);
+                    const scores = productScoreEntry?.scores || {};
+                    const badges = superior.badges.length > 0
+                      ? superior.badges
+                      : [scores.overall >= 90 ? "Hiệu Năng Cao" : "Chính Hãng"];
+
+                    return (
+                      <div key={itemId} style={{ padding: 18, borderLeft: "1px solid #e2e8f0", display: "grid", gap: 14 }}>
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          {(audience.length > 0 ? audience : ["Cần thêm thông số"]).map((label) => (
-                            <span key={label} style={{ padding: "5px 8px", borderRadius: 8, background: "#f1f5f9", color: "#334155", fontSize: 12, fontWeight: 800 }}>{label}</span>
+                          {badges.map((badge) => (
+                            <span key={badge} style={{ padding: "5px 9px", borderRadius: 999, background: badge.includes("Giá") ? "#dcfce7" : badge.includes("❄️") || badge.includes("⚡") || badge.includes("🚀") ? "#dbeafe" : "#fef3c7", color: badge.includes("Giá") ? "#047857" : badge.includes("❄️") || badge.includes("⚡") || badge.includes("🚀") ? "#1d4ed8" : "#b45309", fontSize: 11, fontWeight: 950 }}>
+                              {badge}
+                            </span>
                           ))}
                         </div>
-                      </div>
-                    </div>
-                  );
-                })}
-                <div style={{ gridColumn: `1 / span ${comparedItems.length + 1}`, padding: "14px 18px", background: "#f8fafc", borderTop: "1px solid #e2e8f0", fontWeight: 950, color: "#334155" }}>Thông số CPU</div>
-                {CPU_SPEC_ROWS.map((row) => {
-                  const values = comparedItems.map((item) => getCpuSpecValue(item, row));
-                  const numericValues = values.map((value) => {
-                    const numbers = extractNumbers(value);
-                    if (row.key === "baseBoost") return numbers[numbers.length - 1] || 0;
-                    if (row.key === "coresThreads") return (numbers[0] || 0) * 2 + (numbers[1] || 0);
-                    return numbers[0] || 0;
-                  });
-                  const comparable = numericValues.some((value) => value > 0);
-                  const bestValue = comparable ? (row.key === "tdp" ? Math.min(...numericValues.filter((value) => value > 0)) : Math.max(...numericValues)) : null;
-                  return (
-                    <Fragment key={row.key}>
-                      <div style={{ padding: "14px 18px", background: "#f8fafc", borderTop: "1px solid #edf2f7", color: "#475569", fontWeight: 800 }}>{row.label}</div>
-                      {comparedItems.map((item, index) => {
-                        const isBest = comparable && numericValues[index] > 0 && numericValues[index] === bestValue;
-                        return (
-                          <div key={`${row.key}-${getProductId(item)}`} style={{ padding: "14px 18px", borderLeft: "1px solid #edf2f7", borderTop: "1px solid #edf2f7", background: isBest ? "#ecfdf5" : "#fff", color: values[index] === "—" ? "#94a3b8" : "#0f172a", fontWeight: isBest ? 950 : 700 }}>
-                            {values[index]}
-                            {isBest ? <span style={{ marginLeft: 8, padding: "3px 7px", borderRadius: 999, background: "#bbf7d0", color: "#047857", fontSize: 11, fontWeight: 950 }}>Tốt hơn</span> : null}
+                        <div style={{ fontWeight: 900, color: "#0f172a", minHeight: 38, fontSize: 14 }}>{getProductName(item)}</div>
+                        <div style={{ display: "grid", gap: 12 }}>
+                          {defs.metrics.map((metric) => {
+                            const score = scores[metric.key] || 0;
+                            const maxScore = metricMaxScores[metric.key] || 0;
+
+                            // ✅ Fix 4: Highlight GREEN chỉ khi sản phẩm NÀY có điểm cao nhất
+                            // VÀ không phải tất cả sản phẩm đều bằng nhau (tránh highlight vô nghĩa)
+                            const allSameScore = allProductScores.every(
+                              s => (s.scores[metric.key] || 0) === maxScore
+                            );
+                            const isBestOnMetric = score > 0 && score === maxScore
+                              && !allSameScore && allProductScores.length >= 2;
+
+                            return (
+                              <div key={metric.key} style={{ display: "grid", gap: 4 }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, fontWeight: 800 }}>
+                                  <span style={{ color: isBestOnMetric ? "#047857" : "#334155" }}>
+                                    {metric.label}
+                                    {isBestOnMetric && (
+                                      <span style={{ marginLeft: 5, fontSize: 10, padding: "1px 5px", borderRadius: 999, background: "#d1fae5", color: "#047857" }}>Tốt hơn</span>
+                                    )}
+                                  </span>
+                                  <span style={{ color: isBestOnMetric ? "#047857" : metric.tone, fontWeight: 900 }}>
+                                    {score > 0 ? `${score}/100` : "—"}
+                                  </span>
+                                </div>
+                                <div style={{ height: 8, borderRadius: 999, background: "#e2e8f0", overflow: "hidden" }}>
+                                  <div style={{
+                                    width: `${score}%`,
+                                    height: "100%",
+                                    borderRadius: 999,
+                                    background: isBestOnMetric
+                                      ? "linear-gradient(90deg, #10b981, #059669)"
+                                      : `linear-gradient(90deg, ${metric.tone}, ${metric.tone}cc)`,
+                                    transition: "width 0.6s ease"
+                                  }} />
+                                </div>
+                                <div style={{ fontSize: 10.5, color: "#64748b", fontStyle: "italic" }}>
+                                  💡 {metric.formula}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#94a3b8", marginBottom: 4 }}>PHÙ HỢP CHO AI</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>
+                            {scores.overall >= 90 ? "Người dùng chuyên nghiệp" : scores.overall >= 75 ? "Gaming / Đa dụng" : "Cần thêm thông số"}
                           </div>
-                        );
-                      })}
-                    </Fragment>
-                  );
-                })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          </section>
-        ) : null}
+            </section>
+          );
+        })() : null}
+
 
         {/* ── Comparison Table ── */}
         {!loadingCompare && comparedItems.length >= 2 && (
@@ -893,18 +961,43 @@ export function CompareProductsPage() {
                   <div style={{ fontWeight: 900, fontSize: 14, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em" }}>⚙️ {specGroupTitle}</div>
                 </div>
                 {(attributeNames.length > 0 ? attributeNames : allSpecKeys).map((key, ki) => {
+                  // ✅ Fix Bug #5: dùng superiorSpecMap đã được tính sẵn ngoài .map()
                   return (
                     <div key={ki} style={{ display: "grid", gridTemplateColumns: `220px repeat(${comparedItems.length}, minmax(220px, 1fr))`, borderBottom: "1px solid #f1f5f9", background: ki % 2 === 0 ? "#fff" : "#fafbff", minWidth: 220 + comparedItems.length * 220 }}>
-                      <div style={{ padding: "14px 24px", fontWeight: 600, fontSize: 13, color: "#64748b", background: "#f8fafc", borderRight: "1px solid #f1f5f9", textTransform: "capitalize" }}>
+                      <div style={{ padding: "14px 24px", fontWeight: 700, fontSize: 13, color: "#475569", background: "#f8fafc", borderRight: "1px solid #f1f5f9", textTransform: "capitalize" }}>
                         {String(key).replace(/_/g, " ")}
                       </div>
                       {comparedItems.map((item, ci) => {
+                        const itemId = getProductId(item);
+                        // ✅ Dùng smartSpecsMap pre-computed thay vì gọi extractSmartSpecs() lại
+                        const smartSpecs = smartSpecsMap[itemId] || {};
                         const specs = normalizeSpecs(item);
-                        const val = specs[key] || "—";
-                        const isMissing = val === "—";
+                        // ✅ Fix Bug #4: dùng "—" thay vì "Chính hãng" khi spec không tồn tại
+                        const val = smartSpecs[key] || specs[key] || "—";
+
+                        // ✅ Fix Bug #2: chỉ dùng so sánh tương đối từ superiorSpecMap
+                        // KHÔNG còn fallback tuyệt đối (val.includes("360mm") ...) gây highlight cả 2 bên
+                        const isSuperior = superiorSpecMap[itemId]?.superiorKeys?.has(key) === true;
+
                         return (
-                          <div key={getProductId(item)} style={{ padding: "14px 20px", fontSize: 13, borderLeft: ci > 0 ? "1px solid #f1f5f9" : "none", color: isMissing ? "#cbd5e1" : "#0f172a", fontWeight: isMissing ? 400 : 600 }}>
+                          <div
+                            key={itemId}
+                            style={{
+                              padding: "14px 20px",
+                              fontSize: 13,
+                              borderLeft: ci > 0 ? "1px solid #f1f5f9" : "none",
+                              backgroundColor: isSuperior ? "#ecfdf5" : "transparent",
+                              color: isSuperior ? "#047857" : "#0f172a",
+                              fontWeight: isSuperior ? 900 : 600,
+                              transition: "all 0.2s"
+                            }}
+                          >
                             {val}
+                            {isSuperior && (
+                              <span style={{ marginLeft: 8, padding: "2px 7px", borderRadius: 999, background: "#bbf7d0", color: "#047857", fontSize: 10.5, fontWeight: 900 }}>
+                                ✨ Vượt trội
+                              </span>
+                            )}
                           </div>
                         );
                       })}

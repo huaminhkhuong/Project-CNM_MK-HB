@@ -89,31 +89,63 @@ async function getBuildItemsWithAttributes(buildId) {
 async function getCompatibilityMap() {
   const rows = await query(
     `
-      SELECT id, attribute_value_1 AS attributeValue1, attribute_value_2 AS attributeValue2, is_compatible AS isCompatible
+      SELECT 
+        id, 
+        name,
+        description,
+        attribute_value_1 AS attributeValue1, 
+        attribute_value_2 AS attributeValue2,
+        source_category_id AS sourceCategoryId,
+        target_category_id AS targetCategoryId,
+        source_attribute_key AS sourceAttributeKey,
+        target_attribute_key AS targetAttributeKey,
+        operator,
+        is_compatible AS isCompatible
       FROM compatibility_rules
+      WHERE is_active = 1
       ORDER BY id ASC
     `
   );
 
-  const compatibilityMap = new Map();
-
-  for (const row of rows) {
-    const left = Number(row.attributeValue1);
-    const right = Number(row.attributeValue2);
-    const key = left < right ? `${left}:${right}` : `${right}:${left}`;
-    compatibilityMap.set(key, {
-      ruleId: row.id,
-      isCompatible: Number(row.isCompatible) === 1
-    });
-  }
-
-  return compatibilityMap;
+  return rows.map((row) => ({
+    ruleId: row.id,
+    name: row.name,
+    description: row.description,
+    attributeValue1: row.attributeValue1 ? Number(row.attributeValue1) : null,
+    attributeValue2: row.attributeValue2 ? Number(row.attributeValue2) : null,
+    sourceCategoryId: row.sourceCategoryId ? Number(row.sourceCategoryId) : null,
+    targetCategoryId: row.targetCategoryId ? Number(row.targetCategoryId) : null,
+    sourceAttributeKey: row.sourceAttributeKey,
+    targetAttributeKey: row.targetAttributeKey,
+    operator: row.operator,
+    isCompatible: Number(row.isCompatible) === 1
+  }));
 }
 
-function buildIssue(ruleId, sourceItem, targetItem, sourceAttribute, targetAttribute) {
+function isFormFactorCompatible(boardForm, caseForm) {
+  const b = String(boardForm || "").toLowerCase().trim();
+  const c = String(caseForm || "").toLowerCase().trim();
+  if (!b || !c) return true;
+  if (c.includes("atx") && !c.includes("matx") && !c.includes("micro")) {
+    // Case ATX gắn được ATX, mATX, ITX
+    return true;
+  }
+  if (c.includes("matx") || c.includes("micro")) {
+    // Case mATX gắn được mATX, ITX; KHÔNG gắn được ATX
+    return !b.includes("atx") || b.includes("matx") || b.includes("micro");
+  }
+  if (c.includes("itx")) {
+    // Case ITX chỉ gắn được ITX
+    return b.includes("itx");
+  }
+  return true;
+}
+
+function buildIssue(rule, sourceItem, targetItem, sourceAttribute, targetAttribute) {
+  const desc = rule?.description || rule?.name;
   return {
-    ruleId,
-    ruleDescription: null,
+    ruleId: rule?.ruleId || rule?.id,
+    ruleDescription: desc,
     source: {
       componentType: sourceItem.componentType,
       categoryName: sourceItem.product.categoryName,
@@ -130,7 +162,7 @@ function buildIssue(ruleId, sourceItem, targetItem, sourceAttribute, targetAttri
       attributeKey: targetAttribute.attributeKey,
       attributeValue: targetAttribute.attributeValue
     },
-    message: `${sourceItem.product.categoryName || sourceItem.componentType} ${sourceAttribute.attributeKey} (${sourceAttribute.attributeValue}) is not compatible with ${targetItem.product.categoryName || targetItem.componentType} ${targetAttribute.attributeKey} (${targetAttribute.attributeValue})`
+    message: desc || `${sourceItem.product.categoryName || sourceItem.componentType} (${sourceAttribute.attributeValue}) không tương thích với ${targetItem.product.categoryName || targetItem.componentType} (${targetAttribute.attributeValue})`
   };
 }
 
@@ -142,29 +174,67 @@ async function checkBuildCompatibility(userId, buildId) {
     throw createError("PC build not found", 404);
   }
 
-  const [buildItems, compatibilityMap] = await Promise.all([
+  const [buildItems, rules] = await Promise.all([
     getBuildItemsWithAttributes(parsedBuildId),
     getCompatibilityMap()
   ]);
 
   const issues = [];
+  const reportedRulePairs = new Set();
 
   for (let i = 0; i < buildItems.length; i += 1) {
     for (let j = i + 1; j < buildItems.length; j += 1) {
-      const sourceItem = buildItems[i];
-      const targetItem = buildItems[j];
-      const sourceAttributes = Object.values(sourceItem.attributes);
-      const targetAttributes = Object.values(targetItem.attributes);
+      const itemA = buildItems[i];
+      const itemB = buildItems[j];
+      const catA = itemA.product.categoryId;
+      const catB = itemB.product.categoryId;
 
-      for (const sourceAttribute of sourceAttributes) {
-        for (const targetAttribute of targetAttributes) {
-          const left = Number(sourceAttribute.attributeValueId);
-          const right = Number(targetAttribute.attributeValueId);
-          const key = left < right ? `${left}:${right}` : `${right}:${left}`;
-          const rule = compatibilityMap.get(key);
+      // 1. Kiểm tra Form Factor đặc thù (Mainboard 2 ↔ Case 7)
+      if ((catA === 2 && catB === 7) || (catA === 7 && catB === 2)) {
+        const boardItem = catA === 2 ? itemA : itemB;
+        const caseItem = catA === 7 ? itemA : itemB;
+        const boardForm = boardItem.attributes?.form_factor?.attributeValue;
+        const caseForm = caseItem.attributes?.form_factor?.attributeValue;
 
-          if (rule && !rule.isCompatible) {
-            issues.push(buildIssue(rule.ruleId, sourceItem, targetItem, sourceAttribute, targetAttribute));
+        if (boardForm && caseForm && !isFormFactorCompatible(boardForm, caseForm)) {
+          const formRule = rules.find((r) => r.sourceCategoryId === 2 && r.targetCategoryId === 7 && !r.isCompatible) || {
+            ruleId: 999,
+            name: "Không tương thích kích thước bo mạch và vỏ case",
+            description: `Bo mạch chủ chuẩn ${boardForm} quá lớn, không thể lắp vừa thùng máy chuẩn ${caseForm}.`
+          };
+          issues.push(buildIssue(formRule, boardItem, caseItem, boardItem.attributes.form_factor, caseItem.attributes.form_factor));
+          continue;
+        }
+      }
+
+      // 2. Kiểm tra thông qua bộ rules trong DB
+      const attrsA = Object.values(itemA.attributes);
+      const attrsB = Object.values(itemB.attributes);
+
+      for (const attrA of attrsA) {
+        for (const attrB of attrsB) {
+          const valAId = Number(attrA.attributeValueId);
+          const valBId = Number(attrB.attributeValueId);
+
+          for (const rule of rules) {
+            if (!rule.attributeValue1 || !rule.attributeValue2) continue;
+
+            const isDirectionalMatch = (
+              (rule.attributeValue1 === valAId && rule.attributeValue2 === valBId && (!rule.sourceCategoryId || rule.sourceCategoryId === catA)) ||
+              (rule.attributeValue1 === valBId && rule.attributeValue2 === valAId && (!rule.sourceCategoryId || rule.sourceCategoryId === catB))
+            );
+
+            if (isDirectionalMatch && !rule.isCompatible) {
+              const pairKey = `${rule.ruleId}:${valAId}:${valBId}`;
+              if (!reportedRulePairs.has(pairKey)) {
+                reportedRulePairs.add(pairKey);
+                // Bỏ qua nếu là form factor (đã xử lý chuyên biệt ở trên)
+                if (attrA.attributeKey === "form_factor" && attrB.attributeKey === "form_factor") {
+                  continue;
+                }
+                issues.push(buildIssue(rule, itemA, itemB, attrA, attrB));
+              }
+            }
           }
         }
       }
@@ -175,7 +245,7 @@ async function checkBuildCompatibility(userId, buildId) {
     buildId: build.id,
     buildName: build.name,
     compatible: issues.length === 0,
-    checkedRuleCount: compatibilityMap.size,
+    checkedRuleCount: rules.length,
     checkedComponentCount: buildItems.length,
     issues
   };

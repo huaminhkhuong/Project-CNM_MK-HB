@@ -16,6 +16,9 @@
     "prisma:studio": "prisma studio",
     "seed": "node prisma/seed-production.js && node prisma/seed-full.js",
     "seed:production": "node prisma/seed-production.js && node prisma/seed-full.js",
+    "seed:demo-build": "node prisma/seed-demo-pc-build.js",
+    "seed:hardware-specs": "node prisma/seed-hardware-specs.js",
+    "seed:rich": "node prisma/seed-rich.js",
     "seed:legacy": "node prisma/seed.js",
     "seed:guest-demo": "node prisma/seed-guest-demo.js",
     "stock:ensure": "node scripts/ensure-product-stock.js"

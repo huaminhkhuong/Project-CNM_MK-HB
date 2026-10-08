@@ -9,6 +9,7 @@ import {
   getQueue,
   getQueueStats,
   getSession,
+  handleAiConsultation,
   sendMessage
 } from "./chat.controller";
 
@@ -18,6 +19,7 @@ export const chatRouter = Router();
 chatRouter.post("/session", createSession);
 chatRouter.get("/session/:id", getSession);
 chatRouter.post("/session/:id/message", sendMessage);
+chatRouter.post("/ai-consultation", handleAiConsultation);
 
 // Staff (protected)
 chatRouter.get("/queue/stats", authenticate, authorize([ROLES.ADMIN, ROLES.SALES_STAFF]), getQueueStats);

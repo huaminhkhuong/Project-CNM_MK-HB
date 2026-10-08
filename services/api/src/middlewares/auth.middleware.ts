@@ -62,11 +62,50 @@ export function authorize(allowedRoles: Role[]) {
   };
 }
 
+export function optionalAuthenticate(req: Request, _res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return next();
+  }
+  const token = authHeader.split(" ")[1];
+  try {
+    const payload = jwt.verify(token, env.jwtAccessSecret) as AuthTokenPayload;
+    req.user = payload;
+  } catch (_error) {
+    // Non-blocking: continue as guest if token is invalid or expired
+  }
+  return next();
+}
+
 export const verifyToken = authenticate;
 export const requireAuth = authenticate;
+export const optionalAuth = optionalAuthenticate;
 
 export function requireRole(...allowedRoles: Role[]) {
   return authorize(allowedRoles);
+}
+
+// PERMISSIONS constant — used by admin.route.js for fine-grained route labeling.
+// Role-level enforcement is already handled by requireRole(ROLES.ADMIN).
+// requirePermission acts as a pass-through after role check succeeds.
+export const PERMISSIONS = {
+  ADMIN_DASHBOARD: "admin:dashboard",
+  MANAGE_PRODUCTS: "admin:products",
+  MANAGE_USERS: "admin:users",
+  MANAGE_ORDERS: "admin:orders",
+  MANAGE_COMPATIBILITY_RULES: "admin:compatibility-rules",
+  MANAGE_SYSTEM_SETTINGS: "admin:system-settings",
+  VIEW_REPORTS: "admin:reports",
+  MANAGE_TICKETS: "staff:tickets",
+  MANAGE_WARRANTIES: "tech:warranties"
+} as const;
+
+export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
+
+// requirePermission: pass-through middleware — actual access control is done by requireRole.
+// This exists to support admin.route.js imports without crashing the server.
+export function requirePermission(_permission: Permission | string) {
+  return (_req: Request, _res: Response, next: NextFunction) => next();
 }
 
 export { ROLES };

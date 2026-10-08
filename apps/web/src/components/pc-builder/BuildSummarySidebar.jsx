@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { AIAdvisorPanel } from "./AIAdvisorPanel";
 import { CompatibilityGauge, PowerMeter, CostTicker } from "./BuilderMetricsV2";
 
@@ -42,13 +42,14 @@ export function BuildSummarySidebar({
   suggestionFormBudget,
   visibleChecks = [],
   onOpenXaiDrawer,
+  onOpenAiDrawer,
   handleRunWhatIf,
   isWhatIfLoading,
   aiInsightText,
   selectedItems,
   formatCurrency,
   onExportPdf,
-}) {
+  }) {
   return (
     <aside className="builder-summary" aria-label="Build summary">
 
@@ -86,20 +87,30 @@ export function BuildSummarySidebar({
       </div>
 
 
-      {/* Blocker warning */}
+      {/* Blocker / Compatibility Advisory Card */}
       {hasBlockerSeverity && (
         <div style={{
-          background: "rgba(220,38,38,0.08)",
-          color: "#be123c",
-          border: "1px solid rgba(248,113,113,0.3)",
-          borderRadius: 10,
-          padding: "8px 12px",
-          fontSize: 11,
+          background: "#fffbe6",
+          color: "#7c2d12",
+          border: "1px solid #fef08a",
+          borderRadius: 12,
+          padding: "10px 14px",
+          fontSize: 11.5,
           marginBottom: 12,
           fontWeight: 600,
-          lineHeight: 1.4,
+          lineHeight: 1.45,
+          boxShadow: "0 2px 8px rgba(245, 158, 11, 0.12)",
+          display: "flex",
+          alignItems: "flex-start",
+          gap: "8px"
         }}>
-          {blockerReasonTooltip}
+          <span style={{ fontSize: "15px", flexShrink: 0 }}>⚠️</span>
+          <div>
+            <strong style={{ display: "block", color: "#9a3412", fontSize: "12px", marginBottom: "2px", fontWeight: "700" }}>
+              Gợi Ý Tối Ưu Cấu Hình
+            </strong>
+            <span>{blockerReasonTooltip}</span>
+          </div>
         </div>
       )}
 
@@ -127,6 +138,47 @@ export function BuildSummarySidebar({
           </button>
         )}
       </div>
+
+      {/* 🤖 AI Advisor CTA Button — Mở Slide-Over Drawer */}
+      <button
+        type="button"
+        onClick={onOpenAiDrawer}
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "12px 16px",
+          background: "linear-gradient(135deg, rgba(37,99,235,0.08), rgba(99,102,241,0.08))",
+          border: "1.5px solid rgba(37,99,235,0.3)",
+          borderRadius: 14,
+          marginBottom: 16,
+          cursor: "pointer",
+          transition: "all 0.2s ease",
+          boxShadow: "0 4px 12px rgba(37,99,235,0.08)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 22 }}>🤖</span>
+          <div style={{ textAlign: "left" }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#1d4ed8", display: "flex", alignItems: "center", gap: 6 }}>
+              AI Advisor Tư Vấn PC
+              <span style={{
+                fontSize: 9,
+                fontWeight: 800,
+                padding: "2px 6px",
+                borderRadius: 10,
+                background: "#22c55e",
+                color: "#fff",
+              }}>LIVE</span>
+            </div>
+            <div style={{ fontSize: 11, color: "#64748b", marginTop: 1 }}>
+              Hỏi đáp ngữ cảnh • Cảnh báo tự động
+            </div>
+          </div>
+        </div>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#1d4ed8" }}>Hỏi AI →</span>
+      </button>
 
       {/* V2 Compatibility Gauge */}
       <CompatibilityGauge
@@ -270,13 +322,6 @@ export function BuildSummarySidebar({
         </button>
       </div>
 
-      {/* Embedded AI Advisor Panel */}
-      <AIAdvisorPanel
-        selectedItems={selectedItems}
-        totalPrice={totalPrice}
-        budget={suggestionFormBudget}
-        xaiReport={xaiReport}
-      />
     </aside>
   );
 }

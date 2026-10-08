@@ -1,10 +1,16 @@
 import { httpClient } from "./http";
 
 const requestCache = new Map();
+const CACHE_TTL_MS = 60 * 1000; // 60 seconds TTL
 
 async function cachedRequest(cacheKey, fetcher) {
+  const now = Date.now();
   if (requestCache.has(cacheKey)) {
-    return requestCache.get(cacheKey);
+    const entry = requestCache.get(cacheKey);
+    if (now - entry.timestamp < CACHE_TTL_MS) {
+      return entry.promise;
+    }
+    requestCache.delete(cacheKey);
   }
 
   const requestPromise = Promise.resolve()
@@ -14,7 +20,7 @@ async function cachedRequest(cacheKey, fetcher) {
       throw error;
     });
 
-  requestCache.set(cacheKey, requestPromise);
+  requestCache.set(cacheKey, { timestamp: now, promise: requestPromise });
   return requestPromise;
 }
 

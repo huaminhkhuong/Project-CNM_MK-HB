@@ -135,6 +135,61 @@ export function usePcBuilder(initialBuildName = "Cấu hình của tôi") {
     }
   };
 
+  const batchApplyComponents = useCallback(async (itemsList) => {
+    if (!Array.isArray(itemsList) || itemsList.length === 0) return;
+    setLoading(true);
+    setError("");
+    try {
+      if (isAuthenticated) {
+        const currentBuild = await ensureBuild();
+        const currentComponents = { ...(currentBuild?.components || {}) };
+        itemsList.forEach(({ componentType, product, variant }) => {
+          if (componentType && product) {
+            currentComponents[componentType] = { product, variant };
+          }
+        });
+        const newTotal = Object.values(currentComponents).reduce((sum, item) => {
+          const vPrice = Number(item.variant?.price || item.product?.price || 0);
+          return sum + (vPrice > 0 ? vPrice : 1000000);
+        }, 0);
+        setBuild({
+          ...(currentBuild || {}),
+          components: { ...currentComponents },
+          totalPrice: newTotal
+        });
+      } else {
+        const currentStore = getGuestPcBuildStore();
+        const activeId = currentStore.activeBuildId || "default";
+        const currentComponents = { ...(currentStore.builds[activeId]?.components || {}) };
+        itemsList.forEach(({ componentType, product, variant }) => {
+          if (componentType && product) {
+            currentComponents[componentType] = { product, variant };
+          }
+        });
+        const newTotal = Object.values(currentComponents).reduce((sum, item) => {
+          const vPrice = Number(item.variant?.price || item.product?.price || 0);
+          return sum + (vPrice > 0 ? vPrice : 1000000);
+        }, 0);
+        const saved = saveGuestBuild(
+          { components: currentComponents, totalPrice: newTotal },
+          buildName
+        );
+        setGuestBuild({
+          ...saved,
+          components: { ...currentComponents },
+          totalPrice: newTotal
+        });
+        setGuestBuildList(listGuestBuilds());
+      }
+      setCompatibility(null);
+      showSuccess(`Đã nạp thành công ${itemsList.length} linh kiện vào cấu hình.`);
+    } catch (err) {
+      handleError(err, "Không thể nạp danh sách linh kiện.");
+    } finally {
+      setLoading(false);
+    }
+  }, [isAuthenticated, ensureBuild, buildName, showSuccess, handleError]);
+
   const removeComponent = async (componentType) => {
     setLoading(true);
     setError("");
@@ -378,6 +433,7 @@ export function usePcBuilder(initialBuildName = "Cấu hình của tôi") {
     actions: {
       activeBuildId,
       applyComponent,
+      batchApplyComponents,
       removeComponent,
       checkCompatibility,
       getAiSuggestion,

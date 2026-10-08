@@ -38,19 +38,19 @@ export function CandidateBuildsPanel({
   const compatReport = currentBuild.compatibilityReport || {};
 
   return (
-    <div className="candidate-builds-panel" style={styles.panel}>
+    <div className="candidate-builds-panel">
       {/* PANEL HEADER WITH COMPARISON TOGGLE */}
-      <div style={styles.header}>
+      <div className="candidate-panel-header">
         <div>
-          <div style={styles.badge}>⚡ AI DECISION SUPPORT ENGINE</div>
-          <h3 style={styles.title}>3 Phương Án Cấu Hình AI Đề Xuất</h3>
-          <p style={styles.subtitle}>Phân tích & tối ưu theo mục đích sử dụng và hạn mức ngân sách của bạn</p>
+          <span className="candidate-panel-badge">⚡ AI DECISION SUPPORT ENGINE</span>
+          <h3 className="candidate-panel-title">3 Phương Án Cấu Hình AI Đề Xuất</h3>
+          <p className="candidate-panel-subtitle">Phân tích & tối ưu theo mục đích sử dụng và hạn mức ngân sách của bạn</p>
         </div>
 
         <button
           type="button"
+          className={`btn-candidate-compare${showComparison ? " is-active" : ""}`}
           onClick={() => setShowComparison(!showComparison)}
-          style={styles.toggleCompareBtn(showComparison)}
         >
           {showComparison ? "📋 Xem Dạng Thẻ" : "📊 Bảng So Sánh Side-by-Side"}
         </button>
@@ -58,18 +58,17 @@ export function CandidateBuildsPanel({
 
       {/* SIDE-BY-SIDE COMPARISON TABLE */}
       {showComparison ? (
-        <div style={styles.compareTableWrap}>
-          <table style={styles.compareTable}>
+        <div className="candidate-table-wrap">
+          <table className="candidate-table">
             <thead>
               <tr>
-                <th style={{ ...styles.th, width: "22%" }}>Tiêu chí So sánh</th>
+                <th style={{ width: "22%" }}>Tiêu chí So sánh</th>
                 {tabsMeta.map((tab) => {
-                  const build = candidateBuilds[tab.key];
                   const isCurrentTab = activeCandidateTab === tab.key;
                   return (
-                    <th key={tab.key} style={{ ...styles.th, backgroundColor: isCurrentTab ? "#eff6ff" : "#f8fafc", textAlign: "center" }}>
-                      <div style={{ fontWeight: "800", color: tab.badgeColor, fontSize: "14px" }}>{tab.label}</div>
-                      <div style={{ fontSize: "11px", color: "#64748b" }}>{tab.subtitle}</div>
+                    <th key={tab.key} className={isCurrentTab ? "is-current-col" : ""}>
+                      <div className="tab-col-title" style={{ color: tab.badgeColor }}>{tab.label}</div>
+                      <div className="tab-col-sub">{tab.subtitle}</div>
                     </th>
                   );
                 })}
@@ -78,12 +77,12 @@ export function CandidateBuildsPanel({
             <tbody>
               {/* Row 1: Total Price */}
               <tr>
-                <td style={styles.tdLabel}>💰 Tổng Giá Trị</td>
+                <td className="td-label">💰 Tổng Giá Trị</td>
                 {tabsMeta.map((tab) => {
                   const build = candidateBuilds[tab.key];
                   const price = build ? Number(build.totalPrice || 0) : 0;
                   return (
-                    <td key={tab.key} style={{ ...styles.tdVal, fontWeight: "800", color: "#1d4ed8", fontSize: "15px" }}>
+                    <td key={tab.key} className="td-price-val">
                       {formatCurrency(price)}đ
                     </td>
                   );
@@ -92,9 +91,9 @@ export function CandidateBuildsPanel({
 
               {/* Row 2: FPS Gaming */}
               <tr>
-                <td style={styles.tdLabel}>🎮 Hiệu Năng FPS Ước Tính</td>
+                <td className="td-label">🎮 Hiệu Năng FPS Ước Tính</td>
                 {tabsMeta.map((tab) => (
-                  <td key={tab.key} style={{ ...styles.tdVal, fontWeight: "700", color: "#0f172a" }}>
+                  <td key={tab.key} className="td-fps-val">
                     {tab.fps}
                   </td>
                 ))}
@@ -102,14 +101,14 @@ export function CandidateBuildsPanel({
 
               {/* Row 3: Compatibility XAI */}
               <tr>
-                <td style={styles.tdLabel}>🧠 Điểm Tương Thích XAI</td>
+                <td className="td-label">🧠 Điểm Tương Thích XAI</td>
                 {tabsMeta.map((tab) => {
                   const build = candidateBuilds[tab.key];
                   const report = build?.compatibilityReport || {};
                   const score = report.score || 95;
                   const isOk = report.compatible !== false;
                   return (
-                    <td key={tab.key} style={{ ...styles.tdVal, color: isOk ? "#16a34a" : "#dc2626", fontWeight: "700" }}>
+                    <td key={tab.key} className={`td-score-val ${isOk ? "is-ok" : "is-warn"}`}>
                       {score}/100 {isOk ? "✓ (Tương thích tốt)" : "⚠ (Cần xem xét)"}
                     </td>
                   );
@@ -118,12 +117,12 @@ export function CandidateBuildsPanel({
 
               {/* Row 4: Budget Used % */}
               <tr>
-                <td style={styles.tdLabel}>📊 Tỷ Lệ Sử Dụng Ngân Sách</td>
+                <td className="td-label">📊 Tỷ Lệ Sử Dụng Ngân Sách</td>
                 {tabsMeta.map((tab) => {
                   const build = candidateBuilds[tab.key];
                   const used = build ? Number(build.budgetUtilization || 0) : 0;
                   return (
-                    <td key={tab.key} style={{ ...styles.tdVal, fontWeight: "700" }}>
+                    <td key={tab.key} className="td-budget-val">
                       {used}% {used > 100 ? "(Vượt nhẹ)" : ""}
                     </td>
                   );
@@ -132,12 +131,12 @@ export function CandidateBuildsPanel({
 
               {/* Row 5: Quick Select Action */}
               <tr>
-                <td style={styles.tdLabel}>⚡ Chọn Phương Án</td>
+                <td className="td-label">⚡ Chọn Phương Án</td>
                 {tabsMeta.map((tab) => {
                   const build = candidateBuilds[tab.key];
                   const isCurrent = activeCandidateTab === tab.key;
                   return (
-                    <td key={tab.key} style={{ ...styles.tdVal, padding: "12px 8px" }}>
+                    <td key={tab.key} style={{ padding: "12px 8px" }}>
                       <button
                         type="button"
                         onClick={() => {
@@ -145,13 +144,8 @@ export function CandidateBuildsPanel({
                           if (build) onApplyCandidateBuild(build);
                         }}
                         disabled={isApplying}
-                        style={{
-                          ...styles.applyBtn(isApplying),
-                          width: "100%",
-                          padding: "8px 10px",
-                          fontSize: "12px",
-                          backgroundColor: isCurrent ? tab.badgeColor : "#334155"
-                        }}
+                        className={`btn-candidate-apply-table${isCurrent ? " is-current" : ""}`}
+                        style={isCurrent ? { backgroundColor: tab.badgeColor } : {}}
                       >
                         {isCurrent ? "✓ Đang Chọn & Áp Dụng" : "Chọn Build Này"}
                       </button>
@@ -165,7 +159,7 @@ export function CandidateBuildsPanel({
       ) : (
         <>
           {/* TABS SELECTOR */}
-          <div style={styles.tabGrid}>
+          <div className="candidate-tab-grid">
             {tabsMeta.map((tab) => {
               const isActive = activeCandidateTab === tab.key;
               const buildData = candidateBuilds[tab.key];
@@ -176,64 +170,65 @@ export function CandidateBuildsPanel({
                   key={tab.key}
                   type="button"
                   onClick={() => onSelectCandidateTab(tab.key)}
-                  style={styles.tabButton(isActive, tab.badgeColor)}
+                  className={`candidate-tab-card${isActive ? " is-active" : ""}`}
+                  style={isActive ? { borderColor: tab.badgeColor, backgroundColor: `${tab.badgeColor}15` } : {}}
                 >
-                  <span style={{ fontWeight: "700", fontSize: "14px" }}>{tab.label}</span>
-                  <span style={{ fontSize: "12px", color: isActive ? "#ffffff" : "#64748b" }}>{tab.subtitle}</span>
-                  <span style={{ fontSize: "13px", fontWeight: "800", marginTop: "4px" }}>{price}đ</span>
+                  <span className="candidate-tab-title">{tab.label}</span>
+                  <span className="candidate-tab-subtitle">{tab.subtitle}</span>
+                  <span className="candidate-tab-price" style={{ color: tab.badgeColor }}>{price}đ</span>
                 </button>
               );
             })}
           </div>
 
           {/* CURRENT BUILD DETAILS CARD */}
-          <div style={styles.detailsCard}>
+          <div className="candidate-details-card">
             {/* BUILD OVERVIEW BAR */}
-            <div style={styles.overviewBar}>
+            <div className="candidate-overview-bar">
               <div>
-                <h4 style={{ margin: 0, fontSize: "16px", color: "#0f172a", fontWeight: "700" }}>
+                <h4 className="candidate-overview-title">
                   {currentBuild.label || "Phương án cấu hình"}
                 </h4>
-                <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "#64748b" }}>
+                <p className="candidate-overview-desc">
                   {currentBuild.desc || "Chi tiết linh kiện được hệ thống lựa chọn"}
                 </p>
               </div>
 
-              <div style={styles.metaBox}>
-                <div style={styles.metaItem}>
-                  <span style={styles.metaLabel}>Tỷ lệ Ngân sách:</span>
-                  <span style={styles.metaVal}>{budgetUtilization}%</span>
+              <div className="candidate-meta-box">
+                <div className="candidate-meta-item">
+                  <span className="candidate-meta-label">Ngân sách:</span>
+                  <span className="candidate-meta-val">{budgetUtilization}%</span>
                 </div>
-                <div style={styles.metaItem}>
-                  <span style={styles.metaLabel}>Tương thích XAI:</span>
-                  <span style={{ ...styles.metaVal, color: compatReport.compatible !== false ? "#16a34a" : "#dc2626" }}>
+                <div className="candidate-meta-item">
+                  <span className="candidate-meta-label">Tương thích:</span>
+                  <span className={`candidate-meta-val ${compatReport.compatible !== false ? "is-ok" : "is-warn"}`}>
                     {compatReport.score || 95}% {compatReport.compatible !== false ? "✓" : "⚠"}
                   </span>
                 </div>
-                <div style={styles.metaItem}>
-                  <span style={styles.metaLabel}>Tổng giá:</span>
-                  <span style={{ ...styles.metaVal, color: "#1d4ed8", fontSize: "16px" }}>{formatCurrency(totalPrice)}đ</span>
+                <div className="candidate-meta-item">
+                  <span className="candidate-meta-label">Tổng giá:</span>
+                  <span className="candidate-meta-price">{formatCurrency(totalPrice)}đ</span>
                 </div>
               </div>
             </div>
 
             {/* COMPONENT LIST WITH AI EXPLANATIONS */}
-            <div style={styles.componentsGrid}>
+            <div className="candidate-components-grid">
               {componentsList.map((item, idx) => {
                 const compType = (item.type || item.componentType || `Linh kiện ${idx + 1}`).toUpperCase();
                 const compName = item.name || item.productName || "Tên linh kiện chưa cập nhật";
                 const compPrice = Number(item.price || 0);
 
                 return (
-                  <div key={idx} style={{ display: "flex", flexDirection: "column", gap: "4px", backgroundColor: "#f8fafc", padding: "10px 12px", borderRadius: "10px", border: "1px solid #f1f5f9" }}>
-                    <div style={styles.compRow}>
-                      <span style={styles.compTypeBadge}>{compType}</span>
-                      <span style={styles.compName}>{compName}</span>
-                      <span style={styles.compPrice}>{formatCurrency(compPrice)}đ</span>
+                  <div key={idx} className="candidate-comp-item">
+                    <div className="candidate-comp-row">
+                      <span className="candidate-comp-badge">{compType}</span>
+                      <span className="candidate-comp-name" title={compName}>{compName}</span>
+                      <span className="candidate-comp-price">{formatCurrency(compPrice)}đ</span>
                     </div>
                     {item.explanation && (
-                      <div style={{ fontSize: "11.5px", color: "#475569", lineHeight: "1.45", backgroundColor: "#ffffff", padding: "6px 10px", borderRadius: "8px", border: "1px solid #e2e8f0", marginTop: "2px" }}>
-                        <span style={{ fontWeight: "700", color: "#2563eb" }}>🧠 AI Gợi ý:</span> {item.explanation}
+                      <div className="candidate-comp-explanation">
+                        <span className="explanation-label">🧠 AI Gợi ý:</span> {item.explanation}
                       </div>
                     )}
                   </div>
@@ -242,16 +237,16 @@ export function CandidateBuildsPanel({
             </div>
 
             {/* BOTTOM ACTION BAR */}
-            <div style={styles.actionRow}>
-              <span style={{ fontSize: "12px", color: "#64748b" }}>
-                💡 Nhấn <strong>"Áp Dụng Build Này"</strong> để nạp toàn bộ 8 linh kiện trên vào không gian làm việc.
+            <div className="candidate-action-row">
+              <span className="candidate-action-hint">
+                💡 Nhấn <strong>"Áp Dụng Build Này"</strong> để nạp toàn bộ linh kiện vào workspace.
               </span>
 
               <button
                 type="button"
                 onClick={() => onApplyCandidateBuild(currentBuild)}
                 disabled={isApplying}
-                style={styles.applyBtn(isApplying)}
+                className="btn-candidate-apply-main"
               >
                 {isApplying ? "⏳ Đang Nạp Linh Kiện..." : "⚡ Áp Dụng Build Này Vào Cấu Hình"}
               </button>

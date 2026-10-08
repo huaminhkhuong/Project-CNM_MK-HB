@@ -146,6 +146,7 @@ model Category {
 
 model CompatibilityRule {
   id                                                                       Int               @id @default(autoincrement())
+  name                                                                     String?           @db.VarChar(255)
   attribute_value_1                                                        Int?
   attribute_value_2                                                        Int?
   is_compatible                                                            Boolean?
@@ -204,9 +205,11 @@ model Order {
   payment_proof    String?       @db.VarChar(255)
   note             String?       @db.Text
   updated_at       DateTime?     @default(now()) @db.Timestamp(0)
+  User             User?         @relation(fields: [user_id], references: [id], onDelete: SetNull, onUpdate: Restrict, map: "fk_orders_user")
   OrderItem      OrderItem[]
   Shipment        Shipment[]
   WarrantyItem       WarrantyItem[]
+  @@index([user_id], map: "user_id")
   @@map("orders")
 }
 
@@ -400,6 +403,7 @@ model User {
   tickets_tickets_user_idTousers        Ticket[]         @relation("tickets_user_idTousers")
   Role                                 Role?            @relation(fields: [role_id], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_users_role")
   WarrantyItem                            WarrantyItem[]
+  Order                                Order[]
 
   @@index([role_id], map: "role_id")
   @@map("users")

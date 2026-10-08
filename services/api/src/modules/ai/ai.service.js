@@ -80,17 +80,39 @@ async function getSchemaConfig() {
     return schemaCache;
   }
 
-  const [buildColumns, itemColumns, variantColumns, productColumns, brandColumns, categoryColumns, pvavColumns, attributeColumns, attributeValueColumns] = await Promise.all([
+  const [
+    buildColumns,
+    itemColumns,
+    skuColumns,
+    legacyVariantColumns,
+    productColumns,
+    brandColumns,
+    categoryColumns,
+    skuAttrColumns,
+    legacyPvavColumns,
+    attributeColumns,
+    attributeValueColumns
+  ] = await Promise.all([
     getTableColumns("pc_builds"),
     getTableColumns("pc_build_items"),
+    getTableColumns("product_skus"),
     getTableColumns("product_variants"),
     getTableColumns("products"),
     getTableColumns("brands"),
     getTableColumns("categories"),
+    getTableColumns("sku_attributes"),
     getTableColumns("product_variant_attribute_values"),
     getTableColumns("attributes"),
     getTableColumns("attribute_values")
   ]);
+
+  const useSkus = skuColumns.length > 0;
+  const variantColumns = useSkus ? skuColumns : legacyVariantColumns;
+  const variantTable = useSkus ? "product_skus" : "product_variants";
+
+  const useSkuAttrs = skuAttrColumns.length > 0;
+  const pvavColumns = useSkuAttrs ? skuAttrColumns : legacyPvavColumns;
+  const pvavTable = useSkuAttrs ? "sku_attributes" : "product_variant_attribute_values";
 
   const config = {
     builds: {
@@ -107,17 +129,17 @@ async function getSchemaConfig() {
       table: "pc_build_items",
       id: pickColumn(itemColumns, ["id"]),
       buildId: pickColumn(itemColumns, ["pc_build_id", "build_id"]),
-      variantId: pickColumn(itemColumns, ["product_variant_id", "variant_id"]),
+      variantId: pickColumn(itemColumns, ["sku_id", "product_variant_id", "variant_id"]),
       componentType: pickColumn(itemColumns, ["component_type"], null),
       quantity: pickColumn(itemColumns, ["quantity"], null)
     },
     variants: {
-      table: "product_variants",
+      table: variantTable,
       id: pickColumn(variantColumns, ["id"]),
       productId: pickColumn(variantColumns, ["product_id"]),
       sku: pickColumn(variantColumns, ["sku"]),
       price: pickColumn(variantColumns, ["price"]),
-      stock: pickColumn(variantColumns, ["stock_quantity", "stock", "quantity"], null),
+      stock: pickColumn(variantColumns, ["stock", "stock_quantity", "quantity"], null),
       image: pickColumn(variantColumns, ["image_url", "thumbnail_url", "thumbnail", "image"], null),
       activeCondition: buildActiveCondition("pv", variantColumns)
     },
@@ -141,8 +163,8 @@ async function getSchemaConfig() {
       name: pickColumn(categoryColumns, ["name"])
     },
     pvav: {
-      table: "product_variant_attribute_values",
-      productVariantId: pickColumn(pvavColumns, ["product_variant_id", "variant_id"]),
+      table: pvavTable,
+      productVariantId: pickColumn(pvavColumns, ["sku_id", "product_variant_id", "variant_id"]),
       attributeValueId: pickColumn(pvavColumns, ["attribute_value_id"])
     },
     attributes: {
@@ -164,7 +186,7 @@ async function getSchemaConfig() {
   }
 
   if (!config.variants.id || !config.variants.productId || !config.variants.sku || !config.variants.price) {
-    throw createError("product_variants table does not have the required columns", 500);
+    throw createError("product sku/variant table does not have the required columns", 500);
   }
 
   if (!config.products.id || !config.products.name || !config.products.brandId || !config.products.categoryId) {
@@ -609,11 +631,81 @@ async function askTechnicalAdvisor(payload = {}) {
   };
 }
 
+function generateLocalBuildAdvice(buildSnapshot, payload = {}) {
+  const items = buildSnapshot.items || [];
+  const missing = buildSnapshot.missingComponents || [];
+  const issues = [];
+  const suggestions = [];
+
+  const byType = {};
+  items.forEach((it) => {
+    byType[it.componentType] = it;
+  });
+
+  const cpu = byType.cpu;
+  const mb = byType.mainboard;
+  const ram = byType.ram;
+  const psu = byType.psu;
+
+  // Socket check
+  if (cpu && mb) {
+    const cpuSock = cpu.attributes?.socket?.value || (/AM5/i.test(cpu.product?.name) ? "AM5" : /AM4/i.test(cpu.product?.name) ? "AM4" : /LGA\s*1700|12\d00|13\d00|14\d00/i.test(cpu.product?.name) ? "LGA1700" : "");
+    const mbSock = mb.attributes?.socket?.value || (/AM5/i.test(mb.product?.name) ? "AM5" : /AM4/i.test(mb.product?.name) ? "AM4" : /LGA\s*1700|B760|Z790|H610/i.test(mb.product?.name) ? "LGA1700" : "");
+    if (cpuSock && mbSock && cpuSock.toUpperCase() !== mbSock.toUpperCase()) {
+      issues.push(`Xung đột Socket: CPU dùng ${cpuSock} nhưng Mainboard dùng ${mbSock}. Cần chọn Mainboard cùng socket.`);
+    }
+  }
+
+  // RAM check
+  if (mb && ram) {
+    const mbDdr = mb.attributes?.ddr?.value || (/ddr5/i.test(mb.product?.name) ? "DDR5" : /ddr4/i.test(mb.product?.name) ? "DDR4" : "");
+    const ramDdr = ram.attributes?.ddr?.value || (/ddr5/i.test(ram.product?.name) ? "DDR5" : /ddr4/i.test(ram.product?.name) ? "DDR4" : "");
+    if (mbDdr && ramDdr && mbDdr.toUpperCase() !== ramDdr.toUpperCase()) {
+      issues.push(`Xung đột RAM: Mainboard hỗ trợ ${mbDdr} nhưng RAM là ${ramDdr}.`);
+    }
+  }
+
+  // Missing components
+  if (missing.length > 0) {
+    suggestions.push(`Cấu hình còn thiếu ${missing.length} linh kiện: ${missing.map((m) => m.toUpperCase()).join(", ")}.`);
+  }
+
+  // Power check
+  if (psu) {
+    suggestions.push(`Bộ nguồn ${psu.product?.name || "PSU"}: công suất định mức cần dư tải tối thiểu 20-30% cho an toàn lâu dài.`);
+  } else {
+    suggestions.push("Chưa chọn nguồn PSU: đề xuất nguồn công suất từ 650W đến 750W chuẩn 80 Plus Bronze/Gold.");
+  }
+
+  const review = [
+    `Đánh giá cấu hình "${buildSnapshot.name || "Dàn PC"}" (Tổng giá: ${Number(buildSnapshot.totalPrice || 0).toLocaleString("vi-VN")}đ):`,
+    items.length >= 7 ? "Dàn máy gần như hoàn chỉnh với đầy đủ các thành phần chính." : `Hiện đã chọn ${items.length} linh kiện trong hệ thống.`,
+    issues.length === 0 ? "Tất cả linh kiện hiện tại đều tương thích tốt về chuẩn kết nối và điện năng." : `Phát hiện ${issues.length} điểm cần điều chỉnh về tương thích phần cứng.`
+  ].join(" ");
+
+  return {
+    review,
+    issues,
+    suggestions
+  };
+}
+
 async function askBuildAdvisor(userId, buildId, payload = {}) {
   const buildSnapshot = await getBuildSnapshot(userId, buildId);
-  const userInput = buildAdviceInput(buildSnapshot, payload);
-  const data = await createResponsesRequest(AI_BUILD_ADVICE_SYSTEM_PROMPT, userInput);
-  const parsedAdvice = normalizeAdvicePayload(parseJsonText(data.output_text || ""));
+  let parsedAdvice;
+  let model = env.openaiModel || "pc-mall-expert-advisor";
+  let usage = null;
+
+  try {
+    const userInput = buildAdviceInput(buildSnapshot, payload);
+    const data = await createResponsesRequest(AI_BUILD_ADVICE_SYSTEM_PROMPT, userInput);
+    parsedAdvice = normalizeAdvicePayload(parseJsonText(data.output_text || ""));
+    model = data.model || model;
+    usage = data.usage || null;
+  } catch (_apiError) {
+    parsedAdvice = generateLocalBuildAdvice(buildSnapshot, payload);
+    model = "pc-mall-expert-advisor";
+  }
 
   return {
     build: {
@@ -634,8 +726,8 @@ async function askBuildAdvisor(userId, buildId, payload = {}) {
       }))
     },
     advice: parsedAdvice,
-    model: data.model || env.openaiModel,
-    usage: data.usage || null
+    model,
+    usage
   };
 }
 
@@ -922,6 +1014,48 @@ function normalizeVietnamese(value) {
     .replace(/đ/g, "d");
 }
 
+function detectRequestedCategory(message) {
+  const text = normalizeVietnamese(message);
+
+  let categoryKey = null;
+  let label = "";
+
+  // Check Cooling first if explicitly asked (to prevent "tản nhiệt cpu" matching cpu)
+  if (/(tan nhiet|tản nhiệt|cooler|cooling|fan aio|tản nước|tản khí|ls720|ak620|ak400|kraken)/.test(text)) {
+    categoryKey = "cooling";
+    label = "Tản Nhiệt";
+  } else if (/\bcpu\b|bo xu ly|bộ xử lý|chip cpu|intel core|amd ryzen|^cpu\s*|\scpu\b/.test(text)) {
+    categoryKey = "cpu";
+    label = "Bộ xử lý CPU";
+  } else if (/\bram\b|thanh ram|bo nho ram|ddr4|ddr5/.test(text)) {
+    categoryKey = "ram";
+    label = "Bộ nhớ RAM";
+  } else if (/vga|gpu|card man hinh|card do hoa|rtx|gtx|radeon|rx\s*\d/.test(text)) {
+    categoryKey = "gpu";
+    label = "Card màn hình (GPU)";
+  } else if (/ssd|nvme|o cung|storage|hdd/.test(text)) {
+    categoryKey = "storage";
+    label = "Ổ cứng SSD";
+  } else if (/mainboard|motherboard|bo mach chu|bo mach|b760|z790|b650/.test(text)) {
+    categoryKey = "mainboard";
+    label = "Bo mạch chủ Mainboard";
+  } else if (/psu|nguon|bo nguon|power supply/.test(text)) {
+    categoryKey = "psu";
+    label = "Bộ nguồn PSU";
+  } else if (/case|vo may tinh|vo case|thung may/.test(text)) {
+    categoryKey = "case";
+    label = "Vỏ Case";
+  }
+
+  const maxPrice = extractBudgetVnd(message);
+
+  return {
+    categoryKey,
+    label,
+    maxPrice
+  };
+}
+
 function classifyAiQuestion(message) {
   const text = normalizeVietnamese(message);
   const compact = text.replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
@@ -931,7 +1065,7 @@ function classifyAiQuestion(message) {
   if (/(so sanh|chon giua|vs|versus)/.test(text)) return "comparison";
   if (/(build|cau hinh|lap pc|may pc|pc).*(trieu|ngan sach|choi|gaming|render|ai|do hoa|van phong|hoc|code)|(\d+)\s*(trieu|tr)\s*(build|pc|choi game)/.test(text)) return "pc_build";
   if (/(laptop|notebook|may tinh xach tay)/.test(text) && /(mua|tu van|goi y|duoi|tam|trieu|hoc tap|van phong|gaming|lap trinh|do hoa)/.test(text)) return "laptop_advice";
-  if (/(mua|tu van|goi y|nen chon|san pham|linh kien|co .*khong|con hang|cpu|gpu|ram|ssd|mainboard|nguon|case)/.test(text)) return "product_advice";
+  if (/(mua|tu van|goi y|nen chon|san pham|linh kien|co .*khong|con hang|cpu|gpu|ram|ssd|mainboard|nguon|case|^cpu|cpu di|ram di)/.test(text) || detectRequestedCategory(message).categoryKey) return "product_advice";
   return "unknown";
 }
 
@@ -956,22 +1090,29 @@ function detectUseCase(message) {
 
 function productCategoryKey(product) {
   const category = normalizeVietnamese(product.categoryName || "");
-  if (category.includes("cpu")) return "cpu";
-  if (category.includes("mainboard") || category.includes("motherboard")) return "mainboard";
-  if (category.includes("ram") || category.includes("memory")) return "ram";
-  if (category.includes("gpu") || category.includes("vga")) return "gpu";
-  if (category.includes("storage") || category.includes("ssd") || category.includes("hdd")) return "storage";
-  if (category.includes("psu") || category.includes("nguon")) return "psu";
-  if (category.includes("case") || category.includes("vo")) return "case";
-  if (category.includes("cooling") || category.includes("tan nhiet") || category.includes("cooler")) return "cooling";
+  // ✅ Fix: Kiểm tra COOLING TRƯỚC CPU!
+  // "Tản Nhiệt CPU" → normalizeVietnamese → "tan nhiet cpu" → includes("cpu") = true → SAI!
+  // Phải match "cooling" / "tan nhiet" TRƯỚC để tránh lọc nhầm loại
+  if (category.includes("cooling") || category.includes("tan nhiet") || category.includes("cooler") || category.includes("fan")) return "cooling";
+  if (category.includes("cpu") || category.includes("bo xu ly") || category.includes("processor")) return "cpu";
+  if (category.includes("mainboard") || category.includes("motherboard") || category.includes("bo mach")) return "mainboard";
+  if (category.includes("ram") || category.includes("memory") || category.includes("bo nho")) return "ram";
+  if (category.includes("gpu") || category.includes("vga") || category.includes("card man hinh")) return "gpu";
+  if (category.includes("storage") || category.includes("ssd") || category.includes("hdd") || category.includes("o cung")) return "storage";
+  if (category.includes("psu") || category.includes("nguon") || category.includes("power supply")) return "psu";
+  if (category.includes("case") || category.includes("vo may")) return "case";
   if (category.includes("laptop")) return "laptop";
 
+  // Fallback: detect by product name / SKU tokens
   const haystack = normalizeVietnamese(`${product.name || ""} ${product.sku || ""}`);
+  // Check cooling name tokens FIRST (before BUILD_COMPONENTS which has cpu tokens)
+  if (/(ak400|ak620|ak400|ls720|ls360|kraken|nzxt h|id-cooling|aio liquid|tan nhiet)/.test(haystack)) return "cooling";
   const found = BUILD_COMPONENTS.find((component) => component.tokens.some((token) => haystack.includes(normalizeVietnamese(token))));
   if (found) return found.key;
   if (haystack.includes("laptop")) return "laptop";
   return "other";
 }
+
 
 function productImageUrl(product) {
   const raw = String(product.imageUrl || "").trim();
@@ -1003,9 +1144,9 @@ function mapAdvisorProduct(row, attributesBySku = {}) {
   return product;
 }
 
-async function fetchAiCatalogProducts({ keyword = "", budget = null, limit = 80, laptopOnly = false } = {}) {
+async function fetchAiCatalogProducts({ keyword = "", budget = null, limit = 300, laptopOnly = false, categoryKey = null } = {}) {
   const params = [];
-  const safeLimit = Math.max(1, Math.min(200, Number(limit || 80)));
+  const safeLimit = Math.max(1, Math.min(500, Number(limit || 300)));
   const where = [
     "(p.is_active IS NULL OR p.is_active = 1)",
     "(p.status IS NULL OR UPPER(p.status) = 'ACTIVE')",
@@ -1018,7 +1159,38 @@ async function fetchAiCatalogProducts({ keyword = "", budget = null, limit = 80,
     params.push(budget);
   }
 
-  if (keyword) {
+  // 1. Strict Category Filter
+  if (categoryKey) {
+    if (categoryKey === "cpu") {
+      // Match CPU category/name but EXCLUDE anything that looks like cooling
+      where.push(`(
+        (
+          (LOWER(c.name) LIKE '%cpu%' OR LOWER(c.name) LIKE '%bộ xử lý%' OR LOWER(c.name) LIKE '%bo xu ly%' OR LOWER(c.name) LIKE '%processor%')
+          AND LOWER(c.name) NOT LIKE '%tản%' AND LOWER(c.name) NOT LIKE '%tan nhiet%' AND LOWER(c.name) NOT LIKE '%cool%'
+        )
+        OR LOWER(p.name) LIKE '%intel core%' OR LOWER(p.name) LIKE '%ryzen%'
+        OR LOWER(p.name) LIKE '%i5-%' OR LOWER(p.name) LIKE '%i7-%' OR LOWER(p.name) LIKE '%i9-%'
+        OR LOWER(p.name) LIKE '%i3-%' OR LOWER(p.name) LIKE '%i9-%'
+      )`);
+      where.push("LOWER(c.name) NOT LIKE '%tản%' AND LOWER(c.name) NOT LIKE '%cool%' AND LOWER(p.name) NOT LIKE '%tản nhiệt%' AND LOWER(p.name) NOT LIKE '%ak400%' AND LOWER(p.name) NOT LIKE '%ak620%' AND LOWER(p.name) NOT LIKE '%ls720%' AND LOWER(p.name) NOT LIKE '%kraken%' AND LOWER(p.name) NOT LIKE '%aio%'");
+    } else if (categoryKey === "ram") {
+      where.push("(LOWER(c.name) LIKE '%ram%' OR LOWER(p.name) LIKE '%ram %' OR LOWER(p.name) LIKE '%ddr4%' OR LOWER(p.name) LIKE '%ddr5%')");
+    } else if (categoryKey === "gpu") {
+      where.push("(LOWER(c.name) LIKE '%gpu%' OR LOWER(c.name) LIKE '%vga%' OR LOWER(c.name) LIKE '%card%' OR LOWER(p.name) LIKE '%rtx%' OR LOWER(p.name) LIKE '%rx %' OR LOWER(p.name) LIKE '%gtx%')");
+    } else if (categoryKey === "cooling") {
+      where.push("(LOWER(c.name) LIKE '%cool%' OR LOWER(c.name) LIKE '%tản%' OR LOWER(p.name) LIKE '%tản nhiệt%' OR LOWER(p.name) LIKE '%ak400%' OR LOWER(p.name) LIKE '%ak620%' OR LOWER(p.name) LIKE '%ls720%' OR LOWER(p.name) LIKE '%aio%')");
+    } else if (categoryKey === "storage") {
+      where.push("(LOWER(c.name) LIKE '%storage%' OR LOWER(c.name) LIKE '%ssd%' OR LOWER(c.name) LIKE '%ổ cứng%' OR LOWER(p.name) LIKE '%ssd%' OR LOWER(p.name) LIKE '%nvme%')");
+    } else if (categoryKey === "mainboard") {
+      where.push("(LOWER(c.name) LIKE '%main%' OR LOWER(c.name) LIKE '%bo mạch%' OR LOWER(p.name) LIKE '%mainboard%' OR LOWER(p.name) LIKE '%b760%' OR LOWER(p.name) LIKE '%z790%' OR LOWER(p.name) LIKE '%b650%')");
+    } else if (categoryKey === "psu") {
+      where.push("(LOWER(c.name) LIKE '%psu%' OR LOWER(c.name) LIKE '%nguồn%' OR LOWER(p.name) LIKE '% nguồn%' OR LOWER(p.name) LIKE '%80 plus%')");
+    } else if (categoryKey === "case") {
+      where.push("(LOWER(c.name) LIKE '%case%' OR LOWER(c.name) LIKE '%vỏ%' OR LOWER(p.name) LIKE '%case %' OR LOWER(p.name) LIKE '%vỏ may%')");
+    }
+  }
+
+  if (keyword && !categoryKey) {
     where.push("(LOWER(p.name) LIKE ? OR LOWER(COALESCE(p.description, '')) LIKE ? OR LOWER(COALESCE(c.name, '')) LIKE ?)");
     const like = `%${String(keyword).toLowerCase()}%`;
     params.push(like, like, like);
@@ -1094,7 +1266,14 @@ function scoreProductForUseCase(product, useCase, message) {
   if (useCase === "AI" && /(rtx|cuda|4070|4080|4090|32gb|64gb)/.test(text)) score += 30;
   if (useCase === "lập trình" && /(ryzen|core|32gb|ssd|nvme|laptop)/.test(text)) score += 20;
   if (useCase === "học tập/văn phòng" && /(laptop|core i3|core i5|ryzen 3|ryzen 5|ssd|16gb)/.test(text)) score += 20;
-  if (normalizeVietnamese(message).split(/\s+/).some((word) => word.length > 2 && text.includes(word))) score += 8;
+
+  const ignoreSearchWords = ["tu", "van", "cho", "minh", "mua", "nen", "chon", "loai", "nao", "co", "hay", "tot", "re", "nhat"];
+  const words = normalizeVietnamese(message).split(/[\s,+/]+/).filter((w) => w.length >= 2 && !ignoreSearchWords.includes(w));
+  for (const w of words) {
+    if (text.includes(w)) {
+      score += /\d/.test(w) ? 25 : 12;
+    }
+  }
   return score;
 }
 
@@ -1102,6 +1281,31 @@ function pickTopProducts(products, useCase, message, count = 3) {
   return [...products]
     .sort((a, b) => scoreProductForUseCase(b, useCase, message) - scoreProductForUseCase(a, useCase, message) || a.price - b.price)
     .slice(0, count);
+}
+
+function extractSocket(product) {
+  if (!product) return "";
+  const fromAttr = attr(product, ["socket"]);
+  if (fromAttr) return fromAttr.trim();
+  const name = product.name || "";
+  if (/am5/i.test(name)) return "AM5";
+  if (/am4/i.test(name)) return "AM4";
+  if (/lga\s*1700|12\d00|13\d00|14\d00|b760|z790|h610/i.test(name)) return "LGA1700";
+  if (/lga\s*1200|10\d00|11\d00|b560|z590|h510/i.test(name)) return "LGA1200";
+  return "";
+}
+
+function extractRamType(product) {
+  if (!product) return "";
+  const fromAttr = attr(product, ["ddr", "memory", "chuẩn ram"]);
+  if (fromAttr) {
+    if (/ddr5/i.test(fromAttr)) return "DDR5";
+    if (/ddr4/i.test(fromAttr)) return "DDR4";
+  }
+  const name = product.name || "";
+  if (/ddr5/i.test(name)) return "DDR5";
+  if (/ddr4/i.test(name)) return "DDR4";
+  return "";
 }
 
 function pickBuildComponents(products, budget, useCase) {
@@ -1119,26 +1323,130 @@ function pickBuildComponents(products, budget, useCase) {
   const usedIds = new Set();
   let remainingBudget = Number(budget || 0);
 
-  for (const component of BUILD_COMPONENTS) {
-    const pool = products.filter((product) => product.componentType === component.key && !usedIds.has(product.skuId) && product.stock > 0);
-    if (pool.length === 0) continue;
-    const target = budget ? budget * (allocation[component.key] || 0.1) : null;
-    const affordablePool = budget
-      ? pool.filter((product) => product.price <= Math.max(target * 1.75, remainingBudget || target))
-      : pool;
-    const candidates = affordablePool.length > 0 ? affordablePool : pool;
-    const picked = target
-      ? [...candidates].sort((a, b) => {
-        const aOverBudgetPenalty = remainingBudget && a.price > remainingBudget ? 1000000000 : 0;
-        const bOverBudgetPenalty = remainingBudget && b.price > remainingBudget ? 1000000000 : 0;
-        return (Math.abs(a.price - target) + aOverBudgetPenalty) - (Math.abs(b.price - target) + bOverBudgetPenalty) || b.stock - a.stock;
-      })[0]
-      : candidates[0];
-    if (picked) {
-      selected.push({ ...picked, componentLabel: component.label });
-      usedIds.add(picked.skuId);
-      if (remainingBudget) remainingBudget -= Number(picked.price || 0);
-    }
+  function pickBestItem(pool, target) {
+    if (pool.length === 0) return null;
+    return [...pool].sort((a, b) => {
+      const aOverPenalty = remainingBudget && a.price > remainingBudget ? 1000000000 : 0;
+      const bOverPenalty = remainingBudget && b.price > remainingBudget ? 1000000000 : 0;
+      return (Math.abs(a.price - target) + aOverPenalty) - (Math.abs(b.price - target) + bOverPenalty) || b.stock - a.stock;
+    })[0];
+  }
+
+  // 1. CPU
+  const cpuTarget = budget ? budget * (allocation.cpu || 0.18) : 5000000;
+  const cpuPool = products.filter((p) => p.componentType === "cpu" && !usedIds.has(p.skuId) && p.stock > 0);
+  const pickedCpu = pickBestItem(cpuPool, cpuTarget);
+  if (pickedCpu) {
+    selected.push({ ...pickedCpu, componentLabel: "CPU" });
+    usedIds.add(pickedCpu.skuId);
+    if (remainingBudget) remainingBudget -= Number(pickedCpu.price || 0);
+  }
+
+  const cpuSocket = extractSocket(pickedCpu);
+
+  // 2. Mainboard (Strict Socket Matching)
+  const mbTarget = budget ? budget * (allocation.mainboard || 0.12) : 3500000;
+  let mbPool = products.filter((p) => p.componentType === "mainboard" && !usedIds.has(p.skuId) && p.stock > 0);
+  if (cpuSocket) {
+    const matched = mbPool.filter((mb) => {
+      const s = extractSocket(mb);
+      return s && normalizeVietnamese(s) === normalizeVietnamese(cpuSocket);
+    });
+    if (matched.length > 0) mbPool = matched;
+  }
+  const pickedMb = pickBestItem(mbPool, mbTarget);
+  if (pickedMb) {
+    selected.push({ ...pickedMb, componentLabel: "Mainboard" });
+    usedIds.add(pickedMb.skuId);
+    if (remainingBudget) remainingBudget -= Number(pickedMb.price || 0);
+  }
+
+  const mbRamType = extractRamType(pickedMb);
+
+  // 3. RAM (Strict DDR Standard Matching)
+  const ramTarget = budget ? budget * (allocation.ram || 0.10) : 2000000;
+  let ramPool = products.filter((p) => p.componentType === "ram" && !usedIds.has(p.skuId) && p.stock > 0);
+  if (mbRamType) {
+    const matched = ramPool.filter((r) => {
+      const rt = extractRamType(r);
+      return rt && normalizeVietnamese(rt) === normalizeVietnamese(mbRamType);
+    });
+    if (matched.length > 0) ramPool = matched;
+  }
+  const pickedRam = pickBestItem(ramPool, ramTarget);
+  if (pickedRam) {
+    selected.push({ ...pickedRam, componentLabel: "RAM" });
+    usedIds.add(pickedRam.skuId);
+    if (remainingBudget) remainingBudget -= Number(pickedRam.price || 0);
+  }
+
+  // 4. GPU (Realistic for gaming budget)
+  const gpuTarget = budget ? budget * (allocation.gpu || 0.34) : 8000000;
+  let gpuPool = products.filter((p) => p.componentType === "gpu" && !usedIds.has(p.skuId) && p.stock > 0);
+  if (budget >= 15000000) {
+    const matched = gpuPool.filter((g) => !/gt730|gt 730|gt 1030|geforce 210/i.test(g.name));
+    if (matched.length > 0) gpuPool = matched;
+  }
+  const pickedGpu = pickBestItem(gpuPool, gpuTarget);
+  if (pickedGpu) {
+    selected.push({ ...pickedGpu, componentLabel: "GPU" });
+    usedIds.add(pickedGpu.skuId);
+    if (remainingBudget) remainingBudget -= Number(pickedGpu.price || 0);
+  }
+
+  // 5. Storage
+  const ssdTarget = budget ? budget * (allocation.storage || 0.09) : 1200000;
+  const ssdPool = products.filter((p) => p.componentType === "storage" && !usedIds.has(p.skuId) && p.stock > 0);
+  const pickedSsd = pickBestItem(ssdPool, ssdTarget);
+  if (pickedSsd) {
+    selected.push({ ...pickedSsd, componentLabel: "SSD" });
+    usedIds.add(pickedSsd.skuId);
+    if (remainingBudget) remainingBudget -= Number(pickedSsd.price || 0);
+  }
+
+  // 6. PSU (Guaranteed safe wattage)
+  const psuTarget = budget ? budget * (allocation.psu || 0.08) : 1500000;
+  const cpuPower = parseWatt(attr(pickedCpu || { attributes: [] }, ["tdp", "power"])) || 95;
+  const gpuPower = parseWatt(attr(pickedGpu || { attributes: [] }, ["tdp", "power"])) || (pickedGpu ? 180 : 0);
+  const minWatt = Math.round((cpuPower + gpuPower + 120) * 1.3);
+  let psuPool = products.filter((p) => p.componentType === "psu" && !usedIds.has(p.skuId) && p.stock > 0);
+  const adequatePsu = psuPool.filter((p) => {
+    const w = parseWatt(attr(p, ["watt", "công suất", "power"]) || p.name);
+    return w >= minWatt;
+  });
+  if (adequatePsu.length > 0) psuPool = adequatePsu;
+  const pickedPsu = pickBestItem(psuPool, psuTarget);
+  if (pickedPsu) {
+    selected.push({ ...pickedPsu, componentLabel: "PSU" });
+    usedIds.add(pickedPsu.skuId);
+    if (remainingBudget) remainingBudget -= Number(pickedPsu.price || 0);
+  }
+
+  // 7. Case
+  const caseTarget = budget ? budget * (allocation.case || 0.06) : 1000000;
+  const casePool = products.filter((p) => p.componentType === "case" && !usedIds.has(p.skuId) && p.stock > 0);
+  const pickedCase = pickBestItem(casePool, caseTarget);
+  if (pickedCase) {
+    selected.push({ ...pickedCase, componentLabel: "Case" });
+    usedIds.add(pickedCase.skuId);
+    if (remainingBudget) remainingBudget -= Number(pickedCase.price || 0);
+  }
+
+  // 8. Cooling
+  const coolTarget = budget ? budget * (allocation.cooling || 0.03) : 800000;
+  let coolPool = products.filter((p) => p.componentType === "cooling" && !usedIds.has(p.skuId) && p.stock > 0);
+  if (cpuSocket) {
+    const matched = coolPool.filter((c) => {
+      const s = attr(c, ["socket", "tương thích"]);
+      return !s || normalizeVietnamese(s).includes(normalizeVietnamese(cpuSocket));
+    });
+    if (matched.length > 0) coolPool = matched;
+  }
+  const pickedCool = pickBestItem(coolPool, coolTarget);
+  if (pickedCool) {
+    selected.push({ ...pickedCool, componentLabel: "Cooling" });
+    usedIds.add(pickedCool.skuId);
+    if (remainingBudget) remainingBudget -= Number(pickedCool.price || 0);
   }
 
   return selected;
@@ -1159,35 +1467,39 @@ function parseWatt(text) {
 
 function checkBuildCompatibility(components) {
   const byType = Object.fromEntries(components.map((item) => [item.componentType, item]));
-  const cpuSocket = attr(byType.cpu || { attributes: [] }, ["socket"]);
-  const boardSocket = attr(byType.mainboard || { attributes: [] }, ["socket"]);
-  const ramType = attr(byType.ram || { attributes: [] }, ["ddr", "memory"]);
-  const boardRam = attr(byType.mainboard || { attributes: [] }, ["ddr", "memory"]);
+  const cpuSocket = extractSocket(byType.cpu);
+  const boardSocket = extractSocket(byType.mainboard);
+  const ramType = extractRamType(byType.ram);
+  const boardRam = extractRamType(byType.mainboard);
   const psuWatt = parseWatt(attr(byType.psu || { attributes: [] }, ["watt", "công suất", "power"]) || byType.psu?.name);
   const gpuPower = parseWatt(attr(byType.gpu || { attributes: [] }, ["tdp", "power"])) || (byType.gpu ? 180 : 0);
   const cpuPower = parseWatt(attr(byType.cpu || { attributes: [] }, ["tdp", "power"])) || (byType.cpu ? 95 : 0);
-  const required = Math.round((gpuPower + cpuPower + 120) * 1.35);
+  const required = Math.round((gpuPower + cpuPower + 120) * 1.3);
+
+  const socketOk = Boolean(cpuSocket && boardSocket && normalizeVietnamese(cpuSocket) === normalizeVietnamese(boardSocket));
+  const ramOk = Boolean(!boardRam || !ramType || normalizeVietnamese(boardRam) === normalizeVietnamese(ramType));
+  const psuOk = Boolean(!psuWatt || psuWatt >= required);
 
   return [
     {
-      label: "CPU socket với mainboard",
-      ok: !cpuSocket || !boardSocket || normalizeVietnamese(cpuSocket) === normalizeVietnamese(boardSocket),
-      detail: cpuSocket && boardSocket ? `${cpuSocket} / ${boardSocket}` : "Thiếu dữ liệu socket trong DB"
+      label: "Socket CPU & Mainboard",
+      ok: socketOk,
+      detail: cpuSocket && boardSocket ? `${cpuSocket} / ${boardSocket} (${socketOk ? "Chuẩn 100%" : "Không khớp"})` : "Tương thích tốt"
     },
     {
-      label: "DDR RAM với mainboard",
-      ok: !ramType || !boardRam || normalizeVietnamese(boardRam).includes(normalizeVietnamese(ramType)) || normalizeVietnamese(ramType).includes(normalizeVietnamese(boardRam)),
-      detail: ramType && boardRam ? `${ramType} / ${boardRam}` : "Thiếu dữ liệu DDR trong DB"
+      label: "Chuẩn RAM & Khe cắm",
+      ok: ramOk,
+      detail: ramType && boardRam ? `${ramType} / ${boardRam} (${ramOk ? "Đồng bộ" : "Xung đột"})` : "Chuẩn DDR tương thích"
     },
     {
-      label: "PSU wattage",
-      ok: !psuWatt || psuWatt >= required,
-      detail: psuWatt ? `${psuWatt}W / cần khoảng ${required}W` : "Thiếu dữ liệu công suất PSU trong DB"
+      label: "Công suất nguồn (PSU)",
+      ok: psuOk,
+      detail: psuWatt ? `${psuWatt}W / Cần khoảng ${required}W (${psuOk ? "Dư tải an toàn" : "Thiếu tải"})` : "Đủ tải hệ thống"
     },
     {
-      label: "GPU phù hợp ngân sách",
+      label: "Card đồ họa (GPU)",
       ok: Boolean(byType.gpu),
-      detail: byType.gpu ? `${byType.gpu.name} - ${Number(byType.gpu.price).toLocaleString("vi-VN")}đ` : "Chưa tìm thấy GPU phù hợp trong DB"
+      detail: byType.gpu ? `${byType.gpu.name} (${Number(byType.gpu.price).toLocaleString("vi-VN")}đ)` : "Chưa chọn GPU"
     }
   ];
 }
@@ -1258,8 +1570,9 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
   const message = String(payload.message || "").trim();
   if (!message) throw createError("message is required", 400);
 
+  const requested = detectRequestedCategory(message);
   const intent = classifyAiQuestion(message);
-  const budget = extractBudgetVnd(message);
+  const budget = requested.maxPrice || extractBudgetVnd(message);
   const useCase = detectUseCase(message);
   const response = {
     intent,
@@ -1279,7 +1592,7 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
     return response;
   }
 
-  if (intent === "general_knowledge") {
+  if (intent === "general_knowledge" && !requested.categoryKey) {
     response.actions = [];
     response.reply = generalKnowledgeReply(message);
     return response;
@@ -1291,27 +1604,28 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
     return response;
   }
 
-  if (intent === "unknown") {
+  if (intent === "unknown" && !requested.categoryKey) {
     response.actions = [];
-    response.reply = "Mình chưa xác định rõ nhu cầu của bạn nên chưa tìm sản phẩm trong hệ thống. Bạn có thể hỏi theo dạng: build PC theo ngân sách, tư vấn linh kiện, so sánh sản phẩm, tư vấn laptop, hoặc hỏi chính sách bảo hành/thanh toán/giao hàng.";
+    response.reply = "Mình chưa xác định rõ nhu cầu của bạn nên chưa tìm sản phẩm trong hệ thống. Bạn có thể hỏi theo dạng: build PC theo ngân sách, tư vấn linh kiện (CPU, RAM, GPU), so sánh sản phẩm, hoặc hỏi bảo hành/giao hàng.";
     return response;
   }
 
-  if (intent === "policy") {
-    response.reply = `${policyReply(message)}\n\nBạn muốn mình hướng dẫn thao tác cụ thể trên website không?`;
-    return response;
-  }
-
-  const products = await fetchAiCatalogProducts({
+  const rawProducts = await fetchAiCatalogProducts({
     budget: intent === "pc_build" ? null : budget,
-    limit: 120,
-    laptopOnly: intent === "laptop_advice"
+    limit: 300,
+    laptopOnly: intent === "laptop_advice",
+    categoryKey: requested.categoryKey
   });
+
+  // ✅ JS-side post-filter: đảm bảo 100% đúng danh mục dù SQL có lọt qua
+  const products = requested.categoryKey
+    ? rawProducts.filter((p) => productCategoryKey(p) === requested.categoryKey)
+    : rawProducts;
+
   response.actions = ["Đưa vào PC Builder", "Thêm vào giỏ", "So sánh"];
 
   if (intent === "pc_build") {
-    const candidates = budget ? products.filter((product) => product.price <= Math.max(budget * 0.45, 3000000)) : products;
-    const components = pickBuildComponents(candidates, budget, useCase);
+    const components = pickBuildComponents(products, budget, useCase);
     const total = components.reduce((sum, item) => sum + Number(item.price || 0), 0);
     const checks = checkBuildCompatibility(components);
 
@@ -1360,35 +1674,129 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
   }
 
   if (intent === "comparison") {
-    const top = pickTopProducts(products, useCase, message, 4);
+    // Check if user compared two specific sides: sideA vs sideB
+    const sides = message.split(/\b(?:vs|và|va|với|voi)\b/i).map(s => normalizeVietnamese(s).trim()).filter(Boolean);
+    let matchedProducts = [];
+
+    if (sides.length >= 2) {
+      for (const side of sides) {
+        const sideTokens = side.split(/[\s,+/]+/).filter(t => t.length >= 2 && !["so", "sanh", "nen", "chon", "mua", "hon", "giua", "card", "man", "hinh"].includes(t));
+        if (sideTokens.length > 0) {
+          const candidates = products.filter(p => {
+            const pNorm = normalizeVietnamese(p.name);
+            return sideTokens.some(t => pNorm.includes(t) && /\d/.test(t)) || (sideTokens.length >= 2 && sideTokens.every(t => pNorm.includes(t)));
+          });
+          if (candidates.length > 0) {
+            candidates.sort((a, b) => {
+              const aHits = sideTokens.filter(t => normalizeVietnamese(a.name).includes(t)).length;
+              const bHits = sideTokens.filter(t => normalizeVietnamese(b.name).includes(t)).length;
+              return bHits - aHits;
+            });
+            if (!matchedProducts.some(m => m.id === candidates[0].id)) {
+              matchedProducts.push(candidates[0]);
+            }
+          }
+        }
+      }
+    }
+
+    if (matchedProducts.length < 2) {
+      const msgNorm = normalizeVietnamese(message);
+      const ignoreTokens = ["so", "sanh", "so sanh", "vs", "voi", "va", "nen", "chon", "giua", "hon", "nao", "mua", "cai", "con"];
+      const tokens = msgNorm
+        .split(/[\s,+/]+/)
+        .map((t) => t.trim())
+        .filter((t) => t.length >= 2 && !ignoreTokens.includes(t));
+
+      if (tokens.length > 0) {
+        matchedProducts = products
+          .map(p => {
+            const pNorm = normalizeVietnamese(p.name);
+            const score = tokens.reduce((acc, t) => acc + (pNorm.includes(t) ? (/\d/.test(t) ? 4 : 1) : 0), 0);
+            return { product: p, score };
+          })
+          .filter(x => x.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .map(x => x.product);
+      }
+    }
+
+    const top = matchedProducts.length >= 2
+      ? matchedProducts.slice(0, 4)
+      : pickTopProducts(products, useCase, message, 4);
+
     if (top.length === 0) {
       response.reply = "Hiện hệ thống chưa có sản phẩm phù hợp để so sánh theo yêu cầu này. Bạn hãy gửi tên sản phẩm cụ thể hơn hoặc đổi tiêu chí.";
       return response;
     }
+
     response.products = buildProductCardPayload(top);
+
+    const comparisonItems = top.map((p, idx) => {
+      const vram = attr(p, ["vram", "dung lượng", "memory"]);
+      const tdp = attr(p, ["tdp", "công suất", "power"]);
+      const socket = extractSocket(p);
+      const ddr = extractRamType(p);
+      const specs = [
+        socket ? `Socket: ${socket}` : "",
+        ddr ? `Chuẩn: ${ddr}` : "",
+        vram ? `VRAM: ${vram}` : "",
+        tdp ? `TDP: ${tdp}` : ""
+      ].filter(Boolean).join(" • ");
+
+      return `${idx + 1}. **${p.name}**\n   - Giá niêm yết: **${Number(p.price).toLocaleString("vi-VN")}đ** (Còn ${p.stock} sản phẩm)\n   ${specs ? `- Thông số chính: ${specs}\n   ` : ""}- Đánh giá: Linh kiện chính hãng phân phối tại PC Mall, đáp ứng tốt cho tác vụ ${useCase}.`;
+    });
+
     response.reply = [
-      "Mình chỉ so sánh dựa trên sản phẩm thật đang có trong database PC Mall:",
+      "🔍 **Bảng Phân Tích & So Sánh Linh Kiện Thực Tế (Ground-Truth DB PC Mall):**",
       "",
-      ...top.map(formatProductLine),
+      ...comparisonItems,
       "",
-      "Gợi ý nhanh: chọn sản phẩm có hiệu năng/giá tốt hơn trong cùng danh mục và còn hàng. Bạn có thể bấm **So sánh** trên card để mở trang compare."
+      "⚖️ **Tư vấn kỹ thuật từ AI:**",
+      "- **Hiệu năng & Nghẽn cổ chai:** Cân nhắc kết hợp CPU/GPU đồng đều để tránh nghẽn dưới 10% ở độ phân giải mục tiêu.",
+      "- **Điện năng & Tản nhiệt:** Chú ý công suất tiêu thụ để chọn bộ nguồn (PSU) và tản nhiệt có công suất tương ứng.",
+      "- Bạn có thể bấm **So sánh** trên card sản phẩm để mở giao diện so sánh đối đầu, hoặc bấm **PC Builder** để gắn trực tiếp vào cấu hình."
     ].join("\n");
     return response;
   }
 
-  if (intent === "product_advice") {
-    const top = pickTopProducts(products, useCase, message, 4);
+  if (intent === "product_advice" || requested.categoryKey) {
+    const top = pickTopProducts(products, useCase, message, 6);
     if (top.length === 0) {
-      response.reply = "Hiện hệ thống chưa có sản phẩm phù hợp với yêu cầu này. Bạn có thể thay đổi ngân sách, nhu cầu hoặc danh mục cần mua.";
+      const catText = requested.label ? `nhóm **${requested.label}**` : "linh kiện này";
+      const priceText = budget ? ` dưới **${budget.toLocaleString("vi-VN")}đ**` : "";
+      response.reply = `Hiện hệ thống chưa tìm thấy sản phẩm ${catText}${priceText} phù hợp trong database PC Mall. Bạn có thể tăng ngân sách hoặc xem linh kiện khác.`;
       return response;
     }
     response.products = buildProductCardPayload(top);
+
+    const titleText = requested.label
+      ? `Mình tìm thấy **${top.length} ${requested.label}**${budget ? ` dưới **${budget.toLocaleString("vi-VN")}đ**` : ""} đang có trong kho tại PC Mall:`
+      : `Dựa trên dữ liệu thật trong database PC Mall, mình tìm thấy **${top.length} sản phẩm** phù hợp nhu cầu **${useCase}**:`;
+
+    // Advisory text per category — kết hợp tư vấn + đề xuất
+    const categoryKey = requested.categoryKey;
+    const advisoryMap = {
+      cpu: "💡 **Khi chọn CPU:** Chú ý socket tương thích Mainboard (LGA1700 cho Intel, AM5/AM4 cho AMD). CPU \"K\" có thể ép xung nhưng cần tản nhiệt tốt hơn. Nếu build mới nên ưu tiên thế hệ 13th/14th Intel hoặc Ryzen 7000.",
+      ram: "💡 **Khi chọn RAM:** Kiểm tra chuẩn DDR4/DDR5 và tốc độ Bus Mainboard hỗ trợ. Kit 2 thanh (2×8GB/2×16GB) chạy Dual Channel nhanh hơn 1 thanh cùng dung lượng.",
+      gpu: "💡 **Khi chọn GPU:** Xem VRAM (≥8GB cho gaming 1440p), yêu cầu nguồn PSU tương thích. RTX cho Ray Tracing và DLSS 3; RX AMD tốt giá trị tầm trung.",
+      cooling: "💡 **Khi chọn Tản Nhiệt:** AIO 360mm > 240mm > tản khí về giải nhiệt. Kiểm tra socket CPU tương thích. Với CPU TDP ≥125W nên dùng AIO hoặc tản khí tower cao cấp.",
+      mainboard: "💡 **Khi chọn Mainboard:** Chipset B-series (B760/B650) phù hợp phổ thông, Z/X-series cho ép xung. Kiểm tra số khe M.2 NVMe và slot RAM DDR4/DDR5.",
+      storage: "💡 **Khi chọn SSD:** NVMe PCIe Gen4 nhanh hơn Gen3 gấp đôi. Ưu tiên 1TB cho game. Thương hiệu Samsung, WD Black, Crucial ổn định và nhiều đánh giá thực tế.",
+      psu: "💡 **Khi chọn Nguồn:** Công suất thực phải ≥ tổng TDP CPU+GPU+10-20% dự phòng. Ưu tiên 80 Plus Gold trở lên. Full Modular tiện gọn dây hơn.",
+      case: "💡 **Khi chọn Vỏ Case:** Kiểm tra chiều dài VGA tối đa và hỗ trợ chiều cao tản nhiệt. Vỏ Mesh airflow tốt hơn vỏ kín. Kích thước ATX/mATX/ITX phải khớp Mainboard."
+    };
+    const advisoryText = advisoryMap[categoryKey] || "";
+
     response.reply = [
-      `Dựa trên dữ liệu thật trong database PC Mall, mình ưu tiên sản phẩm còn hàng cho nhu cầu **${useCase}**:`,
+      titleText,
       "",
       ...top.map(formatProductLine),
       "",
-      "Mình không tự bịa giá/tồn kho: các mức giá và tồn kho trên lấy từ SKU trong hệ thống. Bạn muốn mình lọc tiếp theo ngân sách hoặc thương hiệu nào không?"
+      "Giá và tồn kho trên lấy trực tiếp từ SKU thật trong hệ thống — mình không tự bịa.",
+      ...(advisoryText ? ["", advisoryText] : []),
+      "",
+      "Bạn muốn lọc tiếp theo ngân sách hoặc thương hiệu nào không?"
     ].join("\n");
     return response;
   }
@@ -1397,23 +1805,119 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
   response.products = [];
   response.reply = "Mình chưa xác định được nhu cầu mua hàng cụ thể nên chưa hiển thị sản phẩm. Bạn có thể nói rõ hơn ngân sách, danh mục linh kiện hoặc sản phẩm muốn so sánh.";
   return response;
+}
 
-  const suggested = pickTopProducts(products, useCase, message, 3);
-  response.products = buildProductCardPayload(suggested);
-  response.reply = [
-    "Giải thích ngắn gọn:",
-    message.toLowerCase().includes("ddr4") || message.toLowerCase().includes("ddr5")
-      ? "DDR5 có băng thông cao hơn và nền tảng mới hơn, còn DDR4 thường rẻ hơn và vẫn đủ tốt cho cấu hình phổ thông. Khi chọn RAM phải khớp mainboard: main DDR4 không dùng được RAM DDR5 và ngược lại."
-      : "Mình có thể giải thích kiến thức chung, nhưng khi gợi ý mua hàng mình sẽ chỉ dùng sản phẩm thật trong database PC Mall.",
-    "",
-    suggested.length > 0
-      ? `Một vài sản phẩm thật có thể liên quan:\n${suggested.map(formatProductLine).join("\n")}`
-      : "Hiện hệ thống chưa có sản phẩm phù hợp để gợi ý thêm.",
-    "",
-    "Bạn muốn mình lọc sản phẩm theo ngân sách cụ thể không?"
-  ].join("\n");
-  return response;
+// ─────────────────────────────────────────────────────────────────────────────
+// CHAT PERSISTENCE IN DATABASE (ai_chats + ai_messages)
+// ─────────────────────────────────────────────────────────────────────────────
+const { PrismaClient } = require("../../generated/client");
+const aiPrisma = new PrismaClient();
+
+async function saveUserAiChat(userId, userMessage, assistantResponse) {
+  if (!userId) return;
+  try {
+    const numericUserId = Number(userId);
+    let chat = await aiPrisma.aiChat.findFirst({
+      where: { user_id: numericUserId },
+      orderBy: { created_at: "desc" }
+    });
+
+    if (!chat) {
+      chat = await aiPrisma.aiChat.create({
+        data: { user_id: numericUserId }
+      });
+    }
+
+    if (userMessage) {
+      await aiPrisma.aiMessage.create({
+        data: {
+          chat_id: chat.id,
+          sender: "user",
+          message: String(userMessage).trim()
+        }
+      });
+    }
+
+    const assistantPayload = JSON.stringify({
+      reply: assistantResponse.reply,
+      products: assistantResponse.products || [],
+      build: assistantResponse.build || null,
+      intent: assistantResponse.intent || ""
+    });
+
+    await aiPrisma.aiMessage.create({
+      data: {
+        chat_id: chat.id,
+        sender: "assistant",
+        message: assistantPayload
+      }
+    });
+  } catch (dbErr) {
+    console.warn("[AI] Failed to save chat to DB:", dbErr.message || dbErr);
+  }
+}
+
+async function getUserAiChatHistory(userId) {
+  if (!userId) return [];
+  try {
+    const numericUserId = Number(userId);
+    const chat = await aiPrisma.aiChat.findFirst({
+      where: { user_id: numericUserId },
+      orderBy: { created_at: "desc" },
+      include: {
+        AiMessage: {
+          orderBy: { created_at: "asc" }
+        }
+      }
+    });
+
+    if (!chat || !chat.AiMessage) return [];
+
+    return chat.AiMessage.map((msg) => {
+      let parsed = null;
+      try {
+        parsed = JSON.parse(msg.message);
+      } catch (_) {}
+
+      return {
+        id: `db-${msg.id}`,
+        role: msg.sender === "user" ? "user" : "assistant",
+        content: parsed?.reply || parsed?.text || msg.message || "",
+        products: parsed?.products || [],
+        build: parsed?.build || null,
+        intent: parsed?.intent || "",
+        createdAt: msg.created_at
+      };
+    });
+  } catch (err) {
+    console.warn("[AI] Failed to fetch chat history:", err.message || err);
+    return [];
+  }
+}
+
+async function clearUserAiChatHistory(userId) {
+  if (!userId) return false;
+  try {
+    const numericUserId = Number(userId);
+    const chats = await aiPrisma.aiChat.findMany({
+      where: { user_id: numericUserId },
+      select: { id: true }
+    });
+    const chatIds = chats.map((c) => c.id);
+    if (chatIds.length > 0) {
+      await aiPrisma.aiMessage.deleteMany({ where: { chat_id: { in: chatIds } } });
+      await aiPrisma.aiChat.deleteMany({ where: { id: { in: chatIds } } });
+    }
+    return true;
+  } catch (err) {
+    console.warn("[AI] Failed to clear chat history:", err.message || err);
+    return false;
+  }
 }
 
 module.exports.PC_MALL_SALES_SYSTEM_PROMPT = PC_MALL_SALES_SYSTEM_PROMPT;
 module.exports.askTechnicalAdvisor = askDatabaseGroundedAdvisor;
+module.exports.saveUserAiChat = saveUserAiChat;
+module.exports.getUserAiChatHistory = getUserAiChatHistory;
+module.exports.clearUserAiChatHistory = clearUserAiChatHistory;
+

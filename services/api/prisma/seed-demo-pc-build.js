@@ -1,8 +1,9 @@
-﻿const path = require("path");
+const path = require("path");
 const dotenv = require("dotenv");
 const mysql = require("mysql2/promise");
 
 dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
+const { SKU_IMAGE_MAP } = require("../scripts/sku-image-map");
 
 function slugify(input) {
   return String(input || "")
@@ -11,10 +12,6 @@ function slugify(input) {
     .replace(/[^a-z0-9\s-]/g, "")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-");
-}
-
-function pickColumn(columns, candidates, defaultValue = null) {
-  return candidates.find((column) => columns.includes(column)) || defaultValue;
 }
 
 async function getTableColumns(connection, databaseName, tableName) {
@@ -33,7 +30,6 @@ async function getTableColumns(connection, databaseName, tableName) {
 
 function buildInsertParts(record) {
   const entries = Object.entries(record).filter(([, value]) => value !== undefined);
-
   return {
     fields: entries.map(([field]) => field),
     values: entries.map(([, value]) => value),
@@ -47,7 +43,6 @@ async function insertRecord(connection, tableName, record) {
     `INSERT INTO ${tableName} (${fields.join(", ")}) VALUES (${placeholders.join(", ")})`,
     values
   );
-
   return result.insertId;
 }
 
@@ -56,362 +51,8 @@ async function findOne(connection, sql, params) {
   return rows[0] || null;
 }
 
-async function getSchema(connection, databaseName) {
-  const [categoryColumns, brandColumns, productColumns, variantColumns, attributeColumns, attributeValueColumns, pvavColumns, compatibilityRuleColumns, compatibilityDetailColumns] = await Promise.all([
-    getTableColumns(connection, databaseName, "categories"),
-    getTableColumns(connection, databaseName, "brands"),
-    getTableColumns(connection, databaseName, "products"),
-    getTableColumns(connection, databaseName, "product_variants"),
-    getTableColumns(connection, databaseName, "attributes"),
-    getTableColumns(connection, databaseName, "attribute_values"),
-    getTableColumns(connection, databaseName, "product_variant_attribute_values"),
-    getTableColumns(connection, databaseName, "compatibility_rules"),
-    getTableColumns(connection, databaseName, "compatibility_rule_details")
-  ]);
-
-  return {
-    categories: {
-      table: "categories",
-      id: pickColumn(categoryColumns, ["id"]),
-      name: pickColumn(categoryColumns, ["name"]),
-      slug: pickColumn(categoryColumns, ["slug"]),
-      parentId: pickColumn(categoryColumns, ["parent_id"], null),
-      description: pickColumn(categoryColumns, ["description"], null),
-      status: pickColumn(categoryColumns, ["status"], null),
-      isActive: pickColumn(categoryColumns, ["is_active"], null),
-      createdAt: pickColumn(categoryColumns, ["created_at"], null),
-      updatedAt: pickColumn(categoryColumns, ["updated_at"], null)
-    },
-    brands: {
-      table: "brands",
-      id: pickColumn(brandColumns, ["id"]),
-      name: pickColumn(brandColumns, ["name"]),
-      slug: pickColumn(brandColumns, ["slug"], null),
-      description: pickColumn(brandColumns, ["description"], null),
-      logo: pickColumn(brandColumns, ["logo_url", "logo", "image_url"], null),
-      status: pickColumn(brandColumns, ["status"], null),
-      isActive: pickColumn(brandColumns, ["is_active"], null),
-      createdAt: pickColumn(brandColumns, ["created_at"], null),
-      updatedAt: pickColumn(brandColumns, ["updated_at"], null)
-    },
-    products: {
-      table: "products",
-      id: pickColumn(productColumns, ["id"]),
-      name: pickColumn(productColumns, ["name"]),
-      slug: pickColumn(productColumns, ["slug"]),
-      description: pickColumn(productColumns, ["description", "short_description"], null),
-      categoryId: pickColumn(productColumns, ["category_id"]),
-      brandId: pickColumn(productColumns, ["brand_id"]),
-      sku: pickColumn(productColumns, ["sku"], null),
-      price: pickColumn(productColumns, ["price", "base_price"], null),
-      stock: pickColumn(productColumns, ["stock", "stock_quantity"], null),
-      status: pickColumn(productColumns, ["status"], null),
-      isActive: pickColumn(productColumns, ["is_active"], null),
-      createdAt: pickColumn(productColumns, ["created_at"], null),
-      updatedAt: pickColumn(productColumns, ["updated_at"], null)
-    },
-    variants: {
-      table: "product_variants",
-      id: pickColumn(variantColumns, ["id"]),
-      productId: pickColumn(variantColumns, ["product_id"]),
-      sku: pickColumn(variantColumns, ["sku"]),
-      price: pickColumn(variantColumns, ["price"]),
-      stock: pickColumn(variantColumns, ["stock_quantity", "stock", "quantity"], null),
-      image: pickColumn(variantColumns, ["image_url", "thumbnail_url", "thumbnail", "image"], null),
-      status: pickColumn(variantColumns, ["status"], null),
-      isActive: pickColumn(variantColumns, ["is_active"], null),
-      createdAt: pickColumn(variantColumns, ["created_at"], null),
-      updatedAt: pickColumn(variantColumns, ["updated_at"], null)
-    },
-    attributes: {
-      table: "attributes",
-      id: pickColumn(attributeColumns, ["id"]),
-      name: pickColumn(attributeColumns, ["name"]),
-      slug: pickColumn(attributeColumns, ["slug", "code"], null),
-      status: pickColumn(attributeColumns, ["status"], null),
-      isActive: pickColumn(attributeColumns, ["is_active"], null),
-      createdAt: pickColumn(attributeColumns, ["created_at"], null),
-      updatedAt: pickColumn(attributeColumns, ["updated_at"], null)
-    },
-    attributeValues: {
-      table: "attribute_values",
-      id: pickColumn(attributeValueColumns, ["id"]),
-      attributeId: pickColumn(attributeValueColumns, ["attribute_id"]),
-      value: pickColumn(attributeValueColumns, ["value"]),
-      slug: pickColumn(attributeValueColumns, ["slug"], null),
-      status: pickColumn(attributeValueColumns, ["status"], null),
-      isActive: pickColumn(attributeValueColumns, ["is_active"], null),
-      createdAt: pickColumn(attributeValueColumns, ["created_at"], null),
-      updatedAt: pickColumn(attributeValueColumns, ["updated_at"], null)
-    },
-    pvav: {
-      table: "product_variant_attribute_values",
-      id: pickColumn(pvavColumns, ["id"]),
-      productVariantId: pickColumn(pvavColumns, ["product_variant_id", "variant_id"]),
-      attributeValueId: pickColumn(pvavColumns, ["attribute_value_id"]),
-      createdAt: pickColumn(pvavColumns, ["created_at"], null),
-      updatedAt: pickColumn(pvavColumns, ["updated_at"], null)
-    },
-    compatibilityRules: {
-      table: "compatibility_rules",
-      id: pickColumn(compatibilityRuleColumns, ["id"]),
-      sourceCategoryId: pickColumn(compatibilityRuleColumns, ["source_category_id"]),
-      targetCategoryId: pickColumn(compatibilityRuleColumns, ["target_category_id"]),
-      sourceAttributeKey: pickColumn(compatibilityRuleColumns, ["source_attribute_key"], null),
-      targetAttributeKey: pickColumn(compatibilityRuleColumns, ["target_attribute_key"], null),
-      operator: pickColumn(compatibilityRuleColumns, ["operator"], null),
-      description: pickColumn(compatibilityRuleColumns, ["description"], null),
-      status: pickColumn(compatibilityRuleColumns, ["status"], null),
-      isActive: pickColumn(compatibilityRuleColumns, ["is_active"], null),
-      createdAt: pickColumn(compatibilityRuleColumns, ["created_at"], null),
-      updatedAt: pickColumn(compatibilityRuleColumns, ["updated_at"], null)
-    },
-    compatibilityRuleDetails: {
-      table: "compatibility_rule_details",
-      id: pickColumn(compatibilityDetailColumns, ["id"]),
-      ruleId: pickColumn(compatibilityDetailColumns, ["rule_id", "compatibility_rule_id"], null),
-      sourceValueId: pickColumn(compatibilityDetailColumns, ["source_attribute_value_id", "source_value_id"], null),
-      targetValueId: pickColumn(compatibilityDetailColumns, ["target_attribute_value_id", "target_value_id"], null),
-      sourceValue: pickColumn(compatibilityDetailColumns, ["source_value"], null),
-      targetValue: pickColumn(compatibilityDetailColumns, ["target_value"], null),
-      createdAt: pickColumn(compatibilityDetailColumns, ["created_at"], null),
-      updatedAt: pickColumn(compatibilityDetailColumns, ["updated_at"], null)
-    }
-  };
-}
-
-async function upsertByName(connection, tableName, idColumn, nameColumn, nameValue) {
-  return findOne(
-    connection,
-    `SELECT ${idColumn} AS id FROM ${tableName} WHERE ${nameColumn} = ? LIMIT 1`,
-    [nameValue]
-  );
-}
-
-function withCommonColumns(record, schemaPart, options = {}) {
-  const next = { ...record };
-
-  if (schemaPart.status && options.status !== undefined) {
-    next[schemaPart.status] = options.status;
-  }
-
-  if (schemaPart.isActive && options.isActive !== undefined) {
-    next[schemaPart.isActive] = options.isActive;
-  }
-
-  if (schemaPart.createdAt && options.includeTimestamps) {
-    next[schemaPart.createdAt] = new Date();
-  }
-
-  if (schemaPart.updatedAt && options.includeTimestamps) {
-    next[schemaPart.updatedAt] = new Date();
-  }
-
-  return next;
-}
-
-async function ensureCategory(connection, schema, category) {
-  const existing = await upsertByName(connection, schema.categories.table, schema.categories.id, schema.categories.name, category.name);
-  if (existing) return existing.id;
-
-  const record = withCommonColumns({
-    [schema.categories.name]: category.name,
-    [schema.categories.slug]: slugify(category.name),
-    ...(schema.categories.description ? { [schema.categories.description]: `${category.name} components` } : {}),
-    ...(schema.categories.parentId ? { [schema.categories.parentId]: null } : {})
-  }, schema.categories, { status: "ACTIVE", isActive: 1, includeTimestamps: true });
-
-  return insertRecord(connection, schema.categories.table, record);
-}
-
-async function ensureBrand(connection, schema, brand) {
-  const existing = await upsertByName(connection, schema.brands.table, schema.brands.id, schema.brands.name, brand.name);
-  if (existing) return existing.id;
-
-  const record = withCommonColumns({
-    [schema.brands.name]: brand.name,
-    ...(schema.brands.slug ? { [schema.brands.slug]: slugify(brand.name) } : {}),
-    ...(schema.brands.description ? { [schema.brands.description]: `${brand.name} demo brand` } : {}),
-    ...(schema.brands.logo ? { [schema.brands.logo]: null } : {})
-  }, schema.brands, { status: "ACTIVE", isActive: 1, includeTimestamps: true });
-
-  return insertRecord(connection, schema.brands.table, record);
-}
-
-async function ensureAttribute(connection, schema, attributeName) {
-  const existing = await upsertByName(connection, schema.attributes.table, schema.attributes.id, schema.attributes.name, attributeName);
-  if (existing) return existing.id;
-
-  const record = withCommonColumns({
-    [schema.attributes.name]: attributeName,
-    ...(schema.attributes.slug ? { [schema.attributes.slug]: slugify(attributeName) } : {})
-  }, schema.attributes, { status: "ACTIVE", isActive: 1, includeTimestamps: true });
-
-  return insertRecord(connection, schema.attributes.table, record);
-}
-
-async function ensureAttributeValue(connection, schema, attributeId, value) {
-  const [rows] = await connection.execute(
-    `
-      SELECT ${schema.attributeValues.id} AS id
-      FROM ${schema.attributeValues.table}
-      WHERE ${schema.attributeValues.attributeId} = ?
-        AND ${schema.attributeValues.value} = ?
-      LIMIT 1
-    `,
-    [attributeId, value]
-  );
-
-  if (rows[0]) return rows[0].id;
-
-  const record = withCommonColumns({
-    [schema.attributeValues.attributeId]: attributeId,
-    [schema.attributeValues.value]: value,
-    ...(schema.attributeValues.slug ? { [schema.attributeValues.slug]: slugify(value) } : {})
-  }, schema.attributeValues, { status: "ACTIVE", isActive: 1, includeTimestamps: true });
-
-  return insertRecord(connection, schema.attributeValues.table, record);
-}
-
-async function ensureProduct(connection, schema, product) {
-  const [rows] = await connection.execute(
-    `SELECT ${schema.products.id} AS id FROM ${schema.products.table} WHERE ${schema.products.slug} = ? LIMIT 1`,
-    [product.slug]
-  );
-
-  if (rows[0]) return rows[0].id;
-
-  const record = withCommonColumns({
-    [schema.products.name]: product.name,
-    [schema.products.slug]: product.slug,
-    [schema.products.categoryId]: product.categoryId,
-    [schema.products.brandId]: product.brandId,
-    ...(schema.products.description ? { [schema.products.description]: product.description } : {}),
-    ...(schema.products.sku ? { [schema.products.sku]: `${product.slug.toUpperCase()}-BASE` } : {}),
-    ...(schema.products.price ? { [schema.products.price]: product.basePrice } : {}),
-    ...(schema.products.stock ? { [schema.products.stock]: product.baseStock } : {})
-  }, schema.products, { status: "ACTIVE", isActive: 1, includeTimestamps: true });
-
-  return insertRecord(connection, schema.products.table, record);
-}
-
-async function ensureVariant(connection, schema, variant) {
-  const [rows] = await connection.execute(
-    `SELECT ${schema.variants.id} AS id FROM ${schema.variants.table} WHERE ${schema.variants.sku} = ? LIMIT 1`,
-    [variant.sku]
-  );
-
-  if (rows[0]) return rows[0].id;
-
-  const record = withCommonColumns({
-    [schema.variants.productId]: variant.productId,
-    [schema.variants.sku]: variant.sku,
-    [schema.variants.price]: variant.price,
-    ...(schema.variants.stock ? { [schema.variants.stock]: variant.stock } : {}),
-    ...(schema.variants.image ? { [schema.variants.image]: variant.imageUrl || null } : {})
-  }, schema.variants, { status: "ACTIVE", isActive: 1, includeTimestamps: true });
-
-  return insertRecord(connection, schema.variants.table, record);
-}
-
-async function ensureVariantAttributeValue(connection, schema, variantId, attributeValueId) {
-  const [rows] = await connection.execute(
-    `
-      SELECT ${schema.pvav.id} AS id
-      FROM ${schema.pvav.table}
-      WHERE ${schema.pvav.productVariantId} = ?
-        AND ${schema.pvav.attributeValueId} = ?
-      LIMIT 1
-    `,
-    [variantId, attributeValueId]
-  );
-
-  if (rows[0]) return rows[0].id;
-
-  const record = {
-    [schema.pvav.productVariantId]: variantId,
-    [schema.pvav.attributeValueId]: attributeValueId,
-    ...(schema.pvav.createdAt ? { [schema.pvav.createdAt]: new Date() } : {}),
-    ...(schema.pvav.updatedAt ? { [schema.pvav.updatedAt]: new Date() } : {})
-  };
-
-  return insertRecord(connection, schema.pvav.table, record);
-}
-
-async function ensureCompatibilityRule(connection, schema, rule) {
-  const [rows] = await connection.execute(
-    `
-      SELECT ${schema.compatibilityRules.id} AS id
-      FROM ${schema.compatibilityRules.table}
-      WHERE ${schema.compatibilityRules.sourceCategoryId} = ?
-        AND ${schema.compatibilityRules.targetCategoryId} = ?
-      LIMIT 1
-    `,
-    [rule.sourceCategoryId, rule.targetCategoryId]
-  );
-
-  if (rows[0]) return rows[0].id;
-
-  const record = withCommonColumns({
-    [schema.compatibilityRules.sourceCategoryId]: rule.sourceCategoryId,
-    [schema.compatibilityRules.targetCategoryId]: rule.targetCategoryId,
-    ...(schema.compatibilityRules.sourceAttributeKey ? { [schema.compatibilityRules.sourceAttributeKey]: rule.sourceAttributeKey } : {}),
-    ...(schema.compatibilityRules.targetAttributeKey ? { [schema.compatibilityRules.targetAttributeKey]: rule.targetAttributeKey } : {}),
-    ...(schema.compatibilityRules.operator ? { [schema.compatibilityRules.operator]: rule.operator } : {}),
-    ...(schema.compatibilityRules.description ? { [schema.compatibilityRules.description]: rule.description } : {})
-  }, schema.compatibilityRules, { status: "ACTIVE", isActive: 1, includeTimestamps: true });
-
-  return insertRecord(connection, schema.compatibilityRules.table, record);
-}
-
-async function ensureCompatibilityRuleDetail(connection, schema, detail) {
-  if (!schema.compatibilityRuleDetails.ruleId) {
-    return null;
-  }
-
-  const findConditions = [`${schema.compatibilityRuleDetails.ruleId} = ?`];
-  const params = [detail.ruleId];
-
-  if (schema.compatibilityRuleDetails.sourceValueId && schema.compatibilityRuleDetails.targetValueId) {
-    findConditions.push(`${schema.compatibilityRuleDetails.sourceValueId} = ?`);
-    findConditions.push(`${schema.compatibilityRuleDetails.targetValueId} = ?`);
-    params.push(detail.sourceValueId, detail.targetValueId);
-  } else if (schema.compatibilityRuleDetails.sourceValue && schema.compatibilityRuleDetails.targetValue) {
-    findConditions.push(`${schema.compatibilityRuleDetails.sourceValue} = ?`);
-    findConditions.push(`${schema.compatibilityRuleDetails.targetValue} = ?`);
-    params.push(detail.sourceValue, detail.targetValue);
-  } else {
-    return null;
-  }
-
-  const [rows] = await connection.execute(
-    `
-      SELECT ${schema.compatibilityRuleDetails.id} AS id
-      FROM ${schema.compatibilityRuleDetails.table}
-      WHERE ${findConditions.join(" AND ")}
-      LIMIT 1
-    `,
-    params
-  );
-
-  if (rows[0]) return rows[0].id;
-
-  const record = {
-    [schema.compatibilityRuleDetails.ruleId]: detail.ruleId,
-    ...(schema.compatibilityRuleDetails.sourceValueId ? { [schema.compatibilityRuleDetails.sourceValueId]: detail.sourceValueId } : {}),
-    ...(schema.compatibilityRuleDetails.targetValueId ? { [schema.compatibilityRuleDetails.targetValueId]: detail.targetValueId } : {}),
-    ...(schema.compatibilityRuleDetails.sourceValue ? { [schema.compatibilityRuleDetails.sourceValue]: detail.sourceValue } : {}),
-    ...(schema.compatibilityRuleDetails.targetValue ? { [schema.compatibilityRuleDetails.targetValue]: detail.targetValue } : {}),
-    ...(schema.compatibilityRuleDetails.createdAt ? { [schema.compatibilityRuleDetails.createdAt]: new Date() } : {}),
-    ...(schema.compatibilityRuleDetails.updatedAt ? { [schema.compatibilityRuleDetails.updatedAt]: new Date() } : {})
-  };
-
-  return insertRecord(connection, schema.compatibilityRuleDetails.table, record);
-}
-
 async function main() {
   const databaseName = process.env.DB_NAME;
-
   if (!databaseName) {
     throw new Error("DB_NAME is required in services/api/.env");
   }
@@ -426,311 +67,527 @@ async function main() {
   });
 
   try {
-    const schema = await getSchema(connection, databaseName);
+    console.log("🚀 Starting Demo PC Build & Compatibility Seeding...");
 
-    const categories = {};
-    for (const name of ["CPU", "MAINBOARD", "RAM", "GPU", "STORAGE", "PSU", "CASE"]) {
-      categories[name] = await ensureCategory(connection, schema, { name });
+    // 1. Ensure Categories
+    const categoryNames = ["CPU", "MAINBOARD", "RAM", "GPU", "SSD", "PSU", "CASE", "COOLING"];
+    const categoryIds = {};
+
+    for (const name of categoryNames) {
+      let row = await findOne(connection, "SELECT id FROM categories WHERE name = ? LIMIT 1", [name]);
+      if (!row) {
+        const insertId = await insertRecord(connection, "categories", { name });
+        categoryIds[name] = insertId;
+      } else {
+        categoryIds[name] = row.id;
+      }
+    }
+    categoryIds.STORAGE = categoryIds.SSD;
+    console.log(`✓ Categories verified (${Object.keys(categoryIds).length} categories)`);
+
+    // 2. Ensure Brands
+    const brandNames = ["Intel", "AMD", "ASUS", "MSI", "Gigabyte", "Corsair", "Cooler Master", "Samsung", "Kingston", "DeepCool", "Thermalright"];
+    const brandIds = {};
+
+    for (const name of brandNames) {
+      let row = await findOne(connection, "SELECT id FROM brands WHERE name = ? LIMIT 1", [name]);
+      if (!row) {
+        const insertId = await insertRecord(connection, "brands", {
+          name,
+          slug: slugify(name),
+          status: "ACTIVE",
+          is_active: 1
+        });
+        brandIds[name] = insertId;
+      } else {
+        brandIds[name] = row.id;
+      }
+    }
+    console.log(`✓ Brands verified (${Object.keys(brandIds).length} brands)`);
+
+    // 3. Ensure Attributes and Values
+    const attributes = ["socket", "ram_type", "wattage", "form_factor", "storage_type"];
+    const attributeIds = {};
+
+    for (const name of attributes) {
+      let row = await findOne(connection, "SELECT id FROM attributes WHERE name = ? LIMIT 1", [name]);
+      if (!row) {
+        attributeIds[name] = await insertRecord(connection, "attributes", { name });
+      } else {
+        attributeIds[name] = row.id;
+      }
     }
 
-    const brands = {};
-    for (const name of ["Intel", "AMD", "ASUS", "MSI", "Corsair", "Cooler Master", "Samsung", "Kingston"]) {
-      brands[name] = await ensureBrand(connection, schema, { name });
+    const attributeValueIds = {};
+    async function ensureAttrVal(attrKey, val) {
+      const aId = attributeIds[attrKey];
+      let row = await findOne(connection, "SELECT id FROM attribute_values WHERE attribute_id = ? AND value = ? LIMIT 1", [aId, val]);
+      if (!row) {
+        const id = await insertRecord(connection, "attribute_values", { attribute_id: aId, value: val });
+        attributeValueIds[`${attrKey}:${val}`] = id;
+      } else {
+        attributeValueIds[`${attrKey}:${val}`] = row.id;
+      }
     }
 
-    const attributes = {};
-    for (const name of ["socket", "ram_type", "wattage", "form_factor", "storage_type"]) {
-      attributes[name] = await ensureAttribute(connection, schema, name);
-    }
+    await ensureAttrVal("socket", "LGA1700");
+    await ensureAttrVal("socket", "AM5");
+    await ensureAttrVal("socket", "AM4");
+    await ensureAttrVal("socket", "LGA1200");
 
-    const attributeValues = {};
-    async function addAttributeValue(attributeKey, value) {
-      const key = `${attributeKey}:${value}`;
-      attributeValues[key] = await ensureAttributeValue(connection, schema, attributes[attributeKey], value);
-    }
+    await ensureAttrVal("ram_type", "DDR5");
+    await ensureAttrVal("ram_type", "DDR4");
 
-    await addAttributeValue("socket", "LGA1700");
-    await addAttributeValue("socket", "AM5");
-    await addAttributeValue("ram_type", "DDR4");
-    await addAttributeValue("ram_type", "DDR5");
-    await addAttributeValue("wattage", "650W");
-    await addAttributeValue("wattage", "750W");
-    await addAttributeValue("form_factor", "ATX");
-    await addAttributeValue("form_factor", "M-ATX");
-    await addAttributeValue("storage_type", "NVME");
-    await addAttributeValue("storage_type", "SATA");
+    await ensureAttrVal("wattage", "550W");
+    await ensureAttrVal("wattage", "650W");
+    await ensureAttrVal("wattage", "750W");
 
-    const products = [
+    await ensureAttrVal("form_factor", "ATX");
+    await ensureAttrVal("form_factor", "M-ATX");
+
+    await ensureAttrVal("storage_type", "NVME");
+    await ensureAttrVal("storage_type", "SATA");
+
+    console.log("✓ Core Attributes & Values verified");
+
+    // 4. Ensure Demo Component Products
+    const demoComponents = [
       {
         name: "Intel Core i5-13400F",
         slug: "intel-core-i5-13400f",
-        description: "CPU gaming tầm trung, socket LGA1700",
-        categoryId: categories.CPU,
-        brandId: brands.Intel,
-        basePrice: 4800000,
-        baseStock: 20,
-        variants: [
-          {
-            sku: "CPU-I5-13400F-TRAY",
-            price: 4800000,
-            stock: 20,
-            imageUrl: null,
-            specs: { socket: "LGA1700" }
-          }
-        ]
+        description: "CPU 10 nhân 16 luồng Socket LGA1700 tối ưu gaming và đa nhiệm",
+        categoryId: categoryIds.CPU,
+        brandId: brandIds.Intel,
+        price: 5200000,
+        sku: "CPU-INTEL-I5-13400F",
+        specs: { socket: "LGA1700" }
       },
       {
-        name: "AMD Ryzen 5 7600",
-        slug: "amd-ryzen-5-7600",
-        description: "CPU AM5 phù hợp build DDR5 mới",
-        categoryId: categories.CPU,
-        brandId: brands.AMD,
-        basePrice: 5600000,
-        baseStock: 18,
-        variants: [
-          {
-            sku: "CPU-R5-7600-BOX",
-            price: 5600000,
-            stock: 18,
-            imageUrl: null,
-            specs: { socket: "AM5" }
-          }
-        ]
+        name: "AMD Ryzen 7 7800X3D",
+        slug: "amd-ryzen-7-7800x3d",
+        description: "Ông hoàng gaming 8 nhân 16 luồng bộ nhớ đệm 3D V-Cache đỉnh cao",
+        categoryId: categoryIds.CPU,
+        brandId: brandIds.AMD,
+        price: 10800000,
+        sku: "CPU-AMD-R7-7800X3D",
+        specs: { socket: "AM5" }
       },
       {
-        name: "ASUS PRIME B760M-A",
-        slug: "asus-prime-b760m-a",
-        description: "Mainboard Intel B760 hỗ trợ DDR5, mATX",
-        categoryId: categories.MAINBOARD,
-        brandId: brands.ASUS,
-        basePrice: 3200000,
-        baseStock: 14,
-        variants: [
-          {
-            sku: "MB-ASUS-B760M-A",
-            price: 3200000,
-            stock: 14,
-            imageUrl: null,
-            specs: { socket: "LGA1700", ram_type: "DDR5", form_factor: "M-ATX" }
-          }
-        ]
+        name: "Intel Core i3-12100F",
+        slug: "intel-core-i3-12100f",
+        description: "CPU 4 nhân 8 luồng quốc dân cho học tập văn phòng và eSports",
+        categoryId: categoryIds.CPU,
+        brandId: brandIds.Intel,
+        price: 2150000,
+        sku: "CPU-INTEL-I3-12100F",
+        specs: { socket: "LGA1700" }
       },
       {
-        name: "MSI PRO B650-P WIFI",
-        slug: "msi-pro-b650-p-wifi",
-        description: "Mainboard AMD B650 hỗ trợ DDR5, ATX",
-        categoryId: categories.MAINBOARD,
-        brandId: brands.MSI,
-        basePrice: 4500000,
-        baseStock: 10,
-        variants: [
-          {
-            sku: "MB-MSI-B650-P-WIFI",
-            price: 4500000,
-            stock: 10,
-            imageUrl: null,
-            specs: { socket: "AM5", ram_type: "DDR5", form_factor: "ATX" }
-          }
-        ]
+        name: "ASUS Prime B760M-A WIFI DDR5",
+        slug: "asus-prime-b760m-a-wifi-ddr5",
+        description: "Bo mạch chủ Intel B760 Socket LGA1700 hỗ trợ RAM DDR5 và PCIe 4.0",
+        categoryId: categoryIds.MAINBOARD,
+        brandId: brandIds.ASUS,
+        price: 3900000,
+        sku: "MB-ASUS-B760M-A-D5",
+        specs: { socket: "LGA1700", ram_type: "DDR5", form_factor: "M-ATX" }
       },
       {
-        name: "Corsair Vengeance 32GB DDR5",
-        slug: "corsair-vengeance-32gb-ddr5",
-        description: "RAM DDR5 32GB kit cho gaming và làm việc",
-        categoryId: categories.RAM,
-        brandId: brands.Corsair,
-        basePrice: 2800000,
-        baseStock: 25,
-        variants: [
-          {
-            sku: "RAM-CORSAIR-DDR5-32GB",
-            price: 2800000,
-            stock: 25,
-            imageUrl: null,
-            specs: { ram_type: "DDR5" }
-          }
-        ]
+        name: "MSI PRO B650M-A WIFI",
+        slug: "msi-pro-b650m-a-wifi",
+        description: "Bo mạch chủ AMD B650 Socket AM5 hỗ trợ DDR5 và WiFi 6E",
+        categoryId: categoryIds.MAINBOARD,
+        brandId: brandIds.MSI,
+        price: 4100000,
+        sku: "MB-MSI-PRO-B650M-A",
+        specs: { socket: "AM5", ram_type: "DDR5", form_factor: "M-ATX" }
       },
       {
-        name: "MSI GeForce RTX 4060 Ventus 2X",
-        slug: "msi-geforce-rtx-4060-ventus-2x",
-        description: "GPU 1080p/1440p ổn định cho build gaming",
-        categoryId: categories.GPU,
-        brandId: brands.MSI,
-        basePrice: 8900000,
-        baseStock: 12,
-        variants: [
-          {
-            sku: "GPU-MSI-RTX4060-8G",
-            price: 8900000,
-            stock: 12,
-            imageUrl: null,
-            specs: {}
-          }
-        ]
+        name: "ASUS Prime H610M-K DDR4",
+        slug: "asus-prime-h610m-k-ddr4",
+        description: "Bo mạch chủ phổ thông Socket LGA1700 hỗ trợ RAM DDR4 bền bỉ",
+        categoryId: categoryIds.MAINBOARD,
+        brandId: brandIds.ASUS,
+        price: 1900000,
+        sku: "MB-ASUS-H610M-K-D4",
+        specs: { socket: "LGA1700", ram_type: "DDR4", form_factor: "M-ATX" }
       },
       {
-        name: "Samsung 990 EVO 1TB",
-        slug: "samsung-990-evo-1tb",
-        description: "SSD NVMe tốc độ cao 1TB",
-        categoryId: categories.STORAGE,
-        brandId: brands.Samsung,
-        basePrice: 2200000,
-        baseStock: 30,
-        variants: [
-          {
-            sku: "SSD-SAMSUNG-990EVO-1TB",
-            price: 2200000,
-            stock: 30,
-            imageUrl: null,
-            specs: { storage_type: "NVME" }
-          }
-        ]
+        name: "Corsair Vengeance 16GB DDR5 5600MHz",
+        slug: "corsair-vengeance-16gb-ddr5-5600mhz",
+        description: "Kit RAM DDR5 16GB (2x8GB) bus 5600MHz tản nhiệt nhôm",
+        categoryId: categoryIds.RAM,
+        brandId: brandIds.Corsair,
+        price: 1850000,
+        sku: "RAM-CORSAIR-16G-D5-5600",
+        specs: { ram_type: "DDR5" }
       },
       {
-        name: "Cooler Master MWE Gold 750",
-        slug: "cooler-master-mwe-gold-750",
-        description: "Nguồn 750W phù hợp build RTX 4060",
-        categoryId: categories.PSU,
-        brandId: brands["Cooler Master"],
-        basePrice: 2400000,
-        baseStock: 16,
-        variants: [
-          {
-            sku: "PSU-CM-MWE-750",
-            price: 2400000,
-            stock: 16,
-            imageUrl: null,
-            specs: { wattage: "750W" }
-          }
-        ]
+        name: "Corsair Dominator Titanium 32GB DDR5 6000MHz",
+        slug: "corsair-dominator-titanium-32gb-ddr5-6000mhz",
+        description: "Kit RAM DDR5 cao cấp 32GB (2x16GB) bus 6000MHz RGB",
+        categoryId: categoryIds.RAM,
+        brandId: brandIds.Corsair,
+        price: 4200000,
+        sku: "RAM-CORSAIR-32G-D5-6000",
+        specs: { ram_type: "DDR5" }
       },
       {
-        name: "Corsair 4000D Airflow",
-        slug: "corsair-4000d-airflow",
-        description: "Case mid tower hỗ trợ main ATX",
-        categoryId: categories.CASE,
-        brandId: brands.Corsair,
-        basePrice: 2100000,
-        baseStock: 11,
-        variants: [
-          {
-            sku: "CASE-CORSAIR-4000D",
-            price: 2100000,
-            stock: 11,
-            imageUrl: null,
-            specs: { form_factor: "ATX" }
-          }
-        ]
+        name: "Kingston Fury Beast 16GB DDR4 3200MHz",
+        slug: "kingston-fury-beast-16gb-ddr4-3200mhz",
+        description: "Kit RAM DDR4 16GB (2x8GB) bus 3200MHz tản nhôm đen",
+        categoryId: categoryIds.RAM,
+        brandId: brandIds.Kingston,
+        price: 1100000,
+        sku: "RAM-KINGSTON-16G-D4-3200",
+        specs: { ram_type: "DDR4" }
+      },
+      {
+        name: "MSI GeForce RTX 4060 Ventus 2X Black 8GB",
+        slug: "msi-geforce-rtx-4060-ventus-2x-black-8gb",
+        description: "Card đồ họa NVIDIA RTX 4060 8GB GDDR6 Ray Tracing & DLSS 3.0",
+        categoryId: categoryIds.GPU,
+        brandId: brandIds.MSI,
+        price: 8200000,
+        sku: "GPU-MSI-RTX4060-VENTUS-8G",
+        specs: {}
+      },
+      {
+        name: "Gigabyte GeForce RTX 4070 Ti SUPER EAGLE OC 16GB",
+        slug: "gigabyte-geforce-rtx-4070-ti-super-eagle-oc-16gb",
+        description: "Card đồ họa 16GB GDDR6X 3 Fan cân mượt mọi game 4K và đồ họa",
+        categoryId: categoryIds.GPU,
+        brandId: brandIds.Gigabyte,
+        price: 24500000,
+        sku: "GPU-GIGABYTE-RTX4070TI-16G",
+        specs: {}
+      },
+      {
+        name: "Gigabyte Radeon RX 6500 XT EAGLE 4GB",
+        slug: "gigabyte-radeon-rx-6500-xt-eagle-4gb",
+        description: "VGA eSports giá tốt cân mượt LOL, FIFA, Valorant, CS2",
+        categoryId: categoryIds.GPU,
+        brandId: brandIds.Gigabyte,
+        price: 3800000,
+        sku: "GPU-GIGABYTE-RX6500XT-4G",
+        specs: {}
+      },
+      {
+        name: "Samsung 990 EVO 1TB PCIe 4.0 NVMe",
+        slug: "samsung-990-evo-1tb-pcie-4-0-nvme",
+        description: "SSD M.2 NVMe PCIe 4.0 x4 tốc độ đọc lên đến 5000MB/s",
+        categoryId: categoryIds.SSD,
+        brandId: brandIds.Samsung,
+        price: 2150000,
+        sku: "SSD-SAMSUNG-990EVO-1TB",
+        specs: { storage_type: "NVME" }
+      },
+      {
+        name: "Kingston NV2 500GB M.2 2280 NVMe",
+        slug: "kingston-nv2-500gb-m-2-2280-nvme",
+        description: "SSD M.2 NVMe Gen4 tốc độ 3500MB/s giá cực tốt",
+        categoryId: categoryIds.SSD,
+        brandId: brandIds.Kingston,
+        price: 980000,
+        sku: "SSD-KINGSTON-NV2-500GB",
+        specs: { storage_type: "NVME" }
+      },
+      {
+        name: "Cooler Master MWE 650W 80 Plus Bronze V2",
+        slug: "cooler-master-mwe-650w-80-plus-bronze-v2",
+        description: "Nguồn 650W chuẩn 80 Plus Bronze công suất thực an toàn",
+        categoryId: categoryIds.PSU,
+        brandId: brandIds["Cooler Master"],
+        price: 1450000,
+        sku: "PSU-CM-MWE-650-BRONZE",
+        specs: { wattage: "650W" }
+      },
+      {
+        name: "Cooler Master MWE Gold 750W V2 Full Modular",
+        slug: "cooler-master-mwe-gold-750w-v2-full-modular",
+        description: "Nguồn 750W 80 Plus Gold dây rời Full Modular cao cấp",
+        categoryId: categoryIds.PSU,
+        brandId: brandIds["Cooler Master"],
+        price: 2650000,
+        sku: "PSU-CM-MWE-750-GOLD",
+        specs: { wattage: "750W" }
+      },
+      {
+        name: "Cooler Master Elite V4 500W",
+        slug: "cooler-master-elite-v4-500w",
+        description: "Bộ nguồn 500W phổ thông tin cậy cho máy văn phòng và đồ họa nhẹ",
+        categoryId: categoryIds.PSU,
+        brandId: brandIds["Cooler Master"],
+        price: 950000,
+        sku: "PSU-CM-ELITE-500W",
+        specs: { wattage: "550W" }
+      },
+      {
+        name: "Corsair 4000D Airflow Black",
+        slug: "corsair-4000d-airflow-black",
+        description: "Vỏ case Mid Tower mặt lưới tản nhiệt tối ưu hỗ trợ main ATX",
+        categoryId: categoryIds.CASE,
+        brandId: brandIds.Corsair,
+        price: 2100000,
+        sku: "CASE-CORSAIR-4000D-AIRFLOW",
+        specs: { form_factor: "ATX" }
+      },
+      {
+        name: "Case Mik LV12 White Bể Cá Panorama",
+        slug: "case-mik-lv12-white-be-ca-panorama",
+        description: "Vỏ Case Tone Trắng bể cá kính cường lực panorama cực đẹp",
+        categoryId: categoryIds.CASE,
+        brandId: brandIds.Corsair,
+        price: 1050000,
+        sku: "CASE-MIK-LV12-WHITE",
+        specs: { form_factor: "M-ATX" }
+      },
+      {
+        name: "Thermalright Assassin X120 SE ARGB",
+        slug: "thermalright-assassin-x120-se-argb",
+        description: "Tản nhiệt tháp 4 ống đồng quạt PWM 120mm LED ARGB mát mẻ",
+        categoryId: categoryIds.COOLING,
+        brandId: brandIds.Thermalright,
+        price: 450000,
+        sku: "COOL-THERMALRIGHT-X120-ARGB",
+        specs: {}
+      },
+      {
+        name: "DeepCool LS720 SE ARGB 360mm",
+        slug: "deepcool-ls720-se-argb-360mm",
+        description: "Tản nhiệt nước AIO 360mm hiệu năng giải nhiệt 300W TDP",
+        categoryId: categoryIds.COOLING,
+        brandId: brandIds.DeepCool,
+        price: 2750000,
+        sku: "COOL-DEEPCOOL-LS720-360",
+        specs: {}
       }
     ];
 
-    const productIds = {};
+    const seededSkus = {};
 
-    for (const product of products) {
-      const productId = await ensureProduct(connection, schema, product);
-      productIds[product.slug] = productId;
-
-      for (const variant of product.variants) {
-        const variantId = await ensureVariant(connection, schema, {
-          ...variant,
-          productId
+    for (const comp of demoComponents) {
+      // 1. Product
+      let prod = await findOne(connection, "SELECT id FROM products WHERE slug = ? LIMIT 1", [comp.slug]);
+      let prodId;
+      if (!prod) {
+        prodId = await insertRecord(connection, "products", {
+          name: comp.name,
+          slug: comp.slug,
+          description: comp.description,
+          price: comp.price,
+          category_id: comp.categoryId,
+          brand_id: comp.brandId,
+          status: "ACTIVE",
+          is_active: 1
         });
+      } else {
+        prodId = prod.id;
+      }
 
-        for (const [attributeKey, value] of Object.entries(variant.specs)) {
-          const attributeValueId = attributeValues[`${attributeKey}:${value}`];
-          if (attributeValueId) {
-            await ensureVariantAttributeValue(connection, schema, variantId, attributeValueId);
+      // 2. ProductSku
+      const imgUrl = SKU_IMAGE_MAP[comp.sku] || null;
+      let skuRow = await findOne(connection, "SELECT id FROM product_skus WHERE sku = ? LIMIT 1", [comp.sku]);
+      let skuId;
+      if (!skuRow) {
+        skuId = await insertRecord(connection, "product_skus", {
+          product_id: prodId,
+          sku: comp.sku,
+          price: comp.price,
+          stock: 30,
+          image_url: imgUrl,
+          status: "ACTIVE",
+          is_active: 1
+        });
+      } else {
+        skuId = skuRow.id;
+        if (imgUrl) {
+          await connection.execute(
+            "UPDATE product_skus SET image_url = ? WHERE id = ? AND (image_url IS NULL OR image_url = '')",
+            [imgUrl, skuId]
+          );
+        }
+      }
+      seededSkus[comp.slug] = skuId;
+
+      // 3. ProductVariant (for compatibility)
+      let varRow = await findOne(connection, "SELECT id FROM product_variants WHERE sku = ? LIMIT 1", [comp.sku]);
+      if (!varRow) {
+        await insertRecord(connection, "product_variants", {
+          product_id: prodId,
+          sku: comp.sku,
+          price: comp.price,
+          stock_quantity: 30,
+          image_url: imgUrl,
+          status: "ACTIVE",
+          is_active: 1
+        });
+      } else if (imgUrl) {
+        await connection.execute(
+          "UPDATE product_variants SET image_url = ? WHERE id = ? AND (image_url IS NULL OR image_url = '')",
+          [imgUrl, varRow.id]
+        );
+      }
+
+      // 4. SkuAttribute links
+      for (const [attrKey, attrVal] of Object.entries(comp.specs || {})) {
+        const valId = attributeValueIds[`${attrKey}:${attrVal}`];
+        if (valId) {
+          let link = await findOne(connection, "SELECT id FROM sku_attributes WHERE sku_id = ? AND attribute_value_id = ? LIMIT 1", [skuId, valId]);
+          if (!link) {
+            await insertRecord(connection, "sku_attributes", {
+              sku_id: skuId,
+              attribute_value_id: valId
+            });
           }
         }
       }
     }
+    console.log(`✓ Demo products & SKUs verified (${demoComponents.length} components)`);
 
-    const compatibilityRuleIds = {};
+    // 5. Ensure Compatibility Rules
+    const rulesToEnsure = [
+      {
+        name: "CPU & Mainboard Socket Match",
+        source_category_id: categoryIds.CPU,
+        target_category_id: categoryIds.MAINBOARD,
+        source_attribute_key: "socket",
+        target_attribute_key: "socket",
+        operator: "EQ",
+        description: "Socket của CPU và Bo mạch chủ phải trùng khớp nhau (VD: LGA1700 - LGA1700, AM5 - AM5)"
+      },
+      {
+        name: "Mainboard & RAM DDR Standard Match",
+        source_category_id: categoryIds.MAINBOARD,
+        target_category_id: categoryIds.RAM,
+        source_attribute_key: "ram_type",
+        target_attribute_key: "ram_type",
+        operator: "EQ",
+        description: "Chuẩn RAM của Mainboard và thanh RAM phải đồng bộ (DDR4 hoặc DDR5)"
+      },
+      {
+        name: "Mainboard Form Factor & Case Clearance",
+        source_category_id: categoryIds.MAINBOARD,
+        target_category_id: categoryIds.CASE,
+        source_attribute_key: "form_factor",
+        target_attribute_key: "form_factor",
+        operator: "EQ",
+        description: "Vỏ Case phải hỗ trợ form factor của Bo mạch chủ (ATX, Micro-ATX, Mini-ITX)"
+      }
+    ];
 
-    compatibilityRuleIds.cpuMainboard = await ensureCompatibilityRule(connection, schema, {
-      sourceCategoryId: categories.CPU,
-      targetCategoryId: categories.MAINBOARD,
-      sourceAttributeKey: "socket",
-      targetAttributeKey: "socket",
-      operator: "EQ",
-      description: "CPU socket must match mainboard socket"
-    });
+    for (const rule of rulesToEnsure) {
+      let r = await findOne(
+        connection,
+        "SELECT id FROM compatibility_rules WHERE source_category_id = ? AND target_category_id = ? AND source_attribute_key = ? LIMIT 1",
+        [rule.source_category_id, rule.target_category_id, rule.source_attribute_key]
+      );
+      if (!r) {
+        await insertRecord(connection, "compatibility_rules", {
+          ...rule,
+          is_compatible: 1,
+          status: "ACTIVE",
+          is_active: 1
+        });
+      }
+    }
+    console.log(`✓ Compatibility Rules verified (${rulesToEnsure.length} core rules)`);
 
-    compatibilityRuleIds.mainboardRam = await ensureCompatibilityRule(connection, schema, {
-      sourceCategoryId: categories.MAINBOARD,
-      targetCategoryId: categories.RAM,
-      sourceAttributeKey: "ram_type",
-      targetAttributeKey: "ram_type",
-      operator: "EQ",
-      description: "Mainboard RAM type must match RAM module type"
-    });
+    // 6. SEED REAL "PC BUILD MẪU" (Demo PC Builds) in pc_builds and pc_build_items
+    console.log("Seeding Demo PC Builds into pc_builds and pc_build_items...");
 
-    compatibilityRuleIds.mainboardCase = await ensureCompatibilityRule(connection, schema, {
-      sourceCategoryId: categories.MAINBOARD,
-      targetCategoryId: categories.CASE,
-      sourceAttributeKey: "form_factor",
-      targetAttributeKey: "form_factor",
-      operator: "EQ",
-      description: "Mainboard form factor must be supported by case"
-    });
+    // Find a target user for demo builds (Admin or first user)
+    const userRow = await findOne(connection, "SELECT id FROM users ORDER BY id ASC LIMIT 1");
+    const demoUserId = userRow ? userRow.id : 1;
 
-    if (compatibilityRuleIds.cpuMainboard) {
-      await ensureCompatibilityRuleDetail(connection, schema, {
-        ruleId: compatibilityRuleIds.cpuMainboard,
-        sourceValueId: attributeValues["socket:LGA1700"],
-        targetValueId: attributeValues["socket:LGA1700"],
-        sourceValue: "LGA1700",
-        targetValue: "LGA1700"
-      });
-      await ensureCompatibilityRuleDetail(connection, schema, {
-        ruleId: compatibilityRuleIds.cpuMainboard,
-        sourceValueId: attributeValues["socket:AM5"],
-        targetValueId: attributeValues["socket:AM5"],
-        sourceValue: "AM5",
-        targetValue: "AM5"
-      });
+    const demoBuilds = [
+      {
+        name: "⚡ Dàn PC Gaming Quốc Dân (i5-13400F • RTX 4060 • 16GB DDR5)",
+        items: [
+          { component_type: "cpu", slug: "intel-core-i5-13400f" },
+          { component_type: "mainboard", slug: "asus-prime-b760m-a-wifi-ddr5" },
+          { component_type: "ram", slug: "corsair-vengeance-16gb-ddr5-5600mhz" },
+          { component_type: "gpu", slug: "msi-geforce-rtx-4060-ventus-2x-black-8gb" },
+          { component_type: "storage", slug: "samsung-990-evo-1tb-pcie-4-0-nvme" },
+          { component_type: "psu", slug: "cooler-master-mwe-650w-80-plus-bronze-v2" },
+          { component_type: "case", slug: "corsair-4000d-airflow-black" },
+          { component_type: "cooling", slug: "thermalright-assassin-x120-se-argb" }
+        ]
+      },
+      {
+        name: "🚀 Dàn PC Hi-End Gaming 4K (Ryzen 7 7800X3D • RTX 4070 Ti • 32GB DDR5)",
+        items: [
+          { component_type: "cpu", slug: "amd-ryzen-7-7800x3d" },
+          { component_type: "mainboard", slug: "msi-pro-b650m-a-wifi" },
+          { component_type: "ram", slug: "corsair-dominator-titanium-32gb-ddr5-6000mhz" },
+          { component_type: "gpu", slug: "gigabyte-geforce-rtx-4070-ti-super-eagle-oc-16gb" },
+          { component_type: "storage", slug: "samsung-990-evo-1tb-pcie-4-0-nvme" },
+          { component_type: "psu", slug: "cooler-master-mwe-gold-750w-v2-full-modular" },
+          { component_type: "case", slug: "case-mik-lv12-white-be-ca-panorama" },
+          { component_type: "cooling", slug: "deepcool-ls720-se-argb-360mm" }
+        ]
+      },
+      {
+        name: "💼 Dàn PC Văn Phòng & Học Tập (Core i3-12100 • 16GB RAM • SSD 500GB)",
+        items: [
+          { component_type: "cpu", slug: "intel-core-i3-12100f" },
+          { component_type: "mainboard", slug: "asus-prime-h610m-k-ddr4" },
+          { component_type: "ram", slug: "kingston-fury-beast-16gb-ddr4-3200mhz" },
+          { component_type: "gpu", slug: "gigabyte-radeon-rx-6500-xt-eagle-4gb" },
+          { component_type: "storage", slug: "kingston-nv2-500gb-m-2-2280-nvme" },
+          { component_type: "psu", slug: "cooler-master-elite-v4-500w" },
+          { component_type: "case", slug: "case-mik-lv12-white-be-ca-panorama" },
+          { component_type: "cooling", slug: "thermalright-assassin-x120-se-argb" }
+        ]
+      }
+    ];
+
+    for (const b of demoBuilds) {
+      // Calculate total price from SKUs
+      let buildTotal = 0;
+      const resolvedItems = [];
+
+      for (const it of b.items) {
+        const skuId = seededSkus[it.slug];
+        if (skuId) {
+          const skuRow = await findOne(connection, "SELECT price FROM product_skus WHERE id = ? LIMIT 1", [skuId]);
+          const p = Number(skuRow?.price || 0);
+          buildTotal += p;
+          resolvedItems.push({
+            sku_id: skuId,
+            component_type: it.component_type
+          });
+        }
+      }
+
+      let existingBuild = await findOne(connection, "SELECT id FROM pc_builds WHERE name = ? LIMIT 1", [b.name]);
+      let buildId;
+
+      if (!existingBuild) {
+        buildId = await insertRecord(connection, "pc_builds", {
+          user_id: demoUserId,
+          name: b.name,
+          total_price: buildTotal,
+          status: "SAVED",
+          is_saved: 1
+        });
+      } else {
+        buildId = existingBuild.id;
+        await connection.execute("UPDATE pc_builds SET total_price = ?, status = 'SAVED', is_saved = 1 WHERE id = ?", [buildTotal, buildId]);
+        await connection.execute("DELETE FROM pc_build_items WHERE build_id = ?", [buildId]);
+      }
+
+      for (const item of resolvedItems) {
+        await insertRecord(connection, "pc_build_items", {
+          build_id: buildId,
+          sku_id: item.sku_id,
+          component_type: item.component_type
+        });
+      }
+      console.log(`   ✓ Created/Updated Demo Build: "${b.name}" (${resolvedItems.length}/8 items, Total: ${buildTotal.toLocaleString("vi-VN")}đ)`);
     }
 
-    if (compatibilityRuleIds.mainboardRam) {
-      await ensureCompatibilityRuleDetail(connection, schema, {
-        ruleId: compatibilityRuleIds.mainboardRam,
-        sourceValueId: attributeValues["ram_type:DDR5"],
-        targetValueId: attributeValues["ram_type:DDR5"],
-        sourceValue: "DDR5",
-        targetValue: "DDR5"
-      });
-      await ensureCompatibilityRuleDetail(connection, schema, {
-        ruleId: compatibilityRuleIds.mainboardRam,
-        sourceValueId: attributeValues["ram_type:DDR4"],
-        targetValueId: attributeValues["ram_type:DDR4"],
-        sourceValue: "DDR4",
-        targetValue: "DDR4"
-      });
-    }
-
-    if (compatibilityRuleIds.mainboardCase) {
-      await ensureCompatibilityRuleDetail(connection, schema, {
-        ruleId: compatibilityRuleIds.mainboardCase,
-        sourceValueId: attributeValues["form_factor:ATX"],
-        targetValueId: attributeValues["form_factor:ATX"],
-        sourceValue: "ATX",
-        targetValue: "ATX"
-      });
-      await ensureCompatibilityRuleDetail(connection, schema, {
-        ruleId: compatibilityRuleIds.mainboardCase,
-        sourceValueId: attributeValues["form_factor:M-ATX"],
-        targetValueId: attributeValues["form_factor:M-ATX"],
-        sourceValue: "M-ATX",
-        targetValue: "M-ATX"
-      });
-    }
-
-    console.log("Demo PC build seed completed.");
-    console.log("Categories:", Object.keys(categories).join(", "));
-    console.log("Brands:", Object.keys(brands).join(", "));
-    console.log("Products seeded:", products.length);
-    console.log("Compatibility rules seeded:", Object.keys(compatibilityRuleIds).length);
+    console.log("🎉 Seed Demo PC Build completed successfully with 100% database compatibility!");
   } finally {
     await connection.end();
   }

@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { useEffect, useRef } from "react";
 import { ProductCard } from "../common/ProductCard";
 
-export function ProductSection({ title, subtitle, products }) {
+export function ProductSection({ title, subtitle, products, eagerCount = 0 }) {
   const gridRef = useRef(null);
 
   /* IntersectionObserver: staggered fade-up for each card */
@@ -122,7 +122,7 @@ export function ProductSection({ title, subtitle, products }) {
             className="v2-pc-wrapper v2-animate-fadeUp"
             style={{ transitionDelay: `${Math.min(idx * 0.06, 0.48)}s` }}
           >
-            <ProductCard product={product} />
+            <ProductCard product={product} eager={idx < eagerCount} />
           </div>
         ))}
       </div>

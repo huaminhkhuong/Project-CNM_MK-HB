@@ -8,7 +8,6 @@ import {
 } from "../../socket/socket.service";
 
 const prisma = new PrismaClient();
-let chatTablesReady = false;
 
 type ChatSender = "customer" | "staff" | "system";
 type ChatStatus = "open" | "assigned" | "waiting_customer" | "waiting_staff" | "resolved" | "waiting" | "active" | "closed";
@@ -66,52 +65,17 @@ function mapSession(session: any) {
   };
 }
 
-async function ensureChatTables() {
-  if (chatTablesReady) return;
-
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS chat_sessions (
-      id INT NOT NULL AUTO_INCREMENT,
-      session_id VARCHAR(255) NOT NULL,
-      status VARCHAR(50) NOT NULL DEFAULT 'waiting',
-      customer_name VARCHAR(255) NOT NULL DEFAULT 'Khach hang',
-      staff_name VARCHAR(255) NULL,
-      linked_order_id INT NULL,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (id),
-      UNIQUE KEY chat_sessions_session_id_key (session_id),
-      KEY idx_chat_sessions_status (status),
-      KEY idx_chat_sessions_order (linked_order_id)
-    )
-  `);
-
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS chat_messages (
-      id INT NOT NULL AUTO_INCREMENT,
-      session_id INT NOT NULL,
-      sender VARCHAR(50) NOT NULL,
-      text TEXT NOT NULL,
-      build_data TEXT NULL,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (id),
-      KEY fk_chat_messages_session (session_id),
-      KEY idx_chat_messages_session_created (session_id, created_at),
-      CONSTRAINT fk_chat_messages_session FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
-    )
-  `);
-
-  chatTablesReady = true;
-}
-
 export const createSession = async (req: Request, res: Response) => {
   try {
-    await ensureChatTables();
     const { customerName, linkedOrderId, initialMessage, conversationType } = req.body || {};
     const sessionId = uuidv4();
     const now = new Date();
     const normalizedType = normalizeConversationType(conversationType);
     const openingQuestion = String(initialMessage || "").trim();
+
+    if (openingQuestion.length > 2000) {
+      return res.status(400).json({ success: false, message: "Tin nhắn ban đầu vượt quá 2000 ký tự" });
+    }
 
     const session = await prisma.chatSession.create({
       data: {
@@ -161,7 +125,6 @@ export const createSession = async (req: Request, res: Response) => {
 
 export const getSession = async (req: Request, res: Response) => {
   try {
-    await ensureChatTables();
     const session = await prisma.chatSession.findUnique({
       where: { session_id: req.params.id },
       include: { messages: { orderBy: { created_at: "asc" } } }
@@ -180,9 +143,17 @@ export const getSession = async (req: Request, res: Response) => {
 
 export const sendMessage = async (req: Request, res: Response) => {
   try {
-    await ensureChatTables();
     const { id } = req.params;
     const { sender, text, buildData } = req.body || {};
+    const trimmedText = String(text || "").trim();
+
+    if (!trimmedText) {
+      return res.status(400).json({ success: false, message: "Tin nhắn không được để trống" });
+    }
+
+    if (trimmedText.length > 2000) {
+      return res.status(400).json({ success: false, message: "Tin nhắn vượt quá 2000 ký tự" });
+    }
 
     const session = await prisma.chatSession.findUnique({
       where: { session_id: id }
@@ -201,7 +172,7 @@ export const sendMessage = async (req: Request, res: Response) => {
       data: {
         session_id: session.id,
         sender: normalizedSender,
-        text: String(text || "").trim() || "(Tin nhan trong)",
+        text: trimmedText,
         build_data: buildData ? JSON.stringify(buildData) : null,
         created_at: new Date()
       }
@@ -235,7 +206,6 @@ export const sendMessage = async (req: Request, res: Response) => {
 
 export const getQueue = async (_req: Request, res: Response) => {
   try {
-    await ensureChatTables();
     const sessions = await prisma.chatSession.findMany({
       where: { status: { notIn: ["closed", "resolved"] } },
       include: { messages: { orderBy: { created_at: "asc" } } },
@@ -251,7 +221,6 @@ export const getQueue = async (_req: Request, res: Response) => {
 
 export const getQueueStats = async (_req: Request, res: Response) => {
   try {
-    await ensureChatTables();
     const all = await prisma.chatSession.findMany({
       where: { status: { notIn: ["closed", "resolved"] } }
     });
@@ -272,7 +241,6 @@ export const getQueueStats = async (_req: Request, res: Response) => {
 
 export const acceptSession = async (req: Request, res: Response) => {
   try {
-    await ensureChatTables();
     const { id } = req.params;
     const { staffName } = req.body || {};
 
@@ -324,7 +292,6 @@ export const acceptSession = async (req: Request, res: Response) => {
 
 export const closeSession = async (req: Request, res: Response) => {
   try {
-    await ensureChatTables();
     const session = await prisma.chatSession.findUnique({
       where: { session_id: req.params.id }
     });
@@ -367,3 +334,80 @@ export const closeSession = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, message: "Failed to close session" });
   }
 };
+
+/**
+ * POST /api/chat/ai-consultation
+ * Controller tiếp nhận tư vấn AI, tiêu chí chọn, linh kiện có sẵn và thắc mắc lý thuyết phần cứng.
+ */
+export const handleAiConsultation = async (req: Request, res: Response) => {
+  try {
+    const { message, criteria } = req.body;
+    const text = String(message || "").trim();
+
+    if (text.length > 2000) {
+      return res.status(400).json({ success: false, message: "Câu hỏi vượt quá 2000 ký tự" });
+    }
+
+    const { aiAssistantService } = await import("./ai-assistant.service");
+
+    // 1. Check hardware theory questions (downclocking, PSU watt, bottleneck...)
+    if (text) {
+      const theoryExplanation = aiAssistantService.explainHardwareTheory(text);
+      if (theoryExplanation) {
+        return res.status(200).json({
+          success: true,
+          data: {
+            text: theoryExplanation,
+            type: "theory_explanation"
+          }
+        });
+      }
+
+      // 2. Database grounded query (e.g. "cpu đi", "RAM dưới 3tr", "gợi ý vga")
+      try {
+        // @ts-ignore
+        const { askTechnicalAdvisor } = await import("../ai/ai.service");
+        const advisorResult = await askTechnicalAdvisor({ message: text });
+        if (advisorResult && (advisorResult.reply || advisorResult.products?.length)) {
+          return res.status(200).json({
+            success: true,
+            data: {
+              text: advisorResult.reply,
+              products: advisorResult.products || [],
+              buildPayload: advisorResult.build ? {
+                label: "Cấu hình đề xuất từ DB",
+                totalPrice: advisorResult.build.totalPrice,
+                components: advisorResult.build.components
+              } : null,
+              type: advisorResult.products?.length ? "product_recommendation" : "advisor_reply"
+            }
+          });
+        }
+      } catch (dbAiErr) {
+        console.warn("[ChatController] askTechnicalAdvisor failed, falling back:", dbAiErr);
+      }
+    }
+
+    // 3. Fallback to Form criteria build generation
+    const buildResult = await aiAssistantService.generateConsultationBuild(criteria || { budget: 25000000 });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        text: buildResult.summaryText,
+        buildPayload: {
+          label: buildResult.label,
+          totalPrice: buildResult.totalPrice,
+          budgetUtilization: buildResult.budgetUtilization,
+          components: buildResult.components,
+          compatibilityScore: buildResult.compatibilityScore
+        },
+        type: "build_recommendation"
+      }
+    });
+  } catch (error) {
+    console.error("Error in AI Consultation controller:", error);
+    res.status(500).json({ success: false, message: "AI Consultation failed" });
+  }
+};
+

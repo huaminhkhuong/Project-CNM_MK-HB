@@ -21,7 +21,7 @@ const infoContent = {
               <p style={{ marginTop: 10, fontSize: 14, color: '#666' }}>Chịu trách nhiệm kiến trúc cơ sở dữ liệu Prisma, tích hợp AI PC Advisor và hệ thống thanh toán VNPay an toàn.</p>
             </div>
             <div style={{ padding: 20, background: '#f8fafc', borderRadius: 12 }}>
-              <h3 style={{ margin: '0 0 10px' }}>Đặng Hoài Bảo</h3>
+              <h3 style={{ margin: '0 0 10px' }}>Trịnh Công Tuyền</h3>
               <p style={{ margin: 0, fontSize: 14 }}><strong>Lead Frontend Developer</strong></p>
               <p style={{ marginTop: 10, fontSize: 14, color: '#666' }}>Xây dựng giao diện người dùng hiện đại, tối ưu hóa trải nghiệm PC Builder và hệ thống quản lý Dashboard chuyên nghiệp.</p>
             </div>
@@ -227,7 +227,7 @@ const infoContent = {
         <p>Bạn phải hoàn thành nghĩa vụ thanh toán trước khi nhận hàng (đối với thanh toán online) hoặc chuẩn bị đủ tiền mặt để thanh toán COD. PC Mall có quyền hủy các đơn hàng ảo hoặc có dấu hiệu gian lận.</p>
 
         <h3>3. Bản quyền nội dung</h3>
-        <p>Mọi hình ảnh, bài review linh kiện và mã nguồn của hệ thống PC Builder thuộc bản quyền của <strong>PC Mall Team (Hứa Minh Khương & Đặng Hoài Bảo)</strong>. Việc sao chép trái phép sẽ bị xử lý theo pháp luật.</p>
+        <p>Mọi hình ảnh, bài review linh kiện và mã nguồn của hệ thống PC Builder thuộc bản quyền của <strong>PC Mall Team (Hứa Minh Khương & Trịnh Công Tuyền)</strong>. Việc sao chép trái phép sẽ bị xử lý theo pháp luật.</p>
       </>
     )
   },

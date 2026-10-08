@@ -100,7 +100,7 @@ function QuickViewOverlay({ href }) {
   );
 }
 
-export function ProductCard({ product }) {
+export function ProductCard({ product, eager = false }) {
   const navigate  = useNavigate();
   const cardRef   = useRef(null);
   const [imageLoaded, setImageLoaded] = useState(false);
@@ -125,8 +125,22 @@ export function ProductCard({ product }) {
   const coolingType    = useMemo(() => getCoolingType(product), [product]);
 
   useEffect(() => {
-    setImageSrc(resolveProductImage(product));
-    setImageLoaded(false);
+    const nextSrc = resolveProductImage(product);
+    // Skip skeleton if browser already has this image cached
+    if (nextSrc === imageSrc && imageLoaded) return;
+    setImageSrc(nextSrc);
+    // Check if browser cache already has it (complete = true on cached images)
+    if (eager || nextSrc === imageSrc) {
+      setImageLoaded(true);
+    } else {
+      const probe = new window.Image();
+      probe.src = nextSrc;
+      if (probe.complete) {
+        setImageLoaded(true);
+      } else {
+        setImageLoaded(false);
+      }
+    }
     setHasFailedOnce(false);
   }, [product]);
 
@@ -204,7 +218,8 @@ export function ProductCard({ product }) {
             <img
               src={imageSrc}
               alt={productName}
-              loading="lazy"
+              loading={eager ? "eager" : "lazy"}
+              fetchpriority={eager ? "high" : "auto"}
               className="v2-card-img"
               style={{ transition: "transform 0.38s cubic-bezier(0.34, 1.56, 0.64, 1)" }}
               onLoad={() => setImageLoaded(true)}

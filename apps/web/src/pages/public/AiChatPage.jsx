@@ -1,7 +1,7 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-import { sendAiChat } from "../../services/ai.service";
+import { clearAiChatHistory, getAiChatHistory, sendAiChat } from "../../services/ai.service";
 import { addItemToCart } from "../../services/cart.service";
 import { createChatSession, getChatSession, sendChatMessage } from "../../services/chat.service";
 import { useAuth } from "../../hooks/useAuth";
@@ -83,18 +83,38 @@ function getSessionStatus(session) {
 
 function getBuildComponents(build) {
   const components = build?.components || [];
-  if (Array.isArray(components)) return components;
+  if (Array.isArray(components)) {
+    return components.map((item) => ({
+      id: item.id || item.productId,
+      productId: item.productId || item.id,
+      componentType: item.componentType || item.type || "other",
+      skuId: item.skuId || item.id,
+      name: item.name || item.product_name || "Linh kiện",
+      price: Number(item.price || 0),
+      stock: item.stock !== undefined ? item.stock : "",
+      imageUrl: item.imageUrl || item.image_url || "",
+      slug: item.slug || "",
+      brandName: item.brandName || "",
+      categoryName: item.categoryName || ""
+    }));
+  }
   if (!components || typeof components !== "object") return [];
 
   return Object.entries(components).map(([componentType, item]) => {
     const product = item?.product || item?.Product || item?.variant?.product || {};
     const variant = item?.variant || item?.ProductVariant || item?.sku || {};
     return {
+      id: product?.id || item?.id,
+      productId: product?.id || item?.id,
       componentType,
       skuId: variant?.id || variant?.variant_id || variant?.skuId || product?.id || componentType,
       name: product?.product_name || product?.name || item?.name || componentType.toUpperCase(),
       price: Number(variant?.price || item?.price || product?.price || 0),
-      stock: variant?.stock || variant?.stock_quantity || product?.stock || ""
+      stock: variant?.stock || variant?.stock_quantity || product?.stock || "",
+      imageUrl: product?.imageUrl || product?.image_url || item?.imageUrl || "",
+      slug: product?.slug || item?.slug || "",
+      brandName: product?.brandName || item?.brandName || "",
+      categoryName: product?.categoryName || item?.categoryName || ""
     };
   });
 }
@@ -132,6 +152,7 @@ export function AiChatPage() {
   const [liveSessionId, setLiveSessionId] = useState(() => localStorage.getItem(LIVE_SESSION_KEY) || "");
   const [liveSession, setLiveSession] = useState(null);
   const [actionProductId, setActionProductId] = useState(null);
+  const [loadingBuildCart, setLoadingBuildCart] = useState(false);
 
   const canSend = useMemo(() => String(question || "").trim().length > 0 && !loading, [loading, question]);
   const isHumanMode = mode === "human";
@@ -144,6 +165,39 @@ export function AiChatPage() {
   useEffect(() => {
     setGuestAiChatMessages(aiMessages);
   }, [aiMessages]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let isCancelled = false;
+
+    async function loadDbHistory() {
+      try {
+        const response = await getAiChatHistory(30);
+        const data = normalizeApiData(response);
+        const dbMsgs = Array.isArray(data?.messages) ? data.messages : [];
+        if (!isCancelled && dbMsgs.length > 0) {
+          const mapped = dbMsgs.map((m) => ({
+            id: m.id || `${m.role}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            role: m.role,
+            content: m.content,
+            products: m.products || [],
+            build: m.build || null,
+            intent: m.intent || "",
+            handoffSuggested: Boolean(m.handoffSuggested),
+            createdAt: m.created_at || m.createdAt || new Date().toISOString()
+          }));
+          setAiMessages(mapped);
+        }
+      } catch (err) {
+        console.warn("Failed to load user AI chat history from DB:", err);
+      }
+    }
+
+    loadDbHistory();
+    return () => {
+      isCancelled = true;
+    };
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!liveSessionId) {
@@ -198,8 +252,15 @@ export function AiChatPage() {
     shouldStickToBottomRef.current = distanceFromBottom < 120;
   }
 
-  function handleClearChatHistory() {
+  async function handleClearChatHistory() {
     if (!confirm("Xóa lịch sử AI chat trên trình duyệt và rời phiên tư vấn hiện tại?")) return;
+    if (isAuthenticated) {
+      try {
+        await clearAiChatHistory();
+      } catch (err) {
+        console.warn("Failed to clear DB AI chat history:", err);
+      }
+    }
     setAiMessages(clearGuestAiChatMessages());
     setHumanMessages([]);
     setLiveSessionId("");
@@ -364,11 +425,84 @@ export function AiChatPage() {
   function handlePcBuilder(product) {
     navigate(routeConfig.public.pcBuilder, {
       state: {
-        productId: product.id,
-        productName: product.name,
-        skuId: product.skuId
+        loadItem: {
+          id: product.id || product.productId,
+          productId: product.id || product.productId,
+          name: product.name || product.productName,
+          productName: product.name || product.productName,
+          skuId: product.skuId || product.id,
+          price: product.price,
+          componentType: product.componentType || (product.categoryName || "").toLowerCase(),
+          categoryName: product.categoryName,
+          brandName: product.brandName,
+          imageUrl: product.imageUrl,
+          slug: product.slug
+        }
       }
     });
+  }
+
+  function handleLoadBuildToBuilder(build) {
+    const components = getBuildComponents(build);
+    if (components.length === 0) return;
+
+    navigate(routeConfig.public.pcBuilder, {
+      state: {
+        loadBuild: {
+          components: components.map((c) => ({
+            componentType: c.componentType,
+            id: c.productId || c.id,
+            productId: c.productId || c.id,
+            name: c.name,
+            productName: c.name,
+            price: c.price,
+            skuId: c.skuId,
+            imageUrl: c.imageUrl,
+            slug: c.slug
+          }))
+        }
+      }
+    });
+  }
+
+  async function handleAddToCartFullBuild(build) {
+    if (!isAuthenticated) {
+      navigate(routeConfig.public.login);
+      return;
+    }
+    const components = getBuildComponents(build);
+    if (components.length === 0) {
+      setStatusMessage("Không tìm thấy linh kiện trong cấu hình để thêm vào giỏ hàng.");
+      return;
+    }
+
+    setLoadingBuildCart(true);
+    setStatusMessage(`Đang thêm ${components.length} linh kiện vào giỏ hàng...`);
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const item of components) {
+      try {
+        const pId = item.productId || item.id;
+        const vId = item.skuId && item.skuId !== pId ? item.skuId : undefined;
+        await addItemToCart({
+          productId: pId,
+          variantId: vId,
+          quantity: 1
+        });
+        successCount++;
+      } catch (err) {
+        failCount++;
+      }
+    }
+
+    setLoadingBuildCart(false);
+    if (successCount > 0) {
+      setStatusMessage(`Đã thêm thành công cả dàn PC (${successCount}/${components.length} linh kiện) vào giỏ hàng!`);
+    } else {
+      setStatusMessage("Không thể thêm linh kiện vào giỏ hàng. Bạn vui lòng thử lại sau.");
+    }
   }
 
   return (
@@ -474,19 +608,43 @@ export function AiChatPage() {
                     {!isUser && message.build ? (
                       <div className="ai-build-card">
                         <div className="ai-card-head">
-                          <strong>Cấu hình đề xuất</strong>
+                          <strong>Cấu hình đề xuất (Chuẩn 100% Tương thích)</strong>
                           <span>{formatCurrency(message.build.totalPrice)}đ</span>
                         </div>
                         <div className="ai-build-list">
                           {getBuildComponents(message.build).map((item) => (
-                            <div key={`${item.componentType}-${item.skuId || item.name}`}>
-                              <span>{String(item.componentType || "").toUpperCase()}</span>
-                              <strong>{item.name}</strong>
-                              <small>{formatCurrency(item.price)}đ{item.stock !== "" ? ` · còn ${item.stock}` : ""}</small>
+                            <div key={`${item.componentType}-${item.skuId || item.name}`} className="ai-build-item-row">
+                              <span className="ai-build-slot">{String(item.componentType || "").toUpperCase()}</span>
+                              <strong className="ai-build-pname" title={item.name}>{item.name}</strong>
+                              <small className="ai-build-price">{formatCurrency(item.price)}đ{item.stock !== "" ? ` · còn ${item.stock}` : ""}</small>
+                              <button
+                                type="button"
+                                className="ai-build-item-pick"
+                                title="Nạp linh kiện này vào Workspace Builder"
+                                onClick={() => handlePcBuilder(item)}
+                              >
+                                + Chọn
+                              </button>
                             </div>
                           ))}
                         </div>
-                        <Link to={routeConfig.public.pcBuilder}>Mở trong PC Builder</Link>
+                        <div className="ai-build-actions">
+                          <button
+                            type="button"
+                            className="ai-btn-builder"
+                            onClick={() => handleLoadBuildToBuilder(message.build)}
+                          >
+                            🧩 Nạp Dàn PC vào Builder
+                          </button>
+                          <button
+                            type="button"
+                            className="ai-btn-cart"
+                            disabled={loadingBuildCart}
+                            onClick={() => handleAddToCartFullBuild(message.build)}
+                          >
+                            {loadingBuildCart ? "Đang thêm..." : "🛒 Thêm cả dàn vào Giỏ"}
+                          </button>
+                        </div>
                       </div>
                     ) : null}
 
@@ -508,7 +666,7 @@ export function AiChatPage() {
                                   {actionProductId === product.id ? "Đang thêm..." : "Thêm giỏ"}
                                 </button>
                                 <button type="button" onClick={() => handleCompare(product)}>So sánh</button>
-                                <button type="button" onClick={() => handlePcBuilder(product)}>PC Builder</button>
+                                <button type="button" onClick={() => handlePcBuilder(product)}>+ Chọn vào Builder</button>
                               </div>
                             </div>
                           </article>
@@ -1071,35 +1229,116 @@ const aiChatStyles = `
   gap: 8px;
 }
 
-.ai-build-list div {
+.ai-build-list .ai-build-item-row {
   display: grid;
-  gap: 2px;
-  padding: 10px;
+  grid-template-columns: 80px 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
   border-radius: 12px;
   background: #f8fafc;
+  border: 1px solid #e2e8f0;
 }
 
-.ai-build-list span {
-  color: #64748b;
+.ai-build-list span.ai-build-slot {
+  color: #2563eb;
   font-size: 11px;
   font-weight: 900;
+  letter-spacing: 0.05em;
 }
 
-.ai-build-list strong {
+.ai-build-list strong.ai-build-pname {
   color: #0f172a;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.ai-build-list small {
-  color: #2563eb;
+.ai-build-list small.ai-build-price {
+  color: #059669;
   font-weight: 800;
+  font-size: 12.5px;
 }
 
-.ai-build-card a {
-  width: 100%;
-  margin-top: 10px;
+.ai-build-item-pick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 12px;
+  font-size: 11.5px;
+  font-weight: 800;
+  border-radius: 8px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ai-build-item-pick:hover {
+  background: #2563eb;
   color: #fff;
-  border-color: transparent;
-  background: linear-gradient(135deg, #0f172a, #2563eb);
+  border-color: #2563eb;
+  transform: translateY(-1px);
+}
+
+.ai-build-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.ai-btn-builder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 800;
+  border-radius: 12px;
+  border: none;
+  background: linear-gradient(135deg, #0f172a, #1e3a8a);
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
+}
+
+.ai-btn-builder:hover {
+  filter: brightness(1.15);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.25);
+}
+
+.ai-btn-cart {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 800;
+  border-radius: 12px;
+  border: none;
+  background: linear-gradient(135deg, #10b981, #047857);
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+}
+
+.ai-btn-cart:hover:not(:disabled) {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.3);
+}
+
+.ai-btn-cart:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .ai-typing {

@@ -6,7 +6,7 @@ require("dotenv").config({ path: path.join(__dirname, "../.env") });
 const prisma = new PrismaClient();
 
 function slugify(input) {
-  return input
+  return String(input || "")
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9\s-]/g, "")
@@ -15,197 +15,319 @@ function slugify(input) {
 }
 
 async function main() {
-  console.log("Starting a clean, rich seed with Roles and Users...");
+  console.log("🚀 Starting Clean, Rich Database Seeding (seed-rich.js)...");
 
-  // 1. Roles
-  console.log("Seeding Roles...");
+  // ── 1. Roles ──────────────────────────────────────────
+  console.log("1. Seeding Roles...");
   const adminRole = await prisma.role.upsert({
     where: { name: "ADMIN" },
     update: {},
-    create: { name: "ADMIN", description: "Quản trị viên toàn quyền" }
+    create: { name: "ADMIN" }
   });
+
+  const staffRole = await prisma.role.upsert({
+    where: { name: "STAFF" },
+    update: {},
+    create: { name: "STAFF" }
+  });
+
   const customerRole = await prisma.role.upsert({
     where: { name: "CUSTOMER" },
     update: {},
-    create: { name: "CUSTOMER", description: "Khách hàng mua sắm" }
+    create: { name: "CUSTOMER" }
   });
+  console.log("   ✓ Roles verified: ADMIN, STAFF, CUSTOMER");
 
-  // 2. Users
-  console.log("Seeding Users...");
+  // ── 2. Users ──────────────────────────────────────────
+  console.log("2. Seeding Users...");
   const adminPassword = await bcrypt.hash("Admin@123", 10);
+  const staffPassword = await bcrypt.hash("Staff@123", 10);
   const customerPassword = await bcrypt.hash("Auth@123", 10);
-  
-  await prisma.user.upsert({
+
+  const adminUser = await prisma.user.upsert({
     where: { email: "admin@cnm.local" },
-    update: { fullName: "Quản trị viên Hệ thống", roleId: adminRole.id },
+    update: { full_name: "Quản trị viên Hệ thống", role_id: adminRole.id, status: "ACTIVE" },
     create: {
       email: "admin@cnm.local",
       password: adminPassword,
-      fullName: "Quản trị viên Hệ thống",
-      roleId: adminRole.id
+      full_name: "Quản trị viên Hệ thống",
+      role_id: adminRole.id,
+      phone: "0901234567",
+      status: "ACTIVE"
     }
   });
 
-  await prisma.user.upsert({
+  const staffUser = await prisma.user.upsert({
+    where: { email: "staff@cnm.local" },
+    update: { full_name: "Nhân viên Bán hàng PC Mall", role_id: staffRole.id, status: "ACTIVE" },
+    create: {
+      email: "staff@cnm.local",
+      password: staffPassword,
+      full_name: "Nhân viên Bán hàng PC Mall",
+      role_id: staffRole.id,
+      phone: "0902345678",
+      status: "ACTIVE"
+    }
+  });
+
+  const staffExampleUser = await prisma.user.upsert({
+    where: { email: "staff@example.com" },
+    update: { full_name: "Staff Demo", role_id: staffRole.id, status: "ACTIVE" },
+    create: {
+      email: "staff@example.com",
+      password: staffPassword,
+      full_name: "Staff Demo",
+      role_id: staffRole.id,
+      phone: "0900000003",
+      status: "ACTIVE"
+    }
+  });
+
+  const customerUser = await prisma.user.upsert({
     where: { email: "customer@cnm.local" },
-    update: { fullName: "Khách hàng mẫu", roleId: customerRole.id },
+    update: { full_name: "Khách hàng Mẫu PC Mall", role_id: customerRole.id, status: "ACTIVE" },
     create: {
       email: "customer@cnm.local",
       password: customerPassword,
-      fullName: "Khách hàng mẫu",
-      roleId: customerRole.id
+      full_name: "Khách hàng Mẫu PC Mall",
+      role_id: customerRole.id,
+      phone: "0988123456",
+      status: "ACTIVE"
     }
   });
+  console.log("   ✓ Users verified: admin@cnm.local, staff@cnm.local, staff@example.com, customer@cnm.local");
 
-  // 3. Categories
-  console.log("Seeding Categories...");
-  const categories = [
-    { name: "CPU", description: "Bộ vi xử lý trung tâm cho máy tính để bàn" },
-    { name: "Mainboard", description: "Bo mạch chủ hỗ trợ các chipset mới nhất" },
-    { name: "RAM", description: "Bộ nhớ truy cập ngẫu nhiên tốc độ cao" },
-    { name: "GPU", description: "Card đồ họa hiệu năng cao cho gaming và đồ họa" },
-    { name: "SSD", description: "Ổ cứng thể rắn tốc độ cực cao (NVMe PCIe 4.0/5.0)" },
-    { name: "PSU", description: "Nguồn máy tính công suất thực, chuẩn 80 Plus" },
-    { name: "Case", description: "Vỏ máy tính thiết kế hiện đại, tản nhiệt tối ưu" },
-    { name: "Cooling", description: "Tản nhiệt khí và tản nhiệt nước AIO" }
-  ];
+  // ── 3. Categories ─────────────────────────────────────
+  console.log("3. Seeding Categories...");
+  const categoriesList = ["CPU", "MAINBOARD", "RAM", "GPU", "SSD", "PSU", "CASE", "COOLING"];
+  const categoryMap = {};
 
-  for (const cat of categories) {
-    await prisma.category.upsert({
-      where: { name: cat.name },
-      update: { description: cat.description, slug: slugify(cat.name) },
-      create: { name: cat.name, slug: slugify(cat.name), description: cat.description, isActive: true }
-    });
-  }
-
-  const dbCats = await prisma.category.findMany();
-  const catMap = {};
-  dbCats.forEach(c => (catMap[c.name.toLowerCase()] = c.id));
-
-  const categoryImages = {
-    cpu: "https://images.unsplash.com/photo-1591799264318-7e6ef8ddb7ea?q=80&w=800",
-    mainboard: "https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=800",
-    gpu: "https://images.unsplash.com/photo-1591488320449-011701bb6704?q=80&w=800",
-    ram: "https://images.unsplash.com/photo-1541029071515-84cc54f84dc5?q=80&w=800",
-    ssd: "https://images.unsplash.com/photo-1591405351990-4726e331f141?q=80&w=800",
-    psu: "https://images.unsplash.com/photo-1581092160562-40aa08e78837?q=80&w=800",
-    case: "https://images.unsplash.com/photo-1547082299-de196ea013d6?q=80&w=800",
-    cooling: "https://images.unsplash.com/photo-1563770660941-20978e870813?q=80&w=800"
-  };
-
-  // 4. Products
-  console.log("Seeding Products...");
-  const manualProducts = [
-    {
-      sku: "CPU-I7-14700K",
-      name: "Intel Core i7-14700K (3.4GHz up to 5.6GHz, 20 Nhân 28 Luồng)",
-      price: 11500000,
-      category: "cpu",
-      image: categoryImages.cpu,
-      description: "Intel Core i7-14700K là bộ vi xử lý thế hệ 14 mới nhất. Lựa chọn tuyệt vời cho gaming và đồ họa.",
-      attributes: { socket: "LGA1700", cores: "20" }
-    },
-    {
-      sku: "CPU-R7-7800X3D",
-      name: "AMD Ryzen 7 7800X3D (4.2GHz up to 5.0GHz, 8 Nhân 16 Luồng)",
-      price: 10900000,
-      category: "cpu",
-      image: categoryImages.cpu,
-      description: "Ông hoàng gaming với công nghệ 3D V-Cache.",
-      attributes: { socket: "AM5", cores: "8" }
-    },
-    {
-      sku: "GPU-RTX4080S-ROG",
-      name: "ASUS ROG Strix GeForce RTX 4080 SUPER 16GB GDDR6X",
-      price: 36500000,
-      category: "gpu",
-      image: categoryImages.gpu,
-      description: "Hiệu năng đồ họa đỉnh cao kiến trúc Ada Lovelace.",
-      attributes: { vram: "16GB", power: "320W" }
+  for (const catName of categoriesList) {
+    let cat = await prisma.category.findFirst({ where: { name: catName } });
+    if (!cat) {
+      cat = await prisma.category.create({ data: { name: catName } });
     }
+    categoryMap[catName.toLowerCase()] = cat.id;
+  }
+  console.log(`   ✓ ${categoriesList.length} Categories verified`);
+
+  // ── 4. Brands ─────────────────────────────────────────
+  console.log("4. Seeding Brands...");
+  const brandsList = [
+    { name: "Intel", logo_url: "https://upload.wikimedia.org/wikipedia/commons/7/7d/Intel_logo_%282020%29.svg" },
+    { name: "AMD", logo_url: "https://upload.wikimedia.org/wikipedia/commons/7/7c/AMD_Logo.svg" },
+    { name: "ASUS", logo_url: "https://upload.wikimedia.org/wikipedia/commons/2/2e/ASUS_Logo.svg" },
+    { name: "MSI", logo_url: "https://upload.wikimedia.org/wikipedia/commons/0/06/MSI_Logo.svg" },
+    { name: "Gigabyte", logo_url: "https://upload.wikimedia.org/wikipedia/commons/c/c3/Gigabyte_Technology_logo_2008.svg" },
+    { name: "Corsair", logo_url: "https://upload.wikimedia.org/wikipedia/commons/d/dd/Corsair_Memory_logo.svg" },
+    { name: "Samsung", logo_url: "https://upload.wikimedia.org/wikipedia/commons/2/24/Samsung_Logo.svg" },
+    { name: "Kingston", logo_url: "https://upload.wikimedia.org/wikipedia/commons/9/94/Kingston_Technology_logo.svg" },
+    { name: "Cooler Master", logo_url: "" },
+    { name: "DeepCool", logo_url: "" },
+    { name: "Thermalright", logo_url: "" }
   ];
 
-  // Generate more random products
-  const brands = ["ASUS", "MSI", "Gigabyte", "Corsair", "Samsung", "NZXT", "Kingston", "DeepCool"];
-  const categoriesList = ["cpu", "mainboard", "gpu", "ram", "ssd", "psu", "case", "cooling"];
+  for (const b of brandsList) {
+    let brand = await prisma.brand.findFirst({ where: { name: b.name } });
+    if (!brand) {
+      await prisma.brand.create({
+        data: {
+          name: b.name,
+          slug: slugify(b.name),
+          logo_url: b.logo_url || null,
+          status: "ACTIVE",
+          is_active: true
+        }
+      });
+    }
+  }
+  console.log(`   ✓ ${brandsList.length} Brands verified`);
 
-  const allProducts = [...manualProducts];
-  for (let i = 1; i <= 40; i++) {
-    const brand = brands[i % brands.length];
-    const category = categoriesList[i % categoriesList.length];
-    allProducts.push({
-      sku: `${category.toUpperCase()}-${brand.toUpperCase()}-${1000 + i}`,
-      name: `${brand} ${category.toUpperCase()} Model ${200 + i} Gaming Pro Max`,
-      price: 1500000 + (Math.random() * 25000000),
-      category: category,
-      image: categoryImages[category],
-      description: `Sản phẩm ${category} hiệu năng cao từ ${brand}. Phù hợp cho mọi nhu cầu sử dụng.`,
-      attributes: { brand: brand, series: "Gaming" }
+  // ── 5. User Shipping Address ──────────────────────────
+  console.log("5. Seeding User Addresses...");
+  let addr = await prisma.address.findFirst({ where: { user_id: customerUser.id } });
+  if (!addr) {
+    addr = await prisma.address.create({
+      data: {
+        user_id: customerUser.id,
+        full_name: "Khách hàng Mẫu PC Mall",
+        phone: "0988123456",
+        address_line: "Số 123 Đường Công Nghệ Mới",
+        ward: "Phường Bến Nghé",
+        district: "Quận 1",
+        province: "TP. Hồ Chí Minh"
+      }
     });
   }
+  console.log("   ✓ Default customer address verified");
 
-  for (const p of allProducts) {
-    const catId = catMap[p.category.toLowerCase()];
-    if (!catId) continue;
+  // ── 6. Realistic Demo Orders & Warranties ─────────────
+  console.log("6. Seeding Demo Orders & Warranties...");
+  const sampleSkus = await prisma.productSku.findMany({
+    take: 6,
+    include: { Product: true }
+  });
 
-    await prisma.$transaction(async (tx) => {
-      const product = await tx.product.upsert({
-        where: { sku: p.sku },
-        update: { name: p.name, description: p.description, price: p.price, categoryId: catId },
-        create: {
-          sku: p.sku,
-          name: p.name,
-          slug: slugify(p.name),
-          description: p.description,
-          price: p.price,
-          stock: 50,
-          isActive: true,
-          categoryId: catId
-        }
-      });
-
-      await tx.productSku.upsert({
-        where: { sku: p.sku + "-MAIN" },
-        update: { imageUrl: p.image, price: p.price },
-        create: {
-          productId: product.id,
-          sku: p.sku + "-MAIN",
-          price: p.price,
-          imageUrl: p.image,
-          stock: 50,
-          status: "ACTIVE"
-        }
-      });
-
-      await tx.productVariant.upsert({
-        where: { sku: p.sku + "-VAR" },
-        update: { imageUrl: p.image, price: p.price },
-        create: {
-          productId: product.id,
-          sku: p.sku + "-VAR",
-          price: p.price,
-          imageUrl: p.image,
-          stock: 50
-        }
-      });
-
-      await tx.productAttribute.deleteMany({ where: { productId: product.id } });
-      await tx.productAttribute.createMany({
-        data: Object.entries(p.attributes || {}).map(([key, value]) => ({
-          productId: product.id,
-          key,
-          value
-        }))
-      });
+  if (sampleSkus.length >= 2) {
+    const existingOrders = await prisma.order.findMany({
+      where: { user_id: customerUser.id }
     });
+
+    if (existingOrders.length === 0) {
+      // Order 1: Completed Gaming Upgrade
+      const item1 = sampleSkus[0];
+      const item2 = sampleSkus[1];
+      const p1Price = Number(item1.price || 5000000);
+      const p2Price = Number(item2.price || 3000000);
+      const total1 = p1Price + p2Price;
+
+      const order1 = await prisma.order.create({
+        data: {
+          user_id: customerUser.id,
+          status: "COMPLETED",
+          payment_status: "PAID",
+          payment_method: "VNPAY",
+          address_id: addr.id,
+          total_price: total1,
+          total_amount: total1,
+          shipping_fee: 0,
+          final_amount: total1,
+          shipping_address: "Số 123 Đường Công Nghệ Mới, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh",
+          note: "Giao giờ hành chính, gọi trước khi đến"
+        }
+      });
+
+      const oItem1 = await prisma.orderItem.create({
+        data: {
+          order_id: order1.id,
+          product_variant_id: item1.id,
+          product_id: item1.product_id,
+          quantity: 1,
+          unit_price: p1Price,
+          line_total: p1Price,
+          sku_snapshot: item1.sku || "SKU-001",
+          name_snapshot: item1.Product?.name || "Linh kiện PC Mall 1"
+        }
+      });
+
+      const oItem2 = await prisma.orderItem.create({
+        data: {
+          order_id: order1.id,
+          product_variant_id: item2.id,
+          product_id: item2.product_id,
+          quantity: 1,
+          unit_price: p2Price,
+          line_total: p2Price,
+          sku_snapshot: item2.sku || "SKU-002",
+          name_snapshot: item2.Product?.name || "Linh kiện PC Mall 2"
+        }
+      });
+
+      // Electronic Warranty for Completed Order Items
+      const expiresAt = new Date();
+      expiresAt.setFullYear(expiresAt.getFullYear() + 3);
+
+      await prisma.warrantyItem.create({
+        data: {
+          user_id: customerUser.id,
+          order_id: order1.id,
+          order_item_id: oItem1.id,
+          sku_id: item1.id,
+          warranty_code: `WAR-${Date.now()}-001`,
+          status: "ACTIVE",
+          note: "Bảo hành chính hãng 36 tháng",
+          activated_at: new Date(),
+          expires_at: expiresAt
+        }
+      });
+
+      await prisma.warrantyItem.create({
+        data: {
+          user_id: customerUser.id,
+          order_id: order1.id,
+          order_item_id: oItem2.id,
+          sku_id: item2.id,
+          warranty_code: `WAR-${Date.now()}-002`,
+          status: "ACTIVE",
+          note: "Bảo hành chính hãng 36 tháng",
+          activated_at: new Date(),
+          expires_at: expiresAt
+        }
+      });
+
+      // Order 2: Processing Order
+      const item3 = sampleSkus[2] || sampleSkus[0];
+      const p3Price = Number(item3.price || 1500000);
+
+      await prisma.order.create({
+        data: {
+          user_id: customerUser.id,
+          status: "DELIVERING",
+          payment_status: "PAID",
+          payment_method: "COD",
+          address_id: addr.id,
+          total_price: p3Price + 30000,
+          total_amount: p3Price,
+          shipping_fee: 30000,
+          final_amount: p3Price + 30000,
+          shipping_address: "Số 123 Đường Công Nghệ Mới, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh",
+          note: "Đang được chuyển qua đơn vị vận chuyển GHN"
+        }
+      });
+
+      console.log("   ✓ Sample Orders & Electronic Warranties seeded successfully");
+    } else {
+      console.log(`   ✓ Customer already has ${existingOrders.length} orders`);
+    }
   }
 
-  console.log("Rich Seed Completed successfully with Roles, Users, and 43+ Products!");
+  // ── 7. Support Tickets ────────────────────────────────
+  console.log("7. Seeding Support Tickets...");
+  const existingTickets = await prisma.ticket.findMany({
+    where: { user_id: customerUser.id }
+  });
+
+  if (existingTickets.length === 0) {
+    const t1 = await prisma.ticket.create({
+      data: {
+        user_id: customerUser.id,
+        title: "Tư vấn nâng cấp RAM DDR5 cho Mainboard B760",
+        description: "Mình đang dùng mainboard ASUS Prime B760M-A, muốn hỏi nên chọn RAM DDR5 bus 5600 hay 6000 thì tối ưu nhất?",
+        status: "RESOLVED",
+        priority: "MEDIUM",
+        assigned_to_id: staffUser.id
+      }
+    });
+
+    await prisma.ticketMessage.create({
+      data: {
+        ticket_id: t1.id,
+        user_id: customerUser.id,
+        message: "Chào shop, mình cần tư vấn kit RAM DDR5 32GB bus 6000MHz cho main ASUS B760 ạ.",
+        visibility: "PUBLIC"
+      }
+    });
+
+    await prisma.ticketMessage.create({
+      data: {
+        ticket_id: t1.id,
+        user_id: staffUser.id,
+        message: "Dạ chào bạn! Với mainboard ASUS B760, bạn chọn kit Corsair Vengeance hoặc Dominator 6000MHz là chuẩn tối ưu nhất, bật XMP 1 click là chạy mượt mà không lo quá nhiệt ạ.",
+        visibility: "PUBLIC"
+      }
+    });
+
+    console.log("   ✓ Sample Support Tickets & Conversation seeded");
+  } else {
+    console.log(`   ✓ Customer already has ${existingTickets.length} support tickets`);
+  }
+
+  console.log("🎉 seed-rich.js completed successfully with 100% database compatibility!");
 }
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error("Seeding error:", e);
     process.exit(1);
   })
   .finally(async () => {
