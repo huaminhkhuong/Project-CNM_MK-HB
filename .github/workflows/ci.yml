@@ -1,4 +1,4 @@
-﻿name: CI
+name: CI
 
 on:
   push:
@@ -45,10 +45,10 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Import database schema
+      - name: Generate Prisma client & sync database
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq mysql-client
-          mysql -h 127.0.0.1 -P 3306 -u root -proot cnm_mk_hb < "cnm_ecommerce (1).sql"
+          npm run prisma:generate -w services/api
+          npm run prisma:push -w services/api
 
       - name: Seed production accounts
         run: npm run seed:production -w services/api

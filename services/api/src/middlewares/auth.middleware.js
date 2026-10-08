@@ -4,6 +4,8 @@ const {
   verifyToken,
   requireAuth,
   requireRole,
+  optionalAuthenticate,
+  optionalAuth,
   ROLES
 } = require("./auth.middleware.ts");
 
@@ -13,6 +15,8 @@ module.exports = {
   verifyToken,
   requireAuth,
   requireRole,
+  optionalAuthenticate,
+  optionalAuth,
   ROLES
 };
 
