@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, after } from "node:test";
 import request from "supertest";
 
 import { createApp } from "../src/app";
 import { signRefreshToken } from "../src/services/token.service";
+import { prisma } from "../src/config/prisma";
+const { closePool } = require("../src/config/database");
 
 const runIntegration = process.env.RUN_API_INTEGRATION === "1";
 
@@ -21,6 +23,15 @@ describe("auth refresh token", () => {
 
 describe("auth smoke", { skip: !runIntegration }, () => {
   const app = createApp();
+
+  after(async () => {
+    try {
+      await prisma.$disconnect();
+    } catch {}
+    try {
+      await closePool();
+    } catch {}
+  });
 
   it("logs in admin demo account", async () => {
     const response = await request(app).post("/api/auth/login").send({

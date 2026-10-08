@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, after } from "node:test";
 import request from "supertest";
 
 import { createApp } from "../src/app";
+import { prisma } from "../src/config/prisma";
 
 describe("GET /api/health", () => {
+  after(async () => {
+    try {
+      await prisma.$disconnect();
+    } catch {}
+  });
+
   it("returns service status and database probe", async () => {
     const app = createApp();
     const response = await request(app).get("/api/health");
@@ -15,3 +22,4 @@ describe("GET /api/health", () => {
     assert.equal(typeof response.body.database.connected, "boolean");
   });
 });
+
