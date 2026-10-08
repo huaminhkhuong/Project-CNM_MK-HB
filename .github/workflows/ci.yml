@@ -62,4 +62,11 @@ jobs:
         run: npm run build
 
       - name: Test API
-        run: npm test -w services/api
+        run: |
+          npm test -w services/api 2>&1 | tee test-output.log || {
+            echo "### ❌ Test API Failed Output" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat test-output.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          }
