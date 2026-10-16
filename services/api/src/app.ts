@@ -11,7 +11,8 @@ import { requestLogger } from "./middlewares/request-logger.middleware";
 import { apiRouter } from "./routes";
 
 (BigInt.prototype as any).toJSON = function () {
-  return Number(this);
+  const num = Number(this);
+  return Number.isSafeInteger(num) ? num : this.toString();
 };
 
 export function createApp() {

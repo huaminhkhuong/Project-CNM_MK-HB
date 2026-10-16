@@ -477,8 +477,53 @@ async function getProducts(params = {}) {
 
     const totalItems = Number(totalRows[0]?.total_items || 0);
     if (Array.isArray(items)) {
+      // Tải kèm specs và skuId cho từng sản phẩm để PC Builder và catalog hiển thị thông số chính xác 100%
+      const productIds = items.map(item => item.product_id).filter(Boolean);
+      let specsMap = new Map();
+      let skuMap = new Map();
+
+      if (productIds.length > 0 && config.skus && config.skuAttributes && config.attributes && config.attributeValues) {
+        try {
+          const specRows = await query(
+            `
+              SELECT 
+                s.${config.skus.productId} AS product_id,
+                s.${config.skus.id} AS sku_id,
+                a.${config.attributes.name} AS attribute_name,
+                av.${config.attributeValues.value} AS attribute_value
+              FROM ${config.skus.table} s
+              INNER JOIN ${config.skuAttributes.table} sa ON sa.${config.skuAttributes.skuId} = s.${config.skus.id}
+              INNER JOIN ${config.attributeValues.table} av ON av.${config.attributeValues.id} = sa.${config.skuAttributes.attributeValueId}
+              INNER JOIN ${config.attributes.table} a ON a.${config.attributes.id} = av.${config.attributeValues.attributeId}
+              WHERE s.${config.skus.productId} IN (${productIds.map(() => "?").join(", ")})
+              ORDER BY s.${config.skus.id} ASC, a.${config.attributes.name} ASC
+            `,
+            productIds
+          );
+
+          for (const row of (specRows || [])) {
+            if (!specsMap.has(row.product_id)) {
+              specsMap.set(row.product_id, []);
+            }
+            specsMap.get(row.product_id).push({
+              name: row.attribute_name,
+              value: row.attribute_value,
+              key: row.attribute_name
+            });
+
+            if (!skuMap.has(row.product_id)) {
+              skuMap.set(row.product_id, row.sku_id);
+            }
+          }
+        } catch (_err) {
+          // Bỏ qua lỗi phụ nếu bảng attributes chưa đồng bộ
+        }
+      }
+
       const normalizedItems = items.map((item) => ({
         ...item,
+        sku_id: skuMap.get(item.product_id) || item.product_id,
+        specs: specsMap.get(item.product_id) || [],
         image_url: normalizeProductImageUrl(item.image_url, item.category_name, item.product_name)
       }));
 

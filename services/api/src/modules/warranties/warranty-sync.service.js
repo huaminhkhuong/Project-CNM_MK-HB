@@ -6,7 +6,10 @@ function addWarrantyPeriod(date = new Date(), months = 12) {
   return expiresAt;
 }
 
-function generateWarrantyCode(orderItemId) {
+function generateWarrantyCode(orderItemId, serialNumber) {
+  if (serialNumber && String(serialNumber).trim()) {
+    return `SN-${String(serialNumber).trim().toUpperCase()}`;
+  }
   return `BH-${orderItemId}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 }
 
@@ -31,7 +34,10 @@ function getWarrantyMonthsFromItem(item) {
   return 24;
 }
 
+let isWarrantyNotificationTableEnsured = false;
+
 async function ensureWarrantyNotificationTable() {
+  if (isWarrantyNotificationTableEnsured) return;
   await query(`
     CREATE TABLE IF NOT EXISTS warranty_notifications (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -45,6 +51,7 @@ async function ensureWarrantyNotificationTable() {
       INDEX idx_warranty_notifications_read (user_id, is_read)
     )
   `);
+  isWarrantyNotificationTableEnsured = true;
 }
 
 async function createWarrantyRecordsForDeliveredOrder(orderId) {
@@ -74,6 +81,7 @@ async function createWarrantyRecordsForDeliveredOrder(orderId) {
         oi.id,
         oi.order_id AS orderId,
         oi.product_variant_id AS skuId,
+        oi.serial_number AS serialNumber,
         c.name AS categoryName,
         p.name AS productName
       FROM order_items oi
@@ -108,7 +116,7 @@ async function createWarrantyRecordsForDeliveredOrder(orderId) {
           item.orderId,
           item.id,
           item.skuId || null,
-          generateWarrantyCode(item.id),
+          generateWarrantyCode(item.id, item.serialNumber),
           "Auto-created when order was completed",
           now,
           itemExpiresAt

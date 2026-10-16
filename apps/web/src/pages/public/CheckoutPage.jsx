@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 
 import { useAuth } from "../../hooks/useAuth";
 import { getCart } from "../../services/cart.service";
@@ -196,8 +196,10 @@ function loadDirectCheckoutDraft() {
 
 export function CheckoutPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { isAuthenticated, authState, refreshProfile } = useAuth();
   const [currentUser, setCurrentUser] = useState(authState?.user);
+  const [appliedCoupon, setAppliedCoupon] = useState(() => location.state?.appliedCoupon || null);
 
   // States
   const [cart, setCart] = useState(null);
@@ -308,7 +310,8 @@ export function CheckoutPage() {
   const items = useMemo(() => cart?.items || [], [cart]);
   const totalAmount = Number(cart?.totalAmount || 0);
   const shippingFee = Number(formValues.shippingFee || 0);
-  const finalAmount = useMemo(() => totalAmount + shippingFee, [shippingFee, totalAmount]);
+  const discountAmount = Number(appliedCoupon?.discountAmount || 0);
+  const finalAmount = useMemo(() => Math.max(0, totalAmount - discountAmount + shippingFee), [shippingFee, totalAmount, discountAmount]);
   const selectedPaymentOption = useMemo(
     () => PAYMENT_METHOD_CARDS.find((option) => option.value === formValues.paymentMethod) || null,
     [formValues.paymentMethod]
@@ -615,6 +618,7 @@ export function CheckoutPage() {
         addressId: Number(formValues.addressId),
         paymentMethod: formValues.paymentMethod,
         shippingFee: Number(formValues.shippingFee || 0),
+        couponCode: appliedCoupon?.code || undefined,
         note: String(formValues.note || "").trim() || undefined,
         ...(orderItemsPayload ? { items: orderItemsPayload } : {})
       });
@@ -667,7 +671,7 @@ export function CheckoutPage() {
             <div style={{ fontSize: 64, marginBottom: 24, padding: "20px", display: "inline-block", background: "#f1f5f9", borderRadius: "50%" }}>🔒</div>
             <h2 style={{ fontSize: 28, fontWeight: 900 }}>Yêu cầu đăng nhập</h2>
             <p style={{ color: "#64748b", margin: "16px 0 32px", fontSize: 16 }}>Bạn cần đăng nhập để thực hiện thanh toán và theo dõi siêu phẩm công nghệ.</p>
-            <Link to="/login" style={{ padding: "14px 32px", borderRadius: 16, background: "var(--market-primary)", color: "#fff", textDecoration: "none", fontWeight: 800 }}>Đăng nhập ngay</Link>
+            <Link to="/login" state={{ from: { pathname: "/checkout" } }} style={{ padding: "14px 32px", borderRadius: 16, background: "var(--market-primary)", color: "#fff", textDecoration: "none", fontWeight: 800 }}>Đăng nhập ngay</Link>
         </div>
     </div>
   );
@@ -1649,6 +1653,15 @@ export function CheckoutPage() {
                       {selectedPaymentOption ? `${selectedPaymentOption.label} (${selectedPaymentOption.shortLabel})` : "Chưa chọn phương thức thanh toán"}
                     </span>
                   </div>
+
+                  {appliedCoupon && (
+                    <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 12, borderTop: "1px dashed #cbd5e1", paddingTop: 10 }}>
+                      <span style={{ color: "#16a34a", fontWeight: 700 }}>Voucher giảm giá:</span>
+                      <strong style={{ color: "#16a34a" }}>
+                        {appliedCoupon.code} (-{Number(appliedCoupon.discountAmount).toLocaleString("vi-VN")}đ)
+                      </strong>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1726,6 +1739,12 @@ export function CheckoutPage() {
                       <span>Phí giao hàng</span>
                       <span style={{ color: "#059669", background: "rgba(5, 150, 105, 0.08)", padding: "2px 8px", borderRadius: 6, fontSize: "12px", fontWeight: 800 }}>Miễn phí</span>
                     </div>
+                    {discountAmount > 0 && (
+                      <div style={{ display: "flex", justifyContent: "space-between", color: "#16a34a", fontWeight: 700, fontSize: 14 }}>
+                        <span>Giảm giá ({appliedCoupon?.code})</span>
+                        <span style={{ color: "#16a34a", fontWeight: 800 }}>-{formatCurrency(discountAmount)} đ</span>
+                      </div>
+                    )}
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 18, fontWeight: 900, color: "#0f172a", marginTop: 8, alignItems: "flex-end" }}>
                       <span>Thành tiền</span>
                       <div style={{ textAlign: "right" }}>

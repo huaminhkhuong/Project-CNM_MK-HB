@@ -1,13 +1,11 @@
 import { Request, Response } from "express";
 import { v4 as uuidv4 } from "uuid";
 
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../../config/prisma";
 import {
   emitToChatRoom,
   emitToStaffChatQueue
 } from "../../socket/socket.service";
-
-const prisma = new PrismaClient();
 
 type ChatSender = "customer" | "staff" | "system";
 type ChatStatus = "open" | "assigned" | "waiting_customer" | "waiting_staff" | "resolved" | "waiting" | "active" | "closed";

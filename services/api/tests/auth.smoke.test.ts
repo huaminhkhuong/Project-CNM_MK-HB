@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it, after } from "node:test";
+import { describe, it, before, after } from "node:test";
 import request from "supertest";
 
 import { createApp } from "../src/app";
@@ -22,7 +22,11 @@ describe("auth refresh token", () => {
 });
 
 describe("auth smoke", { skip: !runIntegration }, () => {
-  const app = createApp();
+  let app: any;
+
+  before(() => {
+    app = createApp();
+  });
 
   after(async () => {
     try {

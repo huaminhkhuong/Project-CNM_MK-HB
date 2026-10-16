@@ -2,10 +2,10 @@ const http = require("http");
 
 const API_HOST = process.env.API_HOST || "localhost";
 const API_PORT = Number(process.env.API_PORT || 4000);
-const SALES_EMAIL = process.env.SALES_EMAIL || "sales@example.com";
-const SALES_PASSWORD = process.env.SALES_PASSWORD || "123456";
-const CUSTOMER_EMAIL = process.env.CUSTOMER_EMAIL || "customer@example.com";
-const CUSTOMER_PASSWORD = process.env.CUSTOMER_PASSWORD || "123456";
+const SALES_EMAIL = process.env.SALES_EMAIL || "sales@cnm.local";
+const SALES_PASSWORD = process.env.SALES_PASSWORD || "Sales@123";
+const CUSTOMER_EMAIL = process.env.CUSTOMER_EMAIL || "customer@cnm.local";
+const CUSTOMER_PASSWORD = process.env.CUSTOMER_PASSWORD || "Customer@123";
 const TRACKING_CODE = process.env.TRACKING_CODE || `TRACK-${Date.now()}`;
 const TARGET_ORDER_ID = process.env.ORDER_ID ? Number(process.env.ORDER_ID) : null;
 

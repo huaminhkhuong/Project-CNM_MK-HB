@@ -2815,6 +2815,10 @@
   margin-bottom: 24px;
   box-shadow: var(--v2-shadow-xs);
   transition: all 0.2s ease;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .candidate-panel-header {
@@ -2924,6 +2928,10 @@
   border-radius: 12px;
   border: 1px solid #e2e8f0;
   padding: 16px;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .candidate-overview-bar {
@@ -2985,9 +2993,13 @@
 
 .candidate-components-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
   margin-bottom: 16px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .candidate-comp-item {
@@ -2998,6 +3010,11 @@
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid #e2e8f0;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .candidate-comp-row {
@@ -3005,6 +3022,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .candidate-comp-badge {
@@ -3016,6 +3036,7 @@
   border-radius: 4px;
   min-width: 54px;
   text-align: center;
+  flex-shrink: 0;
 }
 
 .candidate-comp-name {
@@ -3023,6 +3044,7 @@
   font-weight: 700;
   color: #1e293b;
   flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3032,6 +3054,8 @@
   font-size: 12px;
   font-weight: 800;
   color: #0f172a;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .candidate-comp-explanation {
@@ -3631,6 +3655,128 @@
   background: linear-gradient(135deg, #059669, #10b981);
   box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   MOBILE BUILDER STICKY BAR (< 992px)
+   ════════════════════════════════════════════════════════════════════════ */
+.mobile-builder-sticky-bar {
+  display: none;
+}
+
+@media (max-width: 991px) {
+  .mobile-builder-sticky-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #0f172a;
+    color: #ffffff;
+    padding: 12px 16px;
+    z-index: 999;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+    border-top: 1px solid #1e293b;
+    gap: 12px;
+  }
+
+  /* Padding bottom for workspace so content isn't covered by sticky bar */
+  .builder-page {
+    padding-bottom: 74px;
+  }
+
+  .mobile-bar-left {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .mobile-bar-price-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .mobile-bar-price {
+    font-size: 15px;
+    font-weight: 900;
+    color: #38bdf8;
+    line-height: 1.2;
+  }
+
+  .mobile-bar-badge {
+    font-size: 10px;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 6px;
+  }
+
+  .mobile-bar-badge.is-ready {
+    background: #065f46;
+    color: #34d399;
+  }
+
+  .mobile-bar-badge.is-blocked {
+    background: #991b1b;
+    color: #fca5a5;
+  }
+
+  .mobile-bar-meta {
+    font-size: 11px;
+    color: #94a3b8;
+  }
+
+  .mobile-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .btn-mobile-summary {
+    background: #1e293b;
+    color: #e2e8f0;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+  }
+
+  .btn-mobile-summary:hover {
+    background: #334155;
+  }
+
+  .btn-mobile-order {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: #ffffff;
+    border: none;
+    border-radius: 10px;
+    padding: 8px 16px;
+    font-size: 12.5px;
+    font-weight: 800;
+    cursor: pointer;
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+    transition: all 0.15s ease;
+  }
+
+  .btn-mobile-order:hover:not(:disabled) {
+    background: linear-gradient(135deg, #1d4ed8, #1e40af);
+  }
+
+  .btn-mobile-order.is-disabled,
+  .btn-mobile-order:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: #475569;
+    box-shadow: none;
+  }
+}
+
 
 
 

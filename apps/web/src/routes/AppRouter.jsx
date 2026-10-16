@@ -1,45 +1,71 @@
+import { lazy, Suspense } from "react";
 import { Navigate, useRoutes } from "react-router-dom";
 
 import { AdminLayout } from "../layouts/AdminLayout";
 import { PublicLayout } from "../layouts/PublicLayout";
 import { StaffLayout } from "../layouts/StaffLayout";
 import { TechLayout } from "../layouts/TechLayout";
-import { AdminAttributesPage } from "../pages/admin/AdminAttributesPage";
-import { AdminCompatibilityRulesPage } from "../pages/admin/AdminCompatibilityRulesPage";
-import { AdminDashboardPage } from "../pages/admin/AdminDashboardPage";
-import { AdminProductsPage } from "../pages/admin/AdminProductsPage";
-import { AdminSkusPage } from "../pages/admin/AdminSkusPage";
-import { AdminSystemPage } from "../pages/admin/AdminSystemPage";
-import { AdminUsersPage } from "../pages/admin/AdminUsersPage";
-import { AdminPaymentApprovalPage } from "../pages/admin/AdminPaymentApprovalPage";
-import { AiChatPage } from "../pages/public/AiChatPage";
-import { CartPage } from "../pages/public/CartPage";
-import { CheckoutPage } from "../pages/public/CheckoutPage";
-import { CompareProductsPage } from "../pages/public/CompareProductsPage";
-import { HomePage } from "../pages/public/HomePage";
-import { LoginPage } from "../pages/public/LoginPage";
-import { NotFoundPage } from "../pages/public/NotFoundPage";
-import { OrderDetailPage } from "../pages/public/OrderDetailPage";
-import { OrdersPage } from "../pages/public/OrdersPage";
-import { PaymentResultPage } from "../pages/public/PaymentResultPage";
-import { MockPaymentPage } from "../pages/public/MockPaymentPage";
-import { PcBuilderPage } from "../pages/public/PcBuilderPage";
-import { SharedBuildPage } from "../pages/public/SharedBuildPage";
-import { ProductDetailPage } from "../pages/public/ProductDetailPage";
-import { ProductListPage } from "../pages/public/ProductListPage";
-import { ProfilePage } from "../pages/public/ProfilePage";
-import { RegisterPage } from "../pages/public/RegisterPage";
-import { TicketCreatePage } from "../pages/public/TicketCreatePage";
-import { TicketDetailPage } from "../pages/public/TicketDetailPage";
-import { TicketListPage } from "../pages/public/TicketListPage";
-import { WarrantiesPage } from "../pages/public/WarrantiesPage";
-import { InformationPage } from "../pages/public/InformationPage";
-import { StaffOrdersPage } from "../pages/staff/StaffOrdersPage";
-import StaffChatPage from "../pages/staff/StaffChatPage";
-import { TechTicketsPage } from "../pages/tech/TechTicketsPage";
-import { TechCompatibilityPage } from "../pages/tech/TechCompatibilityPage";
-import { TechWarrantiesPage } from "../pages/tech/TechWarrantiesPage";
 import { routeConfig } from "./routeConfig";
+
+const PageLoader = () => (
+  <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "40vh" }}>
+    <div style={{ width: 36, height: 36, border: "3px solid #e2e8f0", borderTopColor: "#2563eb", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+  </div>
+);
+
+const load = (importer) => {
+  const Component = lazy(importer);
+  return function LazyWrapper(props) {
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <Component {...props} />
+      </Suspense>
+    );
+  };
+};
+
+// Admin Pages (Code Split)
+const AdminAttributesPage = load(() => import("../pages/admin/AdminAttributesPage").then((m) => ({ default: m.AdminAttributesPage })));
+const AdminCompatibilityRulesPage = load(() => import("../pages/admin/AdminCompatibilityRulesPage").then((m) => ({ default: m.AdminCompatibilityRulesPage })));
+const AdminDashboardPage = load(() => import("../pages/admin/AdminDashboardPage").then((m) => ({ default: m.AdminDashboardPage })));
+const AdminProductsPage = load(() => import("../pages/admin/AdminProductsPage").then((m) => ({ default: m.AdminProductsPage })));
+const AdminSkusPage = load(() => import("../pages/admin/AdminSkusPage").then((m) => ({ default: m.AdminSkusPage })));
+const AdminSystemPage = load(() => import("../pages/admin/AdminSystemPage").then((m) => ({ default: m.AdminSystemPage })));
+const AdminUsersPage = load(() => import("../pages/admin/AdminUsersPage").then((m) => ({ default: m.AdminUsersPage })));
+const AdminPaymentApprovalPage = load(() => import("../pages/admin/AdminPaymentApprovalPage").then((m) => ({ default: m.AdminPaymentApprovalPage })));
+
+// Public Pages (Code Split)
+const AiChatPage = load(() => import("../pages/public/AiChatPage").then((m) => ({ default: m.AiChatPage })));
+const CartPage = load(() => import("../pages/public/CartPage").then((m) => ({ default: m.CartPage })));
+const CheckoutPage = load(() => import("../pages/public/CheckoutPage").then((m) => ({ default: m.CheckoutPage })));
+const CompareProductsPage = load(() => import("../pages/public/CompareProductsPage").then((m) => ({ default: m.CompareProductsPage })));
+const HomePage = load(() => import("../pages/public/HomePage").then((m) => ({ default: m.HomePage })));
+const LoginPage = load(() => import("../pages/public/LoginPage").then((m) => ({ default: m.LoginPage })));
+const NotFoundPage = load(() => import("../pages/public/NotFoundPage").then((m) => ({ default: m.NotFoundPage })));
+const OrderDetailPage = load(() => import("../pages/public/OrderDetailPage").then((m) => ({ default: m.OrderDetailPage })));
+const OrdersPage = load(() => import("../pages/public/OrdersPage").then((m) => ({ default: m.OrdersPage })));
+const PaymentResultPage = load(() => import("../pages/public/PaymentResultPage").then((m) => ({ default: m.PaymentResultPage })));
+const MockPaymentPage = load(() => import("../pages/public/MockPaymentPage").then((m) => ({ default: m.MockPaymentPage })));
+const PcBuilderPage = load(() => import("../pages/public/PcBuilderPage").then((m) => ({ default: m.PcBuilderPage })));
+const SharedBuildPage = load(() => import("../pages/public/SharedBuildPage").then((m) => ({ default: m.SharedBuildPage })));
+const ProductDetailPage = load(() => import("../pages/public/ProductDetailPage").then((m) => ({ default: m.ProductDetailPage })));
+const ProductListPage = load(() => import("../pages/public/ProductListPage").then((m) => ({ default: m.ProductListPage })));
+const ProfilePage = load(() => import("../pages/public/ProfilePage").then((m) => ({ default: m.ProfilePage })));
+const RegisterPage = load(() => import("../pages/public/RegisterPage").then((m) => ({ default: m.RegisterPage })));
+const TicketCreatePage = load(() => import("../pages/public/TicketCreatePage").then((m) => ({ default: m.TicketCreatePage })));
+const TicketDetailPage = load(() => import("../pages/public/TicketDetailPage").then((m) => ({ default: m.TicketDetailPage })));
+const TicketListPage = load(() => import("../pages/public/TicketListPage").then((m) => ({ default: m.TicketListPage })));
+const WarrantiesPage = load(() => import("../pages/public/WarrantiesPage").then((m) => ({ default: m.WarrantiesPage })));
+const InformationPage = load(() => import("../pages/public/InformationPage").then((m) => ({ default: m.InformationPage })));
+
+// Staff Pages (Code Split)
+const StaffOrdersPage = load(() => import("../pages/staff/StaffOrdersPage").then((m) => ({ default: m.StaffOrdersPage })));
+const StaffChatPage = load(() => import("../pages/staff/StaffChatPage"));
+
+// Tech Pages (Code Split)
+const TechTicketsPage = load(() => import("../pages/tech/TechTicketsPage").then((m) => ({ default: m.TechTicketsPage })));
+const TechCompatibilityPage = load(() => import("../pages/tech/TechCompatibilityPage").then((m) => ({ default: m.TechCompatibilityPage })));
+const TechWarrantiesPage = load(() => import("../pages/tech/TechWarrantiesPage").then((m) => ({ default: m.TechWarrantiesPage })));
 
 export function AppRouter() {
   const routes = [

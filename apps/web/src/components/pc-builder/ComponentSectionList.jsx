@@ -1,11 +1,16 @@
 import React from "react";
 import { resolveProductImage } from "../../utils/productImage";
+import { getProductStock } from "./pcBuilderUtils";
 
 const formatCurrency = (v) => Number(v || 0).toLocaleString("vi-VN");
 
 const getProductName = (p) => p?.product_name || p?.name || p?.title || "Chưa chọn";
 const getSelectedProduct = (item) => item?.product || item;
-const getItemPrice = (item) => Number(item?.variant?.price || item?.product?.price || item?.price || 0);
+const getItemPrice = (item) => {
+  const unitPrice = Number(item?.variant?.price || item?.product?.price || item?.price || 0);
+  const qty = Math.max(1, Number(item?.quantity || 1));
+  return unitPrice * qty;
+};
 
 /**
  * ComponentSectionList — Danh sách 8 bước chọn linh kiện trong Sidebar
@@ -19,7 +24,9 @@ export function ComponentSectionList({
   insights,
   onRemoveComponent,
   onClearAll,
-  completionPercent = 0
+  completionPercent = 0,
+  onSubstitute,
+  onUpdateQuantity
 }) {
   const selectedCount = Object.keys(selectedItems || {}).length;
 
@@ -139,10 +146,100 @@ export function ComponentSectionList({
                     ? "Tùy chọn"
                     : "Chưa chọn"}
               </span>
+              {isDone && product && getProductStock(product) <= 0 && (
+                <div style={{ marginTop: "4px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span style={{
+                    fontSize: "10px",
+                    fontWeight: "800",
+                    color: "#dc2626",
+                    backgroundColor: "#fee2e2",
+                    padding: "1px 6px",
+                    borderRadius: "4px"
+                  }}>
+                    Hết hàng
+                  </span>
+                  {onSubstitute && (
+                    <button
+                      type="button"
+                      style={{
+                        backgroundColor: "#fef3c7",
+                        color: "#d97706",
+                        border: "1px solid #f59e0b",
+                        borderRadius: "4px",
+                        fontSize: "10px",
+                        fontWeight: "700",
+                        padding: "1px 6px",
+                        cursor: "pointer"
+                      }}
+                      title="Đổi linh kiện tương thích còn hàng"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSubstitute(section.componentType, product);
+                      }}
+                    >
+                      🔄 Đổi
+                    </button>
+                  )}
+                </div>
+              )}
+              {isDone && section.componentType === "ram" && onUpdateQuantity && (
+                <div style={{ marginTop: "6px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <button
+                    type="button"
+                    style={{
+                      fontSize: "10px",
+                      fontWeight: selected?.quantity === 2 ? "600" : "800",
+                      backgroundColor: selected?.quantity === 2 ? "#f1f5f9" : "#e0e7ff",
+                      color: selected?.quantity === 2 ? "#64748b" : "#4338ca",
+                      border: `1px solid ${selected?.quantity === 2 ? "#cbd5e1" : "#a5b4fc"}`,
+                      borderRadius: "4px",
+                      padding: "2px 6px",
+                      cursor: "pointer"
+                    }}
+                    title="1 thanh đơn lẻ (Single Channel)"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUpdateQuantity("ram", 1);
+                    }}
+                  >
+                    1 Thanh
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      fontSize: "10px",
+                      fontWeight: selected?.quantity === 2 ? "800" : "600",
+                      backgroundColor: selected?.quantity === 2 ? "#dbeafe" : "#f1f5f9",
+                      color: selected?.quantity === 2 ? "#1d4ed8" : "#64748b",
+                      border: `1px solid ${selected?.quantity === 2 ? "#93c5fd" : "#cbd5e1"}`,
+                      borderRadius: "4px",
+                      padding: "2px 6px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "3px"
+                    }}
+                    title="2 thanh kích hoạt Dual Channel tăng băng thông"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUpdateQuantity("ram", 2);
+                    }}
+                  >
+                    <span>⚡ 2 Thanh (Dual)</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {isDone && (
-              <span className="step-price">{formatCurrency(getItemPrice(selected))}đ</span>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+                <span className="step-price">{formatCurrency(getItemPrice(selected))}đ</span>
+                {selected?.quantity > 1 && (
+                  <span style={{ fontSize: "10px", color: "#64748b", fontWeight: "600" }}>
+                    x{selected.quantity}
+                  </span>
+                )}
+              </div>
             )}
 
             {isDone && (

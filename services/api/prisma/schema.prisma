@@ -218,6 +218,7 @@ model PcBuildItem {
   build_id       Int?
   sku_id         Int?
   component_type String?       @db.VarChar(50)
+  quantity       Int?          @default(1)
   PcBuild      PcBuild?    @relation(fields: [build_id], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_pc_build_items_build")
   ProductSku   ProductSku? @relation(fields: [sku_id], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_pc_build_items_sku")
 

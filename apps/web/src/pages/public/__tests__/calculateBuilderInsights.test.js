@@ -108,4 +108,158 @@ describe("Frontend Scoring Engine (calculateBuilderInsights & estimateProductPer
     assert.equal(insights.psuMarginPercent, 34);
     assert.equal(insights.buildReadiness, "WARNINGS_ACKNOWLEDGED"); // incomplete count 5 < requiredCount 8
   });
+
+  // Test 8: RAM Quantity Multiplier & Dual-Channel slot checking
+  it("multiplies RAM sticks by quantity and verifies slot capacity correctly", () => {
+    const mockMainboard2Slots = {
+      id: 25,
+      name: "ASUS PRIME H610M-K DDR4",
+      price: 1800000,
+      attributes: [{ name: "ram_slots", value: "2" }]
+    };
+    const mockSingleStickRam = {
+      id: 31,
+      name: "Kingston Fury Beast 8GB DDR4 3200",
+      price: 500000,
+      attributes: [{ name: "ram_type", value: "DDR4" }]
+    };
+
+    // 1 stick in 2 slots => Pass (1 stick / 2 slots)
+    const build1Stick = {
+      mainboard: mockMainboard2Slots,
+      ram: { product: mockSingleStickRam, quantity: 1 }
+    };
+    const insights1 = calculateBuilderInsights(build1Stick, 2, {});
+    const ramSlotCheck1 = insights1.checks.find((c) => c.label.includes("Khe cắm RAM khả dụng"));
+    assert.equal(ramSlotCheck1.ok, true);
+    assert.ok(ramSlotCheck1.detail.includes("1 thanh RAM / 2 khe Mainboard"));
+
+    // 2 sticks (Dual Channel toggle) in 2 slots => Pass (2 sticks / 2 slots)
+    const build2Sticks = {
+      mainboard: mockMainboard2Slots,
+      ram: { product: mockSingleStickRam, quantity: 2 }
+    };
+    const insights2 = calculateBuilderInsights(build2Sticks, 2, {});
+    const ramSlotCheck2 = insights2.checks.find((c) => c.label.includes("Khe cắm RAM khả dụng"));
+    assert.equal(ramSlotCheck2.ok, true);
+    assert.ok(ramSlotCheck2.detail.includes("2 thanh RAM / 2 khe Mainboard"));
+
+    // 3 sticks in 2 slots => Fail
+    const build3Sticks = {
+      mainboard: mockMainboard2Slots,
+      ram: { product: mockSingleStickRam, quantity: 3 }
+    };
+    const insights3 = calculateBuilderInsights(build3Sticks, 2, {});
+    const ramSlotCheck3 = insights3.checks.find((c) => c.label.includes("Khe cắm RAM khả dụng"));
+    assert.equal(ramSlotCheck3.ok, false);
+    assert.ok(ramSlotCheck3.detail.includes("3 thanh RAM / 2 khe Mainboard"));
+  });
+
+  // Test 9: Dual M.2 SSD Slot Verification (COMP-009)
+  it("verifies M.2 NVMe SSD capacity against Mainboard m2_slots correctly for dual storage", () => {
+    const mockMainboard1M2 = {
+      id: 26,
+      name: "ASUS H510M-E",
+      attributes: [{ name: "m2_slots", value: "1" }]
+    };
+    const mockMainboard2M2 = {
+      id: 27,
+      name: "B760M GAMING PLUS",
+      attributes: [{ name: "m2_slots", value: "2" }]
+    };
+
+    const mockM2Ssd1 = { id: 91, name: "Samsung 980 Pro 1TB NVMe M.2", attributes: [{ name: "storage_type", value: "M.2 NVMe" }] };
+    const mockM2Ssd2 = { id: 92, name: "Kingston NV2 500GB NVMe M.2", attributes: [{ name: "storage_type", value: "M.2 NVMe" }] };
+    const mockSataHdd = { id: 93, name: "Seagate 1TB SATA 3.5 HDD", attributes: [{ name: "storage_type", value: "SATA" }] };
+
+    // 2 M.2 SSDs on 1 M.2 slot Mainboard => Fail
+    const buildFail = {
+      mainboard: mockMainboard1M2,
+      storage: mockM2Ssd1,
+      storage_2: mockM2Ssd2
+    };
+    const insightsFail = calculateBuilderInsights(buildFail, 3, {});
+    const m2CheckFail = insightsFail.checks.find((c) => c.label.includes("COMP-009"));
+    assert.equal(m2CheckFail.ok, false);
+    assert.ok(m2CheckFail.detail.includes("2 ổ M.2 NVMe / 1 khe Mainboard"));
+
+    // 2 M.2 SSDs on 2 M.2 slot Mainboard => Pass
+    const buildPass = {
+      mainboard: mockMainboard2M2,
+      storage: mockM2Ssd1,
+      storage_2: mockM2Ssd2
+    };
+    const insightsPass = calculateBuilderInsights(buildPass, 3, {});
+    const m2CheckPass = insightsPass.checks.find((c) => c.label.includes("COMP-009"));
+    assert.equal(m2CheckPass.ok, true);
+    assert.ok(m2CheckPass.detail.includes("2 ổ M.2 NVMe / 2 khe Mainboard"));
+
+    // 1 M.2 SSD + 1 SATA HDD on 1 M.2 slot Mainboard => Pass (only 1 M.2 used)
+    const buildSataPass = {
+      mainboard: mockMainboard1M2,
+      storage: mockM2Ssd1,
+      storage_2: mockSataHdd
+    };
+    const insightsSataPass = calculateBuilderInsights(buildSataPass, 3, {});
+    const m2CheckSata = insightsSataPass.checks.find((c) => c.label.includes("COMP-009"));
+    assert.equal(m2CheckSata.ok, true);
+    assert.ok(m2CheckSata.detail.includes("1 ổ M.2 NVMe / 1 khe Mainboard"));
+  });
+
+  // Test 10: Stock cooler exclusion for unlocked/high-end CPUs (COMP-005)
+  it("enforces separate cooling requirement for Intel K/KF/KS/Ultra and AMD X/X3D CPUs even if marked box", () => {
+    const mockCpuUnlocked = {
+      id: 101,
+      name: "CPU Intel Core i7-14700K Boxed Chính Hãng",
+      attributes: [{ name: "tdp", value: "253" }, { name: "socket", value: "LGA1700" }]
+    };
+    const mockCpuRegularBoxed = {
+      id: 102,
+      name: "CPU Intel Core i5-12400 Boxed",
+      attributes: [{ name: "tdp", value: "65" }, { name: "socket", value: "LGA1700" }]
+    };
+
+    // Unlocked 14700K without cooler => cooling required, check COMP-005 fails
+    const insightsUnlocked = calculateBuilderInsights({ cpu: mockCpuUnlocked }, 1, {});
+    const coolerCheckUnlocked = insightsUnlocked.checks.find(c => c.label.includes("COMP-005"));
+    assert.equal(coolerCheckUnlocked.ok, false);
+    assert.ok(coolerCheckUnlocked.detail.includes("Bắt buộc chọn tản nhiệt rời"));
+
+    // Regular i5-12400 Boxed without cooler => cooling optional, check COMP-005 passes
+    const insightsRegular = calculateBuilderInsights({ cpu: mockCpuRegularBoxed }, 1, {});
+    const coolerCheckRegular = insightsRegular.checks.find(c => c.label.includes("COMP-005"));
+    assert.equal(coolerCheckRegular.ok, true);
+    assert.ok(coolerCheckRegular.detail.includes("CPU có kèm tản stock"));
+  });
+
+  // Test 11: PCIe bandwidth warning for legacy APU with flagship GPU (COMP-003)
+  it("triggers PCIe bandwidth warning when Pairing legacy APU with limited PCIe lanes with high-end GPU", () => {
+    const mockApu = {
+      id: 103,
+      name: "CPU AMD Ryzen 5 3400G (4 Cores / 8 Threads)",
+      attributes: [{ name: "socket", value: "AM4" }]
+    };
+    const mockMb = {
+      id: 104,
+      name: "Mainboard ASUS PRIME B550M-A",
+      attributes: [{ name: "socket", value: "AM4" }]
+    };
+    const mockFlagshipGpu = {
+      id: 105,
+      name: "Card màn hình Asus ROG ASTRAL RTX 5080 16G GAMING",
+      attributes: [{ name: "tdp", value: "350" }]
+    };
+
+    const insights = calculateBuilderInsights({
+      cpu: mockApu,
+      mainboard: mockMb,
+      gpu: mockFlagshipGpu
+    }, 3, {});
+
+    const pcieCheck = insights.checks.find(c => c.label.includes("COMP-003"));
+    assert.equal(pcieCheck.ok, false);
+    assert.equal(pcieCheck.severity, "WARNING");
+    assert.ok(pcieCheck.detail.includes("APU chỉ cấp 8 làn PCIe x8"));
+  });
 });
+

@@ -4,11 +4,15 @@ import request from "supertest";
 
 import { createApp } from "../src/app";
 import { prisma } from "../src/config/prisma";
+const { closePool } = require("../src/config/database");
 
 describe("GET /api/health", () => {
   after(async () => {
     try {
       await prisma.$disconnect();
+    } catch {}
+    try {
+      await closePool();
     } catch {}
   });
 

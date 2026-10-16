@@ -110,6 +110,7 @@ class PcBuilderService {
       SELECT 
         i.id AS itemId,
         i.component_type AS componentType,
+        COALESCE(i.quantity, 1) AS quantity,
         s.id AS skuId,
         s.price AS price,
         COALESCE(s.stock, 0) AS stock,
@@ -135,12 +136,14 @@ class PcBuilderService {
     const itemMap = new Map<number, BuildItem>();
     for (const row of rows as any[]) {
       if (!itemMap.has(row.itemId)) {
+        const itemQuantity = Math.max(1, Number(row.quantity || 1));
+        const itemUnitPrice = Number(row.price || 0);
         itemMap.set(row.itemId, {
           id: row.itemId,
           componentType: row.componentType,
-          quantity: 1,
-          unitPrice: Number(row.price || 0),
-          lineTotal: this.toMoney(row.price || 0),
+          quantity: itemQuantity,
+          unitPrice: itemUnitPrice,
+          lineTotal: this.toMoney(itemUnitPrice * itemQuantity),
           product: {
             id: row.productId,
             name: row.productName,
@@ -220,6 +223,7 @@ class PcBuilderService {
     const parsedBuildId = toPositiveInteger(buildId, "buildId");
     const skuId = toPositiveInteger(payload.productVariantId, "productVariantId");
     const componentType = String(payload.componentType || "").trim().toLowerCase();
+    const quantity = Math.max(1, Math.min(10, Number(payload.quantity || 1)));
 
     if (!componentType) throw createError("componentType is required", 400);
 
@@ -235,9 +239,9 @@ class PcBuilderService {
       );
       
       if ((existing as any[]).length > 0) {
-        await connection.execute(`UPDATE pc_build_items SET sku_id = ? WHERE id = ?`, [skuId, (existing as any[])[0].id]);
+        await connection.execute(`UPDATE pc_build_items SET sku_id = ?, quantity = ? WHERE id = ?`, [skuId, quantity, (existing as any[])[0].id]);
       } else {
-        await connection.execute(`INSERT INTO pc_build_items (build_id, sku_id, component_type) VALUES (?, ?, ?)`, [parsedBuildId, skuId, componentType]);
+        await connection.execute(`INSERT INTO pc_build_items (build_id, sku_id, component_type, quantity) VALUES (?, ?, ?, ?)`, [parsedBuildId, skuId, componentType, quantity]);
       }
       await connection.commit();
       return this.getBuildDetail(userId, parsedBuildId);
@@ -694,7 +698,7 @@ class PcBuilderService {
     const getPool = (catIds: number[], catNames: string[]) => {
       return allItems.filter(item => 
         catIds.includes(item.categoryId) || 
-        catNames.some(cn => item.categoryName.includes(cn) || item.name.toUpperCase().includes(cn))
+        catNames.some(cn => item.categoryName === cn || item.categoryName.includes(cn))
       );
     };
 
@@ -841,6 +845,49 @@ class PcBuilderService {
       });
       if (coolingItem) {
         selectedComponents.cooling = coolingItem;
+      }
+    }
+
+    // Budget Optimization Pass: If total sum exceeds target budget limit, swap flexible components with lower priced alternatives
+    const targetCandidateBudget = Math.round(budget * multiplier);
+    let currentTotal = Object.values(selectedComponents).reduce((sum: number, item: any) => sum + (item.price || 0), 0);
+
+    if (currentTotal > targetCandidateBudget) {
+      const flexTypes = ["gpu", "cpu", "storage", "cooling", "psu", "ram", "case"];
+      for (const fType of flexTypes) {
+        if (currentTotal <= targetCandidateBudget) break;
+        const currentComp = selectedComponents[fType];
+        if (!currentComp) continue;
+
+        let pool = fType === "gpu" ? gpuPool : fType === "cpu" ? cpuPool : fType === "storage" ? ssdPool : fType === "cooling" ? coolingPool : fType === "psu" ? psuPool : fType === "ram" ? ramPool : casePool;
+        
+        let validPool = pool.filter(p => p.price < currentComp.price && p.price > 0);
+        if (fType === "cpu") {
+          // Keep same socket if mainboard already picked
+          if (selectedComponents.mainboard) {
+            const mbSock = this.getMainboardSocket(selectedComponents.mainboard);
+            validPool = validPool.filter(p => this.getCpuSocket(p) === mbSock);
+          }
+        } else if (fType === "ram") {
+          validPool = validPool.filter(p => this.getRamType(p) === mbRamType);
+        } else if (fType === "psu") {
+          const minW = Math.max(500, Math.round((cpuTdp + gpuTdp + 120) * 1.25));
+          validPool = validPool.filter(p => this.getPsuWattage(p) >= minW);
+        }
+
+        if (validPool.length > 0) {
+          // Sort descending to find the closest cheaper component
+          const sortedCheaper = validPool.sort((a, b) => b.price - a.price);
+          const replacement = sortedCheaper[0];
+          currentTotal -= (currentComp.price - replacement.price);
+          selectedComponents[fType] = replacement;
+          if (fType === "cpu") {
+            cpuSocket = this.getCpuSocket(replacement);
+            cpuTdp = this.getCpuTdp(replacement);
+          } else if (fType === "gpu") {
+            gpuTdp = this.getGpuTdp(replacement);
+          }
+        }
       }
     }
 
@@ -1342,7 +1389,8 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
     const normalizedComponents = rawComponents
       .map((component: any) => ({
         componentType: String(component.component_type || component.componentType || "").trim().toLowerCase(),
-        variantId: Number(component.variant_id || component.variantId || 0)
+        variantId: Number(component.variant_id || component.variantId || 0),
+        quantity: Math.max(1, Number(component.quantity || 1))
       }))
       .filter((component: any) => component.componentType && component.variantId > 0);
 
@@ -1353,44 +1401,91 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
     const variantIds = normalizedComponents.map((component: any) => component.variantId);
     const placeholders = variantIds.map(() => "?").join(", ");
     let rows: any[] = [];
+    let dbRules: any[] = [];
     try {
-      rows = (await query(
-        `
-          SELECT
-            s.id AS skuId,
-            s.price AS price,
-            p.id AS productId,
-            p.name AS productName,
-            a.name AS attributeName,
-            av.value AS attributeValue
-          FROM product_skus s
-          INNER JOIN products p ON p.id = s.product_id
-          LEFT JOIN sku_attributes sa ON sa.sku_id = s.id
-          LEFT JOIN attribute_values av ON av.id = sa.attribute_value_id
-          LEFT JOIN attributes a ON a.id = av.attribute_id
-          WHERE s.id IN (${placeholders})
-          ORDER BY s.id ASC, a.name ASC
-        `,
-        variantIds
-      )) as any[];
+      const [fetchedRows, fetchedRules] = await Promise.all([
+        query(
+          `
+            SELECT
+              s.id AS skuId,
+              s.price AS price,
+              p.id AS productId,
+              p.name AS productName,
+              p.category_id AS categoryId,
+              a.id AS attributeId,
+              a.name AS attributeName,
+              av.id AS attributeValueId,
+              av.value AS attributeValue
+            FROM product_skus s
+            INNER JOIN products p ON p.id = s.product_id
+            LEFT JOIN sku_attributes sa ON sa.sku_id = s.id
+            LEFT JOIN attribute_values av ON av.id = sa.attribute_value_id
+            LEFT JOIN attributes a ON a.id = av.attribute_id
+            WHERE s.id IN (${placeholders})
+            ORDER BY s.id ASC, a.name ASC
+          `,
+          variantIds
+        ),
+        query(
+          `
+            SELECT
+              id,
+              attribute_value_1 AS attributeValue1,
+              attribute_value_2 AS attributeValue2,
+              is_compatible AS isCompatible,
+              source_category_id AS sourceCategoryId,
+              target_category_id AS targetCategoryId,
+              description
+            FROM compatibility_rules
+            WHERE is_active = 1
+          `
+        )
+      ]);
+      rows = fetchedRows as any[];
+      dbRules = fetchedRules as any[];
     } catch (_err) {
       rows = [];
+      dbRules = [];
     }
 
-    const bySku = new Map<number, { productName: string; specs: Array<{ key: string; value: string }> }>();
+    const bySku = new Map<number, {
+      productName: string;
+      categoryId: number;
+      specs: Array<{ key: string; value: string }>;
+      attributeValueIds: number[];
+    }>();
+
     for (const row of rows as any[]) {
       if (!bySku.has(row.skuId)) {
-        bySku.set(row.skuId, { productName: row.productName, specs: [] });
+        bySku.set(row.skuId, {
+          productName: row.productName,
+          categoryId: Number(row.categoryId || 0),
+          specs: [],
+          attributeValueIds: []
+        });
       }
       if (row.attributeName && row.attributeValue) {
         bySku.get(row.skuId)!.specs.push({ key: String(row.attributeName), value: String(row.attributeValue) });
       }
+      if (row.attributeValueId) {
+        bySku.get(row.skuId)!.attributeValueIds.push(Number(row.attributeValueId));
+      }
     }
 
-    const componentMap = normalizedComponents.reduce((accumulator: Record<string, { productName: string; specs: Array<{ key: string; value: string }> }>, component: { componentType: string; variantId: number }) => {
-      accumulator[component.componentType] = bySku.get(component.variantId) || { productName: "", specs: [] };
+    const componentMap = normalizedComponents.reduce((accumulator: Record<string, {
+      productName: string;
+      categoryId: number;
+      specs: Array<{ key: string; value: string }>;
+      attributeValueIds: number[];
+    }>, component: { componentType: string; variantId: number }) => {
+      accumulator[component.componentType] = bySku.get(component.variantId) || {
+        productName: "",
+        categoryId: 0,
+        specs: [],
+        attributeValueIds: []
+      };
       return accumulator;
-    }, {} as Record<string, { productName: string; specs: Array<{ key: string; value: string }> }>);
+    }, {});
 
     const cpu = componentMap.cpu || { productName: "", specs: [] };
     const mainboard = componentMap.mainboard || { productName: "", specs: [] };
@@ -1402,8 +1497,8 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
 
     const cpuSocket = this.findSpec(cpu.specs, ["socket"]);
     const boardSocket = this.findSpec(mainboard.specs, ["socket"]);
-    const ramType = this.findSpec(ram.specs, ["ddr", "memory type", "ram type"]);
-    const boardRam = this.findSpec(mainboard.specs, ["ddr", "memory"]);
+    const ramType = this.findSpec(ram.specs, ["ram_type", "ram", "ddr", "memory type", "ram type"]);
+    const boardRam = this.findSpec(mainboard.specs, ["ram_type", "ram", "ddr", "memory"]);
     const parseGpuTdp = (specs: any[], name: string): number => {
       const specTdp = this.parseNumber(this.findSpec(specs, ["tdp", "power", "tiêu thụ"]), 0);
       if (specTdp > 30 && specTdp < 600) return specTdp;
@@ -1452,7 +1547,7 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
     const caseClearance = rawCaseClearance > 250 ? rawCaseClearance : caseProduct.productName ? 360 : 0;
     const hasCooling = Boolean(componentMap.cooling);
     const requiresCooling = cpu.productName ? !this.cpuHasStockCooler(cpu.specs, cpu.productName) : false;
-    const coolerSockets = this.findSpec(cooling.specs, ["socket support", "supported socket", "socket hỗ trợ", "socket"]);
+    const coolerSockets = this.findSpec(cooling.specs, ["socket_support", "socket support", "supported socket", "socket hỗ trợ"]) || this.findSpec(cooling.specs, ["socket"]);
     const coolerCapacity = this.parseNumber(this.findSpec(cooling.specs, ["cooling capacity", "tdp tản", "tdp capacity", "tdp cooling"]), 0);
     const radiatorSize = this.parseNumber(this.findSpec(cooling.specs, ["radiator", "radiator size"]), 0);
     const caseRadiatorSupport = this.parseNumber(this.findSpec(caseProduct.specs, ["radiator support", "case hỗ trợ radiator", "radiator"]), 0);
@@ -1483,27 +1578,88 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
       return true;
     };
 
-    // Trích xuất số thanh RAM (ví dụ: "2x16GB" -> 2 sticks, mặc định 1 stick nếu chọn 1 kit)
+    // Trích xuất số thanh RAM (ví dụ: "2x16GB" -> 2 sticks, kèm theo quantity nếu có)
     const ramName = this.normalizeText(ram.productName);
     const ramSticksMatch = ramName.match(/(\d+)\s*x\s*\d+\s*gb/i);
-    const ramSticks = ramSticksMatch ? this.parseNumber(ramSticksMatch[1], 1) : 1;
+    const sticksPerUnit = ramSticksMatch ? this.parseNumber(ramSticksMatch[1], 1) : 1;
+    const rawRamComp = normalizedComponents.find(c => c.componentType === "ram");
+    const ramQuantity = Math.max(1, Number(rawRamComp?.quantity || 1));
+    const ramSticks = sticksPerUnit * ramQuantity;
     const isRamSlotsOk = !componentMap.ram || !componentMap.mainboard || ramSlots >= ramSticks;
+
+    // Đánh giá trực tiếp các luật từ bảng compatibility_rules theo từng tiêu chí
+    const dbRuleConflicts: Record<string, string> = {};
+    if (dbRules.length > 0) {
+      const allComponents = Object.values(componentMap) as any[];
+      for (let i = 0; i < allComponents.length; i++) {
+        for (let j = i + 1; j < allComponents.length; j++) {
+          const compA = allComponents[i];
+          const compB = allComponents[j];
+          const catA = compA.categoryId;
+          const catB = compB.categoryId;
+          const valsA = compA.attributeValueIds || [];
+          const valsB = compB.attributeValueIds || [];
+
+          for (const valA of valsA) {
+            for (const valB of valsB) {
+              for (const rule of dbRules) {
+                if (!rule.attributeValue1 || !rule.attributeValue2) continue;
+                const match =
+                  (rule.attributeValue1 === valA && rule.attributeValue2 === valB && (!rule.sourceCategoryId || rule.sourceCategoryId === catA)) ||
+                  (rule.attributeValue1 === valB && rule.attributeValue2 === valA && (!rule.sourceCategoryId || rule.sourceCategoryId === catB));
+
+                if (match && Number(rule.isCompatible) === 0) {
+                  const conflictMsg = rule.description || `Xung đột: ${compA.productName} không tương thích với ${compB.productName}`;
+                  // Phân loại vào check key phù hợp
+                  const ruleKey = (rule.source_attribute_key || rule.sourceAttributeKey || "").toLowerCase();
+                  if (ruleKey === "socket" || ruleKey.includes("socket")) {
+                    dbRuleConflicts.socket = conflictMsg;
+                  } else if (ruleKey === "ram_type" || ruleKey.includes("ram")) {
+                    dbRuleConflicts.ram = conflictMsg;
+                  } else if (ruleKey === "form_factor" || ruleKey.includes("form")) {
+                    dbRuleConflicts.case_form_factor = conflictMsg;
+                  } else if (ruleKey === "radiator_size" || ruleKey.includes("radiator")) {
+                    dbRuleConflicts.radiator_fit = conflictMsg;
+                  } else if (ruleKey === "psu_wattage" || ruleKey.includes("watt")) {
+                    dbRuleConflicts.psu = conflictMsg;
+                  } else if (ruleKey === "cooling_capacity") {
+                    dbRuleConflicts.cooling_tdp = conflictMsg;
+                  } else if (ruleKey === "cooler_height") {
+                    dbRuleConflicts.cooler_height = conflictMsg;
+                  } else {
+                    dbRuleConflicts.general = conflictMsg;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    const isStorageM2 = (comp: any): boolean => {
+      if (!comp || !comp.productName) return false;
+      const n = this.normalizeText(comp.productName);
+      const sType = this.normalizeText(this.findSpec(comp.specs || [], ["storage_type", "loại ổ cứng", "form_factor", "giao thức"]) || "");
+      return n.includes("m.2") || n.includes("nvme") || sType.includes("m.2") || sType.includes("nvme");
+    };
+    const m2Count = (isStorageM2(componentMap.storage) ? 1 : 0) + (isStorageM2(componentMap.storage_2) ? 1 : 0);
 
     const checks = [
       {
         key: "socket",
-        ok: !cpuSocket || !boardSocket || this.normalizeText(cpuSocket) === this.normalizeText(boardSocket),
-        detail: cpuSocket && boardSocket ? `${cpuSocket} / ${boardSocket}` : "Need socket specs"
+        ok: !dbRuleConflicts.socket && (!cpuSocket || !boardSocket || this.normalizeText(cpuSocket) === this.normalizeText(boardSocket)),
+        detail: dbRuleConflicts.socket || (cpuSocket && boardSocket ? `${cpuSocket} / ${boardSocket}` : "Need socket specs")
       },
       {
         key: "ram",
-        ok: !ramType || !boardRam || this.normalizeText(boardRam).includes(this.normalizeText(ramType)) || this.normalizeText(ramType).includes(this.normalizeText(boardRam)),
-        detail: ramType && boardRam ? `${ramType} / ${boardRam}` : "Need RAM specs"
+        ok: !dbRuleConflicts.ram && (!ramType || !boardRam || this.normalizeText(boardRam).includes(this.normalizeText(ramType)) || this.normalizeText(ramType).includes(this.normalizeText(boardRam))),
+        detail: dbRuleConflicts.ram || (ramType && boardRam ? `${ramType} / ${boardRam}` : "Need RAM specs")
       },
       {
         key: "psu",
-        ok: !componentMap.psu || psuWatt === 0 || psuWatt >= requiredWatt,
-        detail: componentMap.psu ? `${psuWatt || "?"}W / need ${requiredWatt}W` : "No PSU selected"
+        ok: !dbRuleConflicts.psu && (!componentMap.psu || psuWatt === 0 || psuWatt >= requiredWatt),
+        detail: dbRuleConflicts.psu || (componentMap.psu ? `${psuWatt || "?"}W / need ${requiredWatt}W` : "No PSU selected")
       },
       {
         key: "gpu_clearance",
@@ -1522,18 +1678,18 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
       },
       {
         key: "cooling_tdp",
-        ok: !hasCooling || coolerCapacity === 0 || cpuTdp === 0 || coolerCapacity >= cpuTdp,
-        detail: hasCooling ? `${coolerCapacity || "?"}W cooler / ${cpuTdp || "?"}W CPU` : "Cooling not selected"
+        ok: !dbRuleConflicts.cooling_tdp && (!hasCooling || coolerCapacity === 0 || cpuTdp === 0 || coolerCapacity >= cpuTdp),
+        detail: dbRuleConflicts.cooling_tdp || (hasCooling ? `${coolerCapacity || "?"}W cooler / ${cpuTdp || "?"}W CPU` : "Cooling not selected")
       },
       {
         key: "radiator_fit",
-        ok: !hasCooling || radiatorSize === 0 || caseRadiatorSupport === 0 || caseRadiatorSupport >= radiatorSize,
-        detail: hasCooling ? `${radiatorSize || "?"}mm radiator / ${caseRadiatorSupport || "?"}mm case` : "Cooling not selected"
+        ok: !dbRuleConflicts.radiator_fit && (!hasCooling || radiatorSize === 0 || caseRadiatorSupport === 0 || caseRadiatorSupport >= radiatorSize),
+        detail: dbRuleConflicts.radiator_fit || (hasCooling ? `${radiatorSize || "?"}mm radiator / ${caseRadiatorSupport || "?"}mm case` : "Cooling not selected")
       },
       {
         key: "cooler_height",
-        ok: !hasCooling || coolerHeight === 0 || caseCoolerClearance === 0 || caseCoolerClearance >= coolerHeight,
-        detail: hasCooling ? `${coolerHeight || "?"}mm cooler / ${caseCoolerClearance || "?"}mm case` : "Cooling not selected"
+        ok: !dbRuleConflicts.cooler_height && (!hasCooling || coolerHeight === 0 || caseCoolerClearance === 0 || caseCoolerClearance >= coolerHeight),
+        detail: dbRuleConflicts.cooler_height || (hasCooling ? `${coolerHeight || "?"}mm cooler / ${caseCoolerClearance || "?"}mm case` : "Cooling not selected")
       },
       {
         key: "ram_slots",
@@ -1547,31 +1703,31 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
       },
       {
         key: "storage_m2",
-      ok: !componentMap.storage || m2Slots >= 1,
-        detail: componentMap.storage ? `Mainboard has ${m2Slots} M.2 slots` : "Storage not selected"
+        ok: m2Count === 0 || m2Slots >= m2Count,
+        detail: (componentMap.storage || componentMap.storage_2) ? `${m2Count} M.2 NVMe SSD(s) / ${m2Slots} M.2 slot(s) on Mainboard` : "Storage not selected"
       },
       {
         key: "case_form_factor",
-        ok: !componentMap.mainboard || !componentMap.case || isFormFactorCompatible(boardFormFactor, caseFormFactor),
-        detail: componentMap.mainboard && componentMap.case ? `MB ${boardFormFactor || "ATX"} / Case ${caseFormFactor || "ATX"}` : "Mainboard or Case not selected"
+        ok: !dbRuleConflicts.case_form_factor && (!componentMap.mainboard || !componentMap.case || isFormFactorCompatible(boardFormFactor, caseFormFactor)),
+        detail: dbRuleConflicts.case_form_factor || (componentMap.mainboard && componentMap.case ? `MB ${boardFormFactor || "ATX"} / Case ${caseFormFactor || "ATX"}` : "Mainboard or Case not selected")
       },
       {
         key: "bottleneck",
         ok: (() => {
           const getCpuTier = (name: string): number => {
             const n = this.normalizeText(name);
-            if (n.includes("i9") || n.includes("7950x") || n.includes("7900x") || n.includes("13900k") || n.includes("14900k")) return 5;
-            if (n.includes("i7") || n.includes("7800x3d") || n.includes("13700k") || n.includes("14700k") || n.includes("5900x") || n.includes("5950x")) return 4;
-            if (n.includes("i5") || n.includes("7600") || n.includes("13600") || n.includes("14600") || n.includes("5700x") || n.includes("5600")) return 3;
-            if (n.includes("i3") || n.includes("12100") || n.includes("5500") || n.includes("8600g")) return 2;
-            return 2;
+            if (n.includes("285k") || n.includes("14900k") || n.includes("13900k") || n.includes("7950x") || n.includes("7900x") || n.includes("i9")) return 5;
+            if (n.includes("265k") || n.includes("14700") || n.includes("13700") || n.includes("7800x3d") || n.includes("5950x") || n.includes("5900x") || n.includes("i7")) return 4;
+            if (n.includes("14600") || n.includes("13600") || n.includes("14400") || n.includes("13400") || n.includes("12400") || n.includes("7600") || n.includes("5700") || n.includes("5600") || n.includes("i5")) return 3;
+            if (n.includes("12100") || n.includes("13100") || n.includes("5500") || n.includes("3400g") || n.includes("3200g") || n.includes("8600g") || n.includes("i3")) return 2;
+            return 1;
           };
           const getGpuTier = (name: string): number => {
             const n = this.normalizeText(name);
-            if (n.includes("4090") || n.includes("7900 xtx") || n.includes("4080")) return 5;
-            if (n.includes("4070 ti") || n.includes("4070 super") || n.includes("7900 xt") || n.includes("7800 xt") || n.includes("3080") || n.includes("3090")) return 4;
-            if (n.includes("4070") || n.includes("4060 ti") || n.includes("3070") || n.includes("7700 xt") || n.includes("6700 xt")) return 3;
-            if (n.includes("4060") || n.includes("3060") || n.includes("7600") || n.includes("6600")) return 2;
+            if (n.includes("5090") || n.includes("5080") || n.includes("4090") || n.includes("7900 xtx") || n.includes("4080")) return 5;
+            if (n.includes("5070") || n.includes("9070") || n.includes("4070") || n.includes("7900 xt") || n.includes("7800 xt") || n.includes("3080") || n.includes("3090")) return 4;
+            if (n.includes("5060") || n.includes("4060") || n.includes("3060") || n.includes("3070") || n.includes("7700 xt") || n.includes("6700 xt")) return 3;
+            if (n.includes("5050") || n.includes("3050") || n.includes("6600") || n.includes("6500") || n.includes("7600") || n.includes("1660") || n.includes("1650")) return 2;
             return 1;
           };
           if (!componentMap.cpu || !componentMap.gpu) return true;
@@ -1583,24 +1739,90 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
           if (!componentMap.cpu || !componentMap.gpu) return "CPU or GPU not selected";
           const getCpuTier = (name: string): number => {
             const n = this.normalizeText(name);
-            if (n.includes("i9") || n.includes("7950x") || n.includes("7900x") || n.includes("13900k") || n.includes("14900k")) return 5;
-            if (n.includes("i7") || n.includes("7800x3d") || n.includes("13700k") || n.includes("14700k") || n.includes("5900x") || n.includes("5950x")) return 4;
-            if (n.includes("i5") || n.includes("7600") || n.includes("13600") || n.includes("14600") || n.includes("5700x") || n.includes("5600")) return 3;
-            if (n.includes("i3") || n.includes("12100") || n.includes("5500") || n.includes("8600g")) return 2;
-            return 2;
+            if (n.includes("285k") || n.includes("14900k") || n.includes("13900k") || n.includes("7950x") || n.includes("7900x") || n.includes("i9")) return 5;
+            if (n.includes("265k") || n.includes("14700") || n.includes("13700") || n.includes("7800x3d") || n.includes("5950x") || n.includes("5900x") || n.includes("i7")) return 4;
+            if (n.includes("14600") || n.includes("13600") || n.includes("14400") || n.includes("13400") || n.includes("12400") || n.includes("7600") || n.includes("5700") || n.includes("5600") || n.includes("i5")) return 3;
+            if (n.includes("12100") || n.includes("13100") || n.includes("5500") || n.includes("3400g") || n.includes("3200g") || n.includes("8600g") || n.includes("i3")) return 2;
+            return 1;
           };
           const getGpuTier = (name: string): number => {
             const n = this.normalizeText(name);
-            if (n.includes("4090") || n.includes("7900 xtx") || n.includes("4080")) return 5;
-            if (n.includes("4070 ti") || n.includes("4070 super") || n.includes("7900 xt") || n.includes("7800 xt") || n.includes("3080") || n.includes("3090")) return 4;
-            if (n.includes("4070") || n.includes("4060 ti") || n.includes("3070") || n.includes("7700 xt") || n.includes("6700 xt")) return 3;
-            if (n.includes("4060") || n.includes("3060") || n.includes("7600") || n.includes("6600")) return 2;
+            if (n.includes("5090") || n.includes("5080") || n.includes("4090") || n.includes("7900 xtx") || n.includes("4080")) return 5;
+            if (n.includes("5070") || n.includes("9070") || n.includes("4070") || n.includes("7900 xt") || n.includes("7800 xt") || n.includes("3080") || n.includes("3090")) return 4;
+            if (n.includes("5060") || n.includes("4060") || n.includes("3060") || n.includes("3070") || n.includes("7700 xt") || n.includes("6700 xt")) return 3;
+            if (n.includes("5050") || n.includes("3050") || n.includes("6600") || n.includes("6500") || n.includes("7600") || n.includes("1660") || n.includes("1650")) return 2;
             return 1;
           };
           const cTier = getCpuTier(cpu.productName);
           const gTier = getGpuTier(gpu.productName);
           const diff = Math.abs(cTier - gTier);
-          return `CPU Tier ${cTier} / GPU Tier ${gTier} (${diff <= 1 ? "Cân bằng tốt" : "Lệch hiệu năng"})`;
+          return `CPU Tier ${cTier} / GPU Tier ${gTier} (${diff <= 1 ? "Cân bằng hoàn hảo" : "Lệch hiệu năng"})`;
+        })()
+      },
+      // ── MULTI-COMPONENT COMBINATORIAL RULES (A + B + C / Cross-Component) ──
+      {
+        key: "multi_cpu_mb_vrm",
+        ok: (() => {
+          if (!componentMap.cpu || !componentMap.mainboard) return true;
+          const cpuName = this.normalizeText(cpu.productName);
+          const mbName = this.normalizeText(mainboard.productName);
+          const isHighPowerCpu = cpuName.includes("14900") || cpuName.includes("13900") || cpuName.includes("14700") || cpuName.includes("13700") || cpuName.includes("285k") || cpuName.includes("265k") || cpuName.includes("7950x") || cpuName.includes("7900x");
+          const isEntryMainboard = mbName.includes("h610") || mbName.includes("a620") || mbName.includes("a520") || mbName.includes("h510") || mbName.includes("h410");
+          return !(isHighPowerCpu && isEntryMainboard);
+        })(),
+        detail: (() => {
+          if (!componentMap.cpu || !componentMap.mainboard) return "Chưa chọn CPU hoặc Mainboard";
+          const cpuName = this.normalizeText(cpu.productName);
+          const mbName = this.normalizeText(mainboard.productName);
+          const isHighPowerCpu = cpuName.includes("14900") || cpuName.includes("13900") || cpuName.includes("14700") || cpuName.includes("13700") || cpuName.includes("285k") || cpuName.includes("265k") || cpuName.includes("7950x") || cpuName.includes("7900x");
+          const isEntryMainboard = mbName.includes("h610") || mbName.includes("a620") || mbName.includes("a520") || mbName.includes("h510") || mbName.includes("h410");
+          if (isHighPowerCpu && isEntryMainboard) {
+            return "CẢNH BÁO VRM: CPU công suất >150W đi kèm bo mạch chủ phổ thông không tản VRM, gây sụt xung khi tải nặng.";
+          }
+          return "Pha cấp nguồn VRM của Mainboard đáp ứng tốt công suất tải của CPU.";
+        })()
+      },
+      {
+        key: "multi_gpu_psu_case",
+        ok: (() => {
+          if (!componentMap.gpu || !componentMap.case || !componentMap.psu) return true;
+          const gpuName = this.normalizeText(gpu.productName);
+          const caseName = this.normalizeText(caseProduct.productName);
+          const isHighEndGpu = gpuName.includes("5090") || gpuName.includes("5080") || gpuName.includes("4090") || gpuName.includes("4080");
+          const isCompactCase = caseName.includes("mini") || caseName.includes("itx") || caseName.includes("sff");
+          const isWeakPsu = psuWatt < 850;
+          return !(isHighEndGpu && (isCompactCase || isWeakPsu));
+        })(),
+        detail: (() => {
+          if (!componentMap.gpu || !componentMap.case || !componentMap.psu) return "Chưa đủ tổ hợp GPU + Case + Nguồn";
+          const gpuName = this.normalizeText(gpu.productName);
+          const caseName = this.normalizeText(caseProduct.productName);
+          const isHighEndGpu = gpuName.includes("5090") || gpuName.includes("5080") || gpuName.includes("4090") || gpuName.includes("4080");
+          const isCompactCase = caseName.includes("mini") || caseName.includes("itx") || caseName.includes("sff");
+          const isWeakPsu = psuWatt < 850;
+          if (isHighEndGpu && isWeakPsu) return `GPU đầu bảng yêu cầu nguồn tối thiểu 850W ATX 3.0 (Hiện tại: ${psuWatt}W).`;
+          if (isHighEndGpu && isCompactCase) return "GPU đầu bảng tỏa nhiệt cực lớn, khoang case nhỏ kín sẽ gây quá nhiệt đối lưu.";
+          return "Tổ hợp GPU + Case + PSU đảm bảo cấp điện & lưu thông luồng khí hoàn hảo.";
+        })()
+      },
+      {
+        key: "multi_cpu_cooling_case",
+        ok: (() => {
+          if (!componentMap.cpu || !componentMap.cooling || !componentMap.case) return true;
+          const cpuName = this.normalizeText(cpu.productName);
+          const coolName = this.normalizeText(cooling.productName);
+          const isExtremeCpu = cpuName.includes("14900k") || cpuName.includes("13900k") || cpuName.includes("285k") || cpuName.includes("7950x");
+          const isAirCoolerSmall = !coolName.includes("360") && !coolName.includes("420") && !coolName.includes("aio") && !coolName.includes("ak620") && !coolName.includes("fc140");
+          return !(isExtremeCpu && isAirCoolerSmall);
+        })(),
+        detail: (() => {
+          if (!componentMap.cpu || !componentMap.cooling || !componentMap.case) return "Chưa đủ tổ hợp CPU + Tản + Case";
+          const cpuName = this.normalizeText(cpu.productName);
+          const coolName = this.normalizeText(cooling.productName);
+          const isExtremeCpu = cpuName.includes("14900k") || cpuName.includes("13900k") || cpuName.includes("285k") || cpuName.includes("7950x");
+          const isAirCoolerSmall = !coolName.includes("360") && !coolName.includes("420") && !coolName.includes("aio") && !coolName.includes("ak620") && !coolName.includes("fc140");
+          if (isExtremeCpu && isAirCoolerSmall) return "CPU đầu bảng TDP >250W yêu cầu tản nước AIO 360mm gắn nóc case để giải nhiệt triệt để.";
+          return "Tổ hợp CPU + Bộ tản nhiệt + Thùng máy tối ưu luồng gió và khả năng tản nhiệt.";
         })()
       }
     ];

@@ -47,4 +47,12 @@ apps/web/.vite/
 scratch/
 test-results/
 playwright-report/
+.codex-run-logs/
+0
+
+# Crawler dataset (avoid git bloat)
+pc_crawler/data.zip
+pc_crawler/data/
+**/__pycache__/
+*.pyc
 

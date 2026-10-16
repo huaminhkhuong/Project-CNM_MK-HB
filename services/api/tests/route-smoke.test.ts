@@ -1,11 +1,22 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, after } from "node:test";
 import request from "supertest";
 
 import { createApp } from "../src/app";
+import { prisma } from "../src/config/prisma";
+const { closePool } = require("../src/config/database");
 
 describe("API route smoke coverage", () => {
   const app = createApp();
+
+  after(async () => {
+    try {
+      await prisma.$disconnect();
+    } catch {}
+    try {
+      await closePool();
+    } catch {}
+  });
 
   it("exposes protected profile mutation routes", async () => {
     const routes = [

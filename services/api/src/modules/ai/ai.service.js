@@ -416,9 +416,6 @@ async function createResponsesRequest(instructions, userInput) {
   const groqApiKey = env.groqApiKey;
   const openaiApiKey = env.openaiApiKey;
 
-  console.log("[AI] Debug - groqApiKey:", groqApiKey ? "present" : "missing");
-  console.log("[AI] Debug - openaiApiKey:", openaiApiKey ? "present" : "missing");
-
   // Groq API configuration
   if (groqApiKey) {
     try {
@@ -1809,9 +1806,7 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CHAT PERSISTENCE IN DATABASE (ai_chats + ai_messages)
-// ─────────────────────────────────────────────────────────────────────────────
-const { PrismaClient } = require("../../generated/client");
-const aiPrisma = new PrismaClient();
+const { prisma: aiPrisma } = require("../../config/prisma");
 
 async function saveUserAiChat(userId, userMessage, assistantResponse) {
   if (!userId) return;

@@ -1,10 +1,21 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, after } from "node:test";
 import request from "supertest";
 import { createApp } from "../app";
+import { prisma } from "../config/prisma";
+const { closePool } = require("../config/database");
 
 describe("PC Builder Integration Tests (AI Build Flow & XAI Endpoints)", () => {
   const app = createApp();
+
+  after(async () => {
+    try {
+      await prisma.$disconnect();
+    } catch {}
+    try {
+      await closePool();
+    } catch {}
+  });
 
   // Test 1: POST /api/pc-builder/suggest-build with Gaming 25M
   it("POST /api/pc-builder/suggest-build returns candidate builds for Gaming 25M", async () => {

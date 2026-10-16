@@ -3,6 +3,8 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 
 import { useAuth } from "../../hooks/useAuth";
 import { usePcBuilder } from "../../hooks/usePcBuilder";
+import { useBuilderModals } from "../../hooks/useBuilderModals";
+import { useBuilderFilters } from "../../hooks/useBuilderFilters";
 import { routeConfig } from "../../routes/routeConfig";
 import { addItemToCart } from "../../services/cart.service";
 import { getCategories, getProductDetail, getProducts, clearCatalogCache } from "../../services/catalog.service";
@@ -25,6 +27,9 @@ import { exportBuildToPdf } from "../../components/pc-builder/BuildExportService
 import { CompatibilityToast } from "../../components/pc-builder/CompatibilityToast";
 import { GuestBuildsAndHistory } from "../../components/pc-builder/GuestBuildsAndHistory";
 import { BuildSummarySidebar } from "../../components/pc-builder/BuildSummarySidebar";
+import { ShareBuildModal } from "../../components/pc-builder/ShareBuildModal";
+import { MobileBuilderStickyBar } from "../../components/pc-builder/MobileBuilderStickyBar";
+import { BuilderProductCard, extractProductSpecs } from "../../components/pc-builder/BuilderProductCard";
 import { httpClient } from "../../services/http";
 import {
   COMPONENT_SECTIONS,
@@ -57,7 +62,11 @@ import {
   getCoolingDiagnostics,
   estimateProductPerformance,
   getCoolingBadge,
-  getStockState
+  getStockState,
+  getProductSocket,
+  getProductRamType,
+  getPsuWattageValue,
+  findOptimalAlternative
 } from "../../components/pc-builder/pcBuilderUtils";
 import "./PcBuilderPage.css";
 
@@ -131,7 +140,9 @@ export function calculateBuilderInsights(selectedItems = {}, selectedCount = 0, 
   const ramSlots = parseNumber(findSpec(mainboard, SPEC_ALIASES.ramSlots), 4);
   const ramName = normalizeText(getProductName(ram));
   const ramSticksMatch = ramName.match(/(\d+)\s*x\s*\d+\s*gb/i);
-  const ramSticks = ramSticksMatch ? parseNumber(ramSticksMatch[1], 1) : 1;
+  const sticksPerUnit = ramSticksMatch ? parseNumber(ramSticksMatch[1], 1) : 1;
+  const ramQuantity = Math.max(1, Number(s.ram?.quantity || 1));
+  const ramSticks = sticksPerUnit * ramQuantity;
 
   const m2Slots = parseNumber(findSpec(mainboard, SPEC_ALIASES.m2Slots), 2);
   const boardForm = findSpec(mainboard, SPEC_ALIASES.boardFormFactor);
@@ -216,8 +227,31 @@ export function calculateBuilderInsights(selectedItems = {}, selectedCount = 0, 
     },
     {
       label: "Khe cắm M.2 SSD ↔ Mainboard [COMP-009]", icon: "💾",
-      ok: !s.storage || m2Slots >= 1,
-      detail: s.storage ? `Mainboard trang bị ${m2Slots} khe M.2 NVMe` : "Chưa chọn Storage."
+      ok: (() => {
+        if (!s.storage && !s.storage_2) return true;
+        const isM2 = (item) => {
+          if (!item) return false;
+          const p = getSelectedProduct(item);
+          const name = normalizeText(getProductName(p));
+          const type = normalizeText(findSpec(p, ["storage_type", "loại ổ cứng", "form_factor", "giao thức"]) || "");
+          return name.includes("m.2") || name.includes("nvme") || type.includes("m.2") || type.includes("nvme");
+        };
+        const m2Count = (isM2(s.storage) ? 1 : 0) + (isM2(s.storage_2) ? 1 : 0);
+        if (m2Count === 0) return true;
+        return m2Slots >= m2Count;
+      })(),
+      detail: (() => {
+        const isM2 = (item) => {
+          if (!item) return false;
+          const p = getSelectedProduct(item);
+          const name = normalizeText(getProductName(p));
+          const type = normalizeText(findSpec(p, ["storage_type", "loại ổ cứng", "form_factor", "giao thức"]) || "");
+          return name.includes("m.2") || name.includes("nvme") || type.includes("m.2") || type.includes("nvme");
+        };
+        const m2Count = (isM2(s.storage) ? 1 : 0) + (isM2(s.storage_2) ? 1 : 0);
+        if (!s.storage && !s.storage_2) return "Chưa chọn Storage.";
+        return `${m2Count} ổ M.2 NVMe / ${m2Slots} khe Mainboard`;
+      })()
     },
     {
       label: "Form Factor Mainboard ↔ Case [COMP-010]", icon: "📦",
@@ -227,7 +261,9 @@ export function calculateBuilderInsights(selectedItems = {}, selectedCount = 0, 
   ];
 
   const hardFails = checks.filter((c) => c.ok === false && c.severity !== "WARNING").length;
-  const requiredCount = getProductId(cpu) && !coolingDiag.required ? COMPONENT_SECTIONS.length - 1 : COMPONENT_SECTIONS.length;
+  // storage_2 là optional, cooling có thể optional nếu CPU có stock cooler
+  const optionalCount = (getProductId(cpu) && !coolingDiag.required ? 1 : 0) + 1; // +1 cho storage_2 optional
+  const requiredCount = Math.max(1, COMPONENT_SECTIONS.length - optionalCount);
   const completionRatio = requiredCount > 0 ? Math.min(selectedCount, requiredCount) / requiredCount : 0;
   const compatibilityScore = Math.max(0, Math.round(completionRatio * 65 + ((checks.length - hardFails) / checks.length) * 35));
   const cpuScore = s.cpu ? estimateProductPerformance(cpu, "cpu") : 45;
@@ -359,415 +395,6 @@ function SkeletonCard() {
   );
 }
 
-/* ── SMART TECHNICAL SPECIFICATION EXTRACTOR ─────────────────── */
-function extractProductSpecs(product, type) {
-  const name = getProductName(product);
-  const nameLower = name.toLowerCase();
-
-  if (type === "cpu") {
-    let socket = findSpec(product, SPEC_ALIASES.socket);
-    if (!socket) {
-      if (nameLower.includes("lga1700") || /\bi[3579]-1[234]\d{3}/.test(nameLower)) socket = "LGA1700";
-      else if (nameLower.includes("am5") || /ryzen\s*[79]?\s*7\d{3}/.test(nameLower)) socket = "AM5";
-      else if (nameLower.includes("am4") || /ryzen\s*[3579]?\s*[35]\d{3}/.test(nameLower)) socket = "AM4";
-      else socket = "AM5 / LGA1700";
-    }
-    let tdp = findSpec(product, SPEC_ALIASES.tdp);
-    if (!tdp) {
-      const match = nameLower.match(/(\d{2,3})\s*w/);
-      tdp = match ? `${match[1]}W` : "65W - 125W";
-    }
-    return [
-      { label: "Socket", value: socket },
-      { label: "TDP", value: tdp }
-    ];
-  }
-
-  if (type === "mainboard") {
-    let socket = findSpec(product, SPEC_ALIASES.socket);
-    if (!socket) {
-      if (nameLower.includes("b650") || nameLower.includes("x670") || nameLower.includes("a620")) socket = "AM5";
-      else if (nameLower.includes("b760") || nameLower.includes("z790") || nameLower.includes("b660") || nameLower.includes("z690")) socket = "LGA1700";
-      else if (nameLower.includes("b550") || nameLower.includes("a520") || nameLower.includes("x570")) socket = "AM4";
-      else socket = "ATX / Micro-ATX";
-    }
-    let ram = findSpec(product, SPEC_ALIASES.ramType);
-    if (!ram) {
-      if (nameLower.includes("ddr5")) ram = "DDR5 Dual Channel";
-      else if (nameLower.includes("ddr4")) ram = "DDR4 Dual Channel";
-      else ram = "DDR4 / DDR5";
-    }
-    return [
-      { label: "Socket", value: socket },
-      { label: "Hỗ trợ RAM", value: ram }
-    ];
-  }
-
-  if (type === "ram") {
-    let ramType = findSpec(product, SPEC_ALIASES.ramType);
-    if (!ramType) {
-      if (nameLower.includes("ddr5")) ramType = "DDR5";
-      else if (nameLower.includes("ddr4")) ramType = "DDR4";
-      else ramType = "DDR4 / DDR5";
-    }
-    let speed = "";
-    const speedMatch = nameLower.match(/(\d{4})\s*mhz/);
-    if (speedMatch) speed = `${speedMatch[1]}MHz`;
-
-    return [
-      { label: "Chuẩn RAM", value: `${ramType} ${speed}`.trim() },
-      { label: "Loại bộ nhớ", value: "Desktop DIMM" }
-    ];
-  }
-
-  if (type === "gpu") {
-    let vram = "";
-    const vramMatch = nameLower.match(/(\d{1,2}\s*gb)/);
-    if (vramMatch) vram = vramMatch[1].toUpperCase();
-
-    let length = findSpec(product, SPEC_ALIASES.gpuLength);
-    if (!length) length = "VGA Tiêu chuẩn";
-
-    return [
-      { label: "VRAM", value: vram || "GDDR6" },
-      { label: "Chiều dài GPU", value: length }
-    ];
-  }
-
-  if (type === "storage") {
-    let capacity = "";
-    const capMatch = nameLower.match(/(\d{3,4}\s*gb|\d\s*tb)/);
-    if (capMatch) capacity = capMatch[1].toUpperCase();
-
-    let interfaceType = "PCIe NVMe SSD";
-    if (nameLower.includes("sata")) interfaceType = "SATA III 2.5\"";
-
-    return [
-      { label: "Dung lượng", value: capacity || "SSD Tốc độ cao" },
-      { label: "Giao tiếp", value: interfaceType }
-    ];
-  }
-
-  if (type === "psu") {
-    let watt = findSpec(product, SPEC_ALIASES.psuWattage);
-    if (!watt) {
-      const wattMatch = nameLower.match(/(\d{3,4})\s*w/);
-      watt = wattMatch ? `${wattMatch[1]}W` : "Công suất thực";
-    }
-    let cert = "80 Plus Certified";
-    if (nameLower.includes("gold")) cert = "80 Plus Gold";
-    else if (nameLower.includes("bronze")) cert = "80 Plus Bronze";
-    else if (nameLower.includes("platinum")) cert = "80 Plus Platinum";
-
-    return [
-      { label: "Công suất", value: typeof watt === "number" ? `${watt}W` : watt },
-      { label: "Chứng nhận", value: cert }
-    ];
-  }
-
-  if (type === "case") {
-    let formFactor = "Mid Tower ATX";
-    if (nameLower.includes("mini") || nameLower.includes("itx")) formFactor = "Mini-ITX / Micro-ATX";
-    else if (nameLower.includes("full")) formFactor = "Full Tower ATX";
-
-    let clearance = findSpec(product, SPEC_ALIASES.caseGpuClearance);
-    if (!clearance) clearance = "Hỗ trợ VGA dài";
-
-    return [
-      { label: "Form Factor", value: formFactor },
-      { label: "Không gian GPU", value: clearance }
-    ];
-  }
-
-  if (type === "cooling") {
-    let coolingType = findSpec(product, SPEC_ALIASES.coolingType);
-    if (!coolingType) {
-      const radMatch = nameLower.match(/(240|360|120|280)/);
-      if (radMatch || nameLower.includes("aio") || nameLower.includes("nước")) coolingType = `AIO ${radMatch ? radMatch[1] : "Liquid"}`;
-      else coolingType = "Tản nhiệt khí";
-    }
-    let sockets = findSpec(product, SPEC_ALIASES.socketSupport) || "Intel & AMD Socket";
-
-    return [
-      { label: "Loại tản", value: coolingType },
-      { label: "Socket hỗ trợ", value: sockets }
-    ];
-  }
-
-  return [
-    { label: "Thương hiệu", value: getProductBrand(product) },
-    { label: "Bảo hành", value: "36 Tháng" }
-  ];
-}
-
-function getComponentEmoji(componentType) {
-  const map = {
-    cpu: "💻",
-    gpu: "🎮",
-    ram: "⚡",
-    storage: "💾",
-    mainboard: "🧩",
-    psu: "🔌",
-    case: "🖥️",
-    cooling: "❄️"
-  };
-  return map[componentType] || "📦";
-}
-
-/* ── PRODUCT IMAGE CONTAINER WITH AUTOMATIC CATEGORY FALLBACK ──── */
-function ProductImageContainer({ product, activeComponent, isSelected }) {
-  const [imageSrc, setImageSrc] = useState(() => resolveProductImage(product));
-  const [imgError, setImgError] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const stock = getProductStock(product);
-  const stockState = getStockState(stock);
-
-  useEffect(() => {
-    setImageSrc(resolveProductImage(product));
-    setImgError(false);
-    setLoaded(false);
-  }, [product]);
-
-  function handleImageError() {
-    const categoryFallback = resolveProductImage({ category_name: activeComponent, product_name: getProductName(product) });
-    if (categoryFallback && categoryFallback !== imageSrc) {
-      setImageSrc(categoryFallback);
-    } else {
-      setImgError(true);
-    }
-  }
-
-  return (
-    <div className="product-card__image-container">
-      {/* Skeleton Loading State (P9-07) */}
-      {!loaded && !imgError && imageSrc && (
-        <div className="product-card__skeleton" aria-hidden="true" />
-      )}
-
-      {!imgError && imageSrc ? (
-        <img
-          className={`product-card__img ${loaded ? "is-loaded" : "is-loading"}`}
-          src={imageSrc}
-          alt={getProductName(product)}
-          loading="lazy"
-          onLoad={() => setLoaded(true)}
-          onError={handleImageError}
-        />
-      ) : (
-        <div className="product-card__no-image">
-          <span className="no-image-icon">📦</span>
-          <span className="no-image-text">{getProductName(product).slice(0, 20)}</span>
-        </div>
-      )}
-
-      {/* Quick view overlay badge */}
-      <span className="product-card__quick-hint">🔍 Xem chi tiết</span>
-
-      {/* Badges Overlaid */}
-      <span className={`product-card__stock-badge ${stockState.cls}`}>{stockState.label}</span>
-      {isSelected && <span className="product-card__selected-mark">✓ Đã chọn</span>}
-      {activeComponent === "cooling" && (
-        <span className="product-card__type-badge">{getCoolingBadge(product)}</span>
-      )}
-    </div>
-  );
-}
-
-function getAiScoreBadge(perf) {
-  if (perf >= 80) return { label: `AI ${perf}/100 • Rất Tốt`, cls: "ai-badge--excellent" };
-  if (perf >= 60) return { label: `AI ${perf}/100 • Khá Tốt`, cls: "ai-badge--good" };
-  if (perf >= 40) return { label: `AI ${perf}/100 • Trung Bình`, cls: "ai-badge--fair" };
-  return { label: `AI ${perf}/100 • Cần Cân Nhắc`, cls: "ai-badge--poor" };
-}
-
-/* ── "WHY THIS COMPONENT?" EXPLANATION GENERATOR ────────────────── */
-function getWhyThisComponentExplanation(product, activeComponent, selectedItems, totalPrice, suggestionForm) {
-  const price = getProductPrice(product);
-  const budget = Number(suggestionForm?.budget || 25000000);
-  const priceRatio = budget > 0 ? Math.round((price / budget) * 100) : 0;
-  
-  const reasons = [];
-
-  // 1. Budget Ratio Reason
-  if (priceRatio > 0) {
-    reasons.push(`Giá chiếm ${priceRatio}% ngân sách`);
-  }
-
-  // 2. Spec & Compatibility Reason
-  const specs = extractProductSpecs(product, activeComponent);
-  const findSpecVal = (labelKey) => {
-    const s = specs.find((item) => item.label.toLowerCase().includes(labelKey.toLowerCase()));
-    return s ? s.value : null;
-  };
-
-  const nameLower = getProductName(product).toLowerCase();
-
-  if (activeComponent === "cpu") {
-    const socket = findSpecVal("socket") || findSpec(product, "socket");
-    if (socket) reasons.push(`Tương thích socket ${socket}`);
-    else reasons.push("Hiệu năng đa nhiệm & Gaming tối ưu");
-  } else if (activeComponent === "mainboard") {
-    const socket = findSpecVal("socket") || findSpec(product, "socket");
-    const ramType = findSpecVal("ram") || findSpec(product, "ram_type");
-    if (socket && ramType) reasons.push(`Khớp socket ${socket} & RAM ${ramType}`);
-    else if (socket) reasons.push(`Khớp socket ${socket}`);
-  } else if (activeComponent === "ram") {
-    const cap = findSpecVal("dung lượng") || findSpecVal("ram") || findSpec(product, "capacity");
-    if (cap) reasons.push(`Dung lượng ${cap} mượt mà`);
-    else reasons.push("Tốc độ Bus cao, giảm giật lag");
-  } else if (activeComponent === "gpu") {
-    if (nameLower.includes("4090") || nameLower.includes("4080") || nameLower.includes("7900")) {
-      reasons.push("Xử lý 4K Gaming / 3D Render cao cấp");
-    } else if (nameLower.includes("4070") || nameLower.includes("7800")) {
-      reasons.push("Chiến mượt mà game 2K Ultra / 1440p");
-    } else {
-      reasons.push("Đáp ứng tốt Gaming 1080p eSports & AAA");
-    }
-  } else if (activeComponent === "cooling") {
-    const coolingType = findSpecVal("loại tản") || findSpecVal("tản");
-    if (coolingType) reasons.push(`Giải nhiệt CPU tốt (${coolingType})`);
-    else reasons.push("Giữ CPU mát mẻ dưới 75°C khi tải nặng");
-  } else if (activeComponent === "psu") {
-    const watt = findSpecVal("công suất") || findSpec(product, "psu_wattage");
-    if (watt) reasons.push(`Công suất ${watt}W có margin an toàn >20%`);
-    else reasons.push("Cung cấp dòng điện ổn định 80 Plus");
-  } else if (activeComponent === "case") {
-    const form = findSpecVal("kích thước") || findSpec(product, "form_factor");
-    if (form) reasons.push(`Thiết kế ${form} thông thoáng, vừa GPU & AIO`);
-    else reasons.push("Luồng khí tản nhiệt tốt, dễ đi dây");
-  } else if (activeComponent === "storage") {
-    reasons.push("Tốc độ đọc/ghi NVMe cao, load game cực nhanh");
-  }
-
-  // 3. Purpose Match Reason
-  const purpose = suggestionForm?.purpose;
-  if (purpose === "gaming") reasons.push("Tối ưu Gaming FPS");
-  else if (purpose === "editing") reasons.push("Tối ưu Đồ họa & Video");
-  else if (purpose === "office") reasons.push("Tiết kiệm điện & bền bỉ");
-
-  return reasons.join(" • ");
-}
-
-/* ── PRODUCT CARD COMPONENT ──────────────────────────────────── */
-function BuilderProductCard({ activeComponent, isSelected, processingComponent, loading, onSelect, onOpenDetail, product, selectedItems, suggestionForm, totalPrice, isCompared, onToggleCompare }) {
-  const productId     = getProductId(product);
-  const perf          = estimateProductPerformance(product, activeComponent);
-  const stock         = getProductStock(product);
-  const coolingStatus = activeComponent === "cooling" ? getCoolingCardStatus(product, selectedItems) : null;
-  const isProcessing  = processingComponent === activeComponent;
-  const specs         = extractProductSpecs(product, activeComponent);
-  const aiBadge       = getAiScoreBadge(perf);
-  const whyText       = getWhyThisComponentExplanation(product, activeComponent, selectedItems, totalPrice, suggestionForm);
-
-  return (
-    <article className={`product-card${isSelected ? " is-selected" : ""}`} onClick={() => onOpenDetail(product)}>
-      <ProductImageContainer product={product} activeComponent={activeComponent} isSelected={isSelected} />
-
-      <div className="product-card__body">
-        <div className="product-card__brand">{getProductBrand(product)}</div>
-
-        <h3 className="product-card__name" title={getProductName(product)}>
-          {getProductName(product)}
-        </h3>
-
-        <div className="product-card__meta">
-          <span className="meta-rating">
-            <span className="meta-rating__star">★</span>
-            <span className="meta-rating__val">{getRating(product)}</span>
-          </span>
-          {activeComponent === "cooling" && coolingStatus ? (
-            <span className={`meta-ai-badge ${coolingStatus.cls}`}>{coolingStatus.label}</span>
-          ) : (
-            <span className={`meta-ai-badge ${aiBadge.cls}`}>{aiBadge.label}</span>
-          )}
-        </div>
-
-        <div className="product-card__specs">
-          {specs.map((s, idx) => (
-            <div key={idx} className="spec-row">
-              <span className="spec-row__label">{s.label}</span>
-              <span className="spec-row__value" title={s.value}>{s.value}</span>
-            </div>
-          ))}
-          <div className="spec-row">
-            <span className="spec-row__label">Tồn kho</span>
-            <span className="spec-row__value spec-row__value--stock">
-              Còn {stock} sp
-            </span>
-          </div>
-        </div>
-
-        {/* WHY THIS COMPONENT EXPLANATION BOX */}
-        {whyText && (
-          <div
-            className={`product-card__why-box${isSelected ? " is-selected" : ""}`}
-            style={{
-              marginTop: "10px",
-              marginBottom: "8px",
-              padding: "8px 10px",
-              backgroundColor: isSelected ? "#eff6ff" : "#f8fafc",
-              border: `1px solid ${isSelected ? "#bfdbfe" : "#e2e8f0"}`,
-              borderRadius: "8px",
-              fontSize: "12px",
-              lineHeight: "1.4",
-              color: isSelected ? "#1e40af" : "#475569"
-            }}
-          >
-            <div style={{ fontWeight: "700", fontSize: "11px", color: isSelected ? "#1d4ed8" : "#0369a1", marginBottom: "2px", display: "flex", alignItems: "center", gap: "4px" }}>
-              <span>💡</span>
-              <span>Lý do chọn ({activeComponent.toUpperCase()}):</span>
-            </div>
-            <div style={{ fontSize: "11.5px", fontWeight: isSelected ? "600" : "400" }}>
-              {whyText}
-            </div>
-          </div>
-        )}
-
-        <div className="product-card__footer">
-          <div className="product-card__price-box">
-            <span className="product-card__price">{formatCurrency(getProductPrice(product))}</span>
-            <span className="product-card__price-unit">đ</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "4px",
-                fontSize: "11.5px",
-                fontWeight: "700",
-                color: isCompared ? "#2563eb" : "#64748b",
-                cursor: "pointer"
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <input
-                type="checkbox"
-                checked={Boolean(isCompared)}
-                onChange={(e) => onToggleCompare(product, e.target.checked)}
-                style={{ width: "14px", height: "14px", cursor: "pointer" }}
-              />
-              So sánh
-            </label>
-
-            <button
-              type="button"
-              className={`btn-select${isSelected ? " is-selected" : ""}`}
-              disabled={isProcessing || loading}
-              onClick={(e) => {
-                e.stopPropagation();
-                onSelect(activeComponent, product);
-              }}
-            >
-              {isProcessing ? "Đang chọn..." : isSelected ? "✓ Đã chọn" : "Chọn"}
-            </button>
-          </div>
-        </div>
-      </div>
-    </article>
-  );
-}
-
 /* ── WORKSPACE SESSION PERSISTENCE ─────────────────────────────
    Lưu / khôi phục trạng thái workspace giữa các phiên làm việc.
    Key: pcmall_workspace_session_v1
@@ -885,6 +512,9 @@ export function PcBuilderPage() {
         );
         setLocalMessage(`Đã nạp ${p.name || p.productName} vào khe ${cType.toUpperCase()}.`);
       }
+    } else if (state.buildsMigrated > 0) {
+      locationHandledRef.current = true;
+      setLocalMessage(`🎉 Đã tự động đồng bộ cấu hình PC bạn vừa dựng lên tài khoản thành công!`);
     }
   }, [location?.state, actions]);
 
@@ -926,23 +556,32 @@ export function PcBuilderPage() {
     const s = loadWorkspaceSession();
     return PRESET_BUILDS.some((p) => p.id === s.selectedPresetId) ? s.selectedPresetId : "gaming";
   });
-  const [isXaiDrawerOpen, setIsXaiDrawerOpen] = useState(false);
-  const [isAiAdvisorDrawerOpen, setIsAiAdvisorDrawerOpen] = useState(false);
+
+  /* ── MODALS & DRAWERS STATE (REFACTORED VIA useBuilderModals) ── */
+  const modals = useBuilderModals();
+  const {
+    isXaiDrawerOpen, setIsXaiDrawerOpen,
+    isAiAdvisorDrawerOpen, setIsAiAdvisorDrawerOpen,
+    detailModalProduct, setDetailModalProduct,
+    isReqWizardOpen, setIsReqWizardOpen,
+    whatIfModalOpen, setWhatIfModalOpen,
+    whatIfCurrentSnapshot, setWhatIfCurrentSnapshot,
+    whatIfSimulatedBuild, setWhatIfSimulatedBuild,
+    whatIfDeltaBudget, setWhatIfDeltaBudget,
+    isWhatIfLoading, setIsWhatIfLoading,
+    isFinalReviewOpen, setIsFinalReviewOpen,
+    isShareModalOpen, setIsShareModalOpen,
+    shareUrl, setShareUrl,
+    compareList, setCompareList,
+    isCompareDrawerOpen, setIsCompareDrawerOpen,
+    isMobileSummaryOpen, setIsMobileSummaryOpen
+  } = modals;
+
   const [backendXaiReport, setBackendXaiReport] = useState(null);
   const [isXaiLoading, setIsXaiLoading] = useState(false);
-  const [detailModalProduct, setDetailModalProduct] = useState(null);
-  const [isReqWizardOpen, setIsReqWizardOpen] = useState(false);
   const [candidateBuilds, setCandidateBuilds] = useState(null);
   const [activeCandidateTab, setActiveCandidateTab] = useState("bestValue");
-  const [whatIfModalOpen, setWhatIfModalOpen] = useState(false);
-  const [whatIfCurrentSnapshot, setWhatIfCurrentSnapshot] = useState(null);
-  const [whatIfSimulatedBuild, setWhatIfSimulatedBuild] = useState(null);
-  const [whatIfDeltaBudget, setWhatIfDeltaBudget] = useState(5000000);
-  const [isWhatIfLoading, setIsWhatIfLoading] = useState(false);
   const [isAutoBuilding, setIsAutoBuilding] = useState(false);
-  const [isFinalReviewOpen, setIsFinalReviewOpen] = useState(false);
-  const [compareList, setCompareList] = useState([]);
-  const [isCompareDrawerOpen, setIsCompareDrawerOpen] = useState(false);
   const [userBuildsHistory, setUserBuildsHistory] = useState([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const autoBuildAbortControllerRef = useRef(null);
@@ -1385,10 +1024,10 @@ export function PcBuilderPage() {
     }
     return (
       <span>
-        Cấu hình đạt trạng thái <strong>BUILD READY</strong> với điểm tương thích <strong>{xaiReport?.score || 96}/100</strong>. Hiệu năng ước tính: <strong>{insights?.fps || 165} FPS</strong> Gaming. Sẵn sàng đặt hàng!
+        Cấu hình đạt trạng thái <strong>BUILD READY</strong> với điểm tương thích <strong>{xaiReport?.score || 96}/100</strong>. Hiệu năng ước tính: <strong>{insights?.fps || 165} FPS</strong> (Game AAA / High Settings ở <strong>{(suggestionForm?.resolution || "1080p").toUpperCase()}</strong>). Sẵn sàng đặt hàng!
       </span>
     );
-  }, [selectedCount, insights, xaiReport]);
+  }, [selectedCount, insights, xaiReport, suggestionForm]);
 
   /* Fetch User Saved Builds History for Authenticated Users */
   useEffect(() => {
@@ -1483,6 +1122,23 @@ export function PcBuilderPage() {
     }
   }
 
+  /**
+   * handleSubstituteProduct — Tự động tìm linh kiện thay thế tương thích còn hàng có giá tương đương khi linh kiện hết hàng
+   */
+  async function handleSubstituteProduct(type, outOfStockProduct) {
+    const catalogList = optionsByComponent[type] || [];
+    const altProduct = findOptimalAlternative(type, outOfStockProduct, catalogList, selectedItems);
+
+    if (altProduct) {
+      const altName = getProductName(altProduct);
+      const outName = getProductName(outOfStockProduct);
+      await handleSelectProduct(type, altProduct);
+      setLocalMessage(`🔄 Đã tự động thay thế [${outName}] bằng [${altName}] (Còn hàng & Tương thích 100%)!`);
+    } else {
+      actions.setError(`Không tìm thấy linh kiện thay thế phù hợp còn hàng trong danh mục ${type.toUpperCase()}. Vui lòng chọn thủ công.`);
+    }
+  }
+
   async function handleAutoRecommend(overrideOptions = null) {
     if (autoBuildAbortControllerRef.current) {
       autoBuildAbortControllerRef.current.abort();
@@ -1508,6 +1164,7 @@ export function PcBuilderPage() {
       ram:       [{ id: 5, product_name: "Corsair Vengeance 16GB DDR5 5600", price: 1800000, attributes: [{ name: "ram_type", value: "DDR5" }] }],
       gpu:       [{ id: 7, product_name: "Gigabyte RTX 4060 Eagle OC 8GB", price: 7800000, attributes: [{ name: "gpu_length", value: "240mm" }] }],
       storage:   [{ id: 9, product_name: "Kingston NV2 500GB NVMe M.2", price: 950000, attributes: [] }],
+      storage_2: [{ id: 19, product_name: "Seagate Barracuda 1TB HDD 3.5 SATA", price: 1100000, attributes: [] }],
       psu:       [{ id: 8, product_name: "MSI MAG A650BN 650W 80 Plus Bronze", price: 1250000, attributes: [{ name: "psu_wattage", value: "650W" }] }],
       case:      [{ id: 10, product_name: "Case Mik LV12 Black Bể Cá Panorama", price: 990000, attributes: [{ name: "case_gpu_clearance", value: "380mm" }] }],
       cooling:   [{ id: 20, product_name: "Tản nhiệt Thermalright Assassin X120 SE", price: 450000, attributes: [{ name: "socket", value: "LGA1700 / AM5" }] }]
@@ -1598,7 +1255,8 @@ export function PcBuilderPage() {
       const selectedProductsList = [];
       const excludedTypes = Array.isArray(overrideOptions?.excludedTypes) ? overrideOptions.excludedTypes : [];
 
-      const prebuiltComponents = overrideOptions?.recommendedBuild?.components || overrideOptions?.recommendedBuild;
+      const candidateToLoad = candidateData?.bestValue?.components || candidateData?.[0]?.components;
+      const prebuiltComponents = overrideOptions?.recommendedBuild?.components || overrideOptions?.recommendedBuild || candidateToLoad;
       if (prebuiltComponents) {
         const compEntries = Array.isArray(prebuiltComponents)
           ? prebuiltComponents.map((c) => [c.componentType || c.type, c])
@@ -1610,7 +1268,7 @@ export function PcBuilderPage() {
           if (excludedTypes.includes(compType)) continue;
 
           const catalogList = currentCatalog[compType] || optionsByComponent[compType] || [];
-          const targetId = Number(getProductId(comp) || comp.productId || comp.id || 0);
+          const targetId = Number(getProductId(comp) || comp.productId || comp.id || comp.variantId || 0);
           const matchedProd = (targetId ? catalogList.find((p) => Number(getProductId(p)) === targetId) : null) || catalogList.find((p) => {
             const pName = normalizeText(getProductName(p));
             const targetName = normalizeText(comp.name || comp.product_name || "");
@@ -1724,10 +1382,10 @@ export function PcBuilderPage() {
         purpose: purpose || prev.purpose
       }));
 
-      // Budget Optimization Pass: Ensure total sum <= targetBudget
+      // Budget Optimization Pass: Ensure total sum <= targetBudget (only for local heuristic builds)
       let totalSum = selectedProductsList.reduce((acc, item) => acc + getProductPrice(item.product), 0);
 
-      if (totalSum > targetBudget) {
+      if (!candidateData && totalSum > targetBudget) {
         const flexibleTypes = ["ram", "storage", "cpu", "gpu", "mainboard", "case", "psu"];
         for (const type of flexibleTypes) {
           if (totalSum <= targetBudget) break;
@@ -1989,7 +1647,10 @@ export function PcBuilderPage() {
     if (!candidateBuild?.components) return;
     const comps = Array.isArray(candidateBuild.components)
       ? candidateBuild.components
-      : Object.values(candidateBuild.components);
+      : Object.entries(candidateBuild.components).map(([typeKey, compVal]) => ({
+          componentType: compVal?.componentType || typeKey,
+          ...compVal
+        }));
 
     if (comps.length === 0) return;
     setProcessingComponent("apply-candidate");
@@ -2000,14 +1661,14 @@ export function PcBuilderPage() {
       const resolvedItems = await Promise.all(
         comps.map(async (item) => {
           const type = (item.type || item.componentType || "").toLowerCase();
-          const pId = item.id || item.productId || item.product_id;
+          const pId = Number(item.productId || item.product_id || item.id || item.variantId || 0);
           if (!type) return null;
 
           const catalogList = optionsByComponent[type] || [];
           let productMatch = item.product || null;
 
           if (!productMatch && pId) {
-            productMatch = catalogList.find((p) => String(getProductId(p)) === String(pId));
+            productMatch = catalogList.find((p) => Number(getProductId(p)) === pId);
 
             if (!productMatch) {
               try {
@@ -2026,6 +1687,22 @@ export function PcBuilderPage() {
               const pName = normalizeText(getProductName(p));
               return pName.includes(targetName) || targetName.includes(pName);
             });
+          }
+
+          // Direct item as product fallback
+          if (!productMatch && (item.name || item.productName)) {
+            productMatch = {
+              id: pId || 1,
+              name: item.name || item.productName,
+              price: item.price || 0,
+              image_url: item.imageUrl || null,
+              variants: [{
+                id: item.variantId || pId || 1,
+                variant_id: item.variantId || pId || 1,
+                price: item.price || 0,
+                stock: 10
+              }]
+            };
           }
 
           // Ultimate fallback to first available catalog item for this component type
@@ -2131,12 +1808,19 @@ export function PcBuilderPage() {
   }
 
   async function handleAddAllToCart() {
-    const ids = Object.values(selectedItems).map(getVariantId).filter(Boolean);
-    if (ids.length === 0) { actions.setError("Chưa có linh kiện để thêm vào giỏ hàng."); return; }
+    const items = Object.values(selectedItems).filter((item) => Boolean(getVariantId(item)));
+    if (items.length === 0) { actions.setError("Chưa có linh kiện để thêm vào giỏ hàng."); return; }
     if (!isAuthenticated) { navigate(routeConfig.public.login); return; }
     setProcessingComponent("cart");
     try {
-      await Promise.all(ids.map((productVariantId) => addItemToCart({ productVariantId, quantity: 1 })));
+      await Promise.all(
+        items.map((item) =>
+          addItemToCart({
+            productVariantId: getVariantId(item),
+            quantity: Math.max(1, Number(item?.quantity || 1))
+          })
+        )
+      );
       setLocalMessage("✅ Đã thêm toàn bộ linh kiện vào giỏ hàng.");
     } catch { actions.setError("Không thể thêm toàn bộ linh kiện vào giỏ hàng."); }
     finally { setProcessingComponent(""); }
@@ -2150,11 +1834,18 @@ export function PcBuilderPage() {
   }
 
   async function executeBuyWholeBuild(options = {}) {
-    const ids = Object.values(selectedItems).map(getVariantId).filter(Boolean);
+    const items = Object.values(selectedItems).filter((item) => Boolean(getVariantId(item)));
     setProcessingComponent("cart");
     setIsFinalReviewOpen(false);
     try {
-      await Promise.all(ids.map((productVariantId) => addItemToCart({ productVariantId, quantity: 1 })));
+      await Promise.all(
+        items.map((item) =>
+          addItemToCart({
+            productVariantId: getVariantId(item),
+            quantity: Math.max(1, Number(item?.quantity || 1))
+          })
+        )
+      );
       setLocalMessage("✅ Đã xác nhận & nạp toàn bộ linh kiện vào giỏ hàng. Đang chuyển đến trang thanh toán...");
       navigate(routeConfig.public.checkout);
     } catch {
@@ -2165,26 +1856,24 @@ export function PcBuilderPage() {
   }
 
   async function handleShareBuild() {
-    setLocalMessage("Đang tạo link chia sẻ...");
+    setLocalMessage("Đang tạo link chia sẻ & mã QR...");
     const targetBuildId = activeBuildId || actions.activeBuildId;
+    let url = typeof window !== "undefined" ? window.location.href : "";
     try {
       if (isAuthenticated && targetBuildId) {
         const response = await httpClient.post(`/pc-builder/${targetBuildId}/publish`);
         const shareToken = response.data?.data?.shareToken || response.data?.shareToken;
         if (shareToken) {
-          const url = `${window.location.origin}/pc-builder/shared/${shareToken}`;
-          await navigator.clipboard.writeText(url);
-          setLocalMessage(`🔗 Đã sao chép link chia sẻ: ${url}`);
-          return;
+          url = `${window.location.origin}/pc-builder/shared/${shareToken}`;
         }
       }
-      const text = `${buildName} — ${formatCurrency(totalPrice)}đ\n${COMPONENT_SECTIONS.map((s) => {
-        const item = selectedItems[s.componentType];
-        return `${s.label}: ${item ? getProductName(getSelectedProduct(item)) : "Chưa chọn"}`;
-      }).join("\n")}`;
-      await navigator.clipboard.writeText(text);
-      setLocalMessage("✅ Đã sao chép thông tin cấu hình vào clipboard.");
-    } catch { setLocalMessage("Vui lòng đăng nhập và lưu cấu hình để tạo link chia sẻ công khai."); }
+    } catch {
+      // Fallback: Use current page URL or origin
+      url = typeof window !== "undefined" ? window.location.href : "";
+    }
+    setShareUrl(url);
+    setIsShareModalOpen(true);
+    setLocalMessage("✅ Đã mở bảng chia sẻ cấu hình PC.");
   }
 
   function handlePreset(preset) {
@@ -2307,6 +1996,8 @@ export function PcBuilderPage() {
               onRemoveComponent={actions.removeComponent}
               onClearAll={actions.clearAll}
               completionPercent={completionPercent}
+              onSubstitute={handleSubstituteProduct}
+              onUpdateQuantity={actions.updateComponentQuantity}
             />
 
             <div className="sidebar-divider" />
@@ -2442,17 +2133,6 @@ export function PcBuilderPage() {
               </div>
             )}
 
-            {/* 🚀 CANDIDATE BUILDS PANEL — Hiển thị 3 phương án cấu hình AI đề xuất khi có dữ liệu */}
-            {candidateBuilds && (
-              <CandidateBuildsPanel
-                candidateBuilds={candidateBuilds}
-                activeCandidateTab={activeCandidateTab}
-                onSelectCandidateTab={(tab) => setActiveCandidateTab(tab)}
-                onApplyCandidateBuild={handleApplyCandidateBuild}
-                isApplying={processingComponent === "apply-candidate"}
-              />
-            )}
-
             {/* Sticky workspace header */}
             <div className="workspace-header">
               <div>
@@ -2545,6 +2225,7 @@ export function PcBuilderPage() {
                           selectedItems={selectedItems}
                           suggestionForm={suggestionForm}
                           totalPrice={totalPrice}
+                          onSubstitute={handleSubstituteProduct}
                           isCompared={compareList.some((p) => (p.product_id || p.id) === productId)}
                           onToggleCompare={(prod, isChecked) => {
                             if (isChecked) {
@@ -2595,6 +2276,7 @@ export function PcBuilderPage() {
             aiInsightText={aiInsightText}
             selectedItems={selectedItems}
             formatCurrency={formatCurrency}
+            onExportPdf={handleExportPdf}
           />
 
         </div>
@@ -2762,6 +2444,19 @@ export function PcBuilderPage() {
         blockerReason={blockerReasonTooltip}
       />
 
+      {/* ── SHARE BUILD MODAL (QR CODE & SOCIAL SHARE) ──────── */}
+      <ShareBuildModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        shareUrl={shareUrl}
+        buildName={buildName}
+        totalPrice={totalPrice}
+        selectedItems={selectedItems}
+        sections={COMPONENT_SECTIONS}
+        insights={insights}
+        onExportPdf={handleExportPdf}
+      />
+
       {/* ── REQUIREMENT WIZARD MODAL (FIX VẤN ĐỀ 10) ───────── */}
       <RequirementWizardModal
         isOpen={isReqWizardOpen}
@@ -2864,6 +2559,120 @@ export function PcBuilderPage() {
                 <span>✨</span> Nạp trực tiếp 8/8 linh kiện vào workspace hiển thị tức thì
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MOBILE BOTTOM STICKY BAR (< 992px) (ĐỀ XUẤT 4) ── */}
+      <MobileBuilderStickyBar
+        totalPrice={totalPrice}
+        selectedCount={selectedCount}
+        requiredCount={insights.requiredCount}
+        completionPercent={completionPercent}
+        hasBlockerSeverity={hasBlockerSeverity}
+        isBudgetBlocked={isBudgetBlocked}
+        onOpenSummary={() => setIsMobileSummaryOpen(true)}
+        onBuyWholeBuild={handleBuyWholeBuild}
+        processingComponent={processingComponent}
+      />
+
+      {/* ── MOBILE BUILD SUMMARY MODAL / BOTTOM SHEET ── */}
+      {isMobileSummaryOpen && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(15, 23, 42, 0.75)",
+            backdropFilter: "blur(6px)",
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "center",
+            zIndex: 10001
+          }}
+          onClick={() => setIsMobileSummaryOpen(false)}
+        >
+          <div
+            style={{
+              backgroundColor: "#ffffff",
+              borderTopLeftRadius: "24px",
+              borderTopRightRadius: "24px",
+              maxWidth: "600px",
+              width: "100%",
+              maxHeight: "85vh",
+              overflowY: "auto",
+              padding: "20px",
+              boxShadow: "0 -10px 40px rgba(0, 0, 0, 0.35)",
+              animation: "fadeIn 0.2s ease-out"
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "20px" }}>📱</span>
+                <h3 style={{ margin: 0, fontSize: "17px", fontWeight: "800", color: "#0f172a" }}>
+                  Tổng Quan Cấu Hình
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMobileSummaryOpen(false)}
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  borderRadius: "50%",
+                  width: "32px",
+                  height: "32px",
+                  cursor: "pointer",
+                  fontWeight: "800",
+                  color: "#64748b"
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <BuildSummarySidebar
+              xaiReport={xaiReport}
+              totalPrice={totalPrice}
+              selectedCount={selectedCount}
+              insights={insights}
+              handleBuyWholeBuild={() => {
+                setIsMobileSummaryOpen(false);
+                handleBuyWholeBuild();
+              }}
+              processingComponent={processingComponent}
+              hasBlockerSeverity={hasBlockerSeverity || isBudgetBlocked}
+              xaiBuildReadiness={isBudgetBlocked ? "BLOCKED" : xaiReport.buildReadiness}
+              blockerReasonTooltip={blockerReasonTooltip}
+              isAuthenticated={isAuthenticated}
+              onSaveBuild={actions.commitSave}
+              onAddAllToCart={handleAddAllToCart}
+              onShareBuild={() => {
+                setIsMobileSummaryOpen(false);
+                handleShareBuild();
+              }}
+              onClearAll={actions.clearAll}
+              handleAutoRecommend={handleAutoRecommend}
+              suggestionFormBudget={suggestionForm.budget}
+              visibleChecks={visibleChecks}
+              onOpenXaiDrawer={() => {
+                setIsMobileSummaryOpen(false);
+                setIsXaiDrawerOpen(true);
+              }}
+              onOpenAiDrawer={() => {
+                setIsMobileSummaryOpen(false);
+                setIsAiAdvisorDrawerOpen(true);
+              }}
+              handleRunWhatIf={handleRunWhatIf}
+              isWhatIfLoading={isWhatIfLoading}
+              aiInsightText={aiInsightText}
+              selectedItems={selectedItems}
+              formatCurrency={formatCurrency}
+              onExportPdf={handleExportPdf}
+            />
           </div>
         </div>
       )}

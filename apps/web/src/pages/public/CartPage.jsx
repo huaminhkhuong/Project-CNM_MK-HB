@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 
 import { useAuth } from "../../hooks/useAuth";
+import { httpClient } from "../../services/http";
 import { getCart, removeCartItem, updateCartItem } from "../../services/cart.service";
 
 function getErrorMessage(error, fallbackMessage) {
@@ -38,8 +39,41 @@ export function CartPage() {
   const [processingItemId, setProcessingItemId] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
+  // Coupon Voucher States
+  const [couponInput, setCouponInput] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
+  const [couponMessage, setCouponMessage] = useState(null);
+
   const items = useMemo(() => cart?.items || [], [cart]);
   const totalAmount = Number(cart?.totalAmount || 0);
+
+  async function handleApplyCoupon() {
+    if (!couponInput.trim()) return;
+    try {
+      setIsApplyingCoupon(true);
+      setCouponMessage(null);
+      const res = await httpClient.post("/coupons/validate", {
+        code: couponInput.trim(),
+        orderAmount: totalAmount
+      });
+      if (res.data?.success && res.data?.data) {
+        setAppliedCoupon(res.data.data);
+        setCouponMessage({ type: "success", text: `Đã áp dụng mã: ${res.data.data.description}` });
+      }
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || "Mã giảm giá không hợp lệ";
+      setCouponMessage({ type: "error", text: msg });
+    } finally {
+      setIsApplyingCoupon(false);
+    }
+  }
+
+  function handleRemoveCoupon() {
+    setAppliedCoupon(null);
+    setCouponInput("");
+    setCouponMessage(null);
+  }
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -100,7 +134,7 @@ export function CartPage() {
           <div style={{ fontSize: 64, marginBottom: 24, padding: "20px", display: "inline-block", background: "#f1f5f9", borderRadius: "50%" }}>🔒</div>
           <h2 style={{ fontSize: 28, fontWeight: 900, marginBottom: 16 }}>Truy cập bị hạn chế</h2>
           <p style={{ color: "#64748b", margin: "0 0 32px", fontSize: 16 }}>Bạn cần đăng nhập để xem giỏ hàng và tiếp tục hành trình mua sắm các linh kiện PC cao cấp.</p>
-          <Link to="/login" style={{ display: "inline-block", padding: "14px 32px", borderRadius: 16, background: "var(--market-primary)", color: "#fff", textDecoration: "none", fontWeight: 800 }}>Đăng nhập ngay</Link>
+          <Link to="/login" state={{ from: { pathname: "/cart" } }} style={{ display: "inline-block", padding: "14px 32px", borderRadius: 16, background: "var(--market-primary)", color: "#fff", textDecoration: "none", fontWeight: 800 }}>Đăng nhập ngay</Link>
         </div>
       </div>
     );
@@ -241,10 +275,88 @@ export function CartPage() {
                   <span style={{ fontWeight: 800, color: '#10b981' }}>Miễn phí</span>
                 </div>
                 <div style={{ height: 1, background: '#e2e8f0', margin: '8px 0' }} />
+
+                {/* Coupon Code Input */}
+                <div style={{ margin: '8px 0' }}>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 800, color: '#475569', marginBottom: 8 }}>
+                    🏷️ Mã giảm giá / Voucher
+                  </label>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      type="text"
+                      placeholder="VD: PCMALL10, VIPBUILD..."
+                      value={couponInput}
+                      onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                      disabled={isApplyingCoupon || !!appliedCoupon}
+                      style={{
+                        flex: 1,
+                        padding: '10px 14px',
+                        borderRadius: 12,
+                        border: '1px solid #cbd5e1',
+                        fontSize: 14,
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        outline: 'none'
+                      }}
+                    />
+                    {appliedCoupon ? (
+                      <button
+                        type="button"
+                        onClick={handleRemoveCoupon}
+                        style={{
+                          padding: '10px 14px',
+                          borderRadius: 12,
+                          border: 'none',
+                          background: '#fee2e2',
+                          color: '#dc2626',
+                          fontWeight: 800,
+                          fontSize: 13,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Hủy
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleApplyCoupon}
+                        disabled={isApplyingCoupon || !couponInput.trim()}
+                        style={{
+                          padding: '10px 16px',
+                          borderRadius: 12,
+                          border: 'none',
+                          background: isApplyingCoupon ? '#94a3b8' : 'var(--market-primary)',
+                          color: '#fff',
+                          fontWeight: 800,
+                          fontSize: 13,
+                          cursor: isApplyingCoupon ? 'not-allowed' : 'pointer'
+                        }}
+                      >
+                        {isApplyingCoupon ? '...' : 'Áp dụng'}
+                      </button>
+                    )}
+                  </div>
+                  {couponMessage && (
+                    <div style={{ fontSize: 12, marginTop: 6, fontWeight: 700, color: couponMessage.type === 'success' ? '#16a34a' : '#dc2626' }}>
+                      {couponMessage.text}
+                    </div>
+                  )}
+                </div>
+
+                {appliedCoupon && (
+                  <div style={{ display: "flex", justifyContent: "space-between", color: "#16a34a", fontSize: 16, fontWeight: 700 }}>
+                    <span>Giảm giá ({appliedCoupon.code}):</span>
+                    <span>-{formatCurrency(appliedCoupon.discountAmount)} đ</span>
+                  </div>
+                )}
+
+                <div style={{ height: 1, background: '#e2e8f0', margin: '8px 0' }} />
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: 'flex-end', marginTop: 8 }}>
                   <span style={{ fontWeight: 900, fontSize: 18, color: "#0f172a" }}>Tổng cộng</span>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 28, fontWeight: 950, color: 'var(--market-primary)' }}>{formatCurrency(totalAmount)} đ</div>
+                    <div style={{ fontSize: 28, fontWeight: 950, color: 'var(--market-primary)' }}>
+                      {formatCurrency(appliedCoupon ? appliedCoupon.finalAmount : totalAmount)} đ
+                    </div>
                     <div style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600, marginTop: 4 }}>(Đã tính thuế VAT)</div>
                   </div>
                 </div>
@@ -253,7 +365,7 @@ export function CartPage() {
               <div style={{ display: 'grid', gap: 16 }}>
                 <button
                   type="button"
-                  onClick={() => navigate("/checkout")}
+                  onClick={() => navigate("/checkout", { state: { appliedCoupon } })}
                   style={{ 
                     height: 64, fontSize: 18, borderRadius: 20, border: "none", 
                     background: "linear-gradient(135deg, var(--market-primary), #1e40af)", 

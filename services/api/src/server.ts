@@ -30,3 +30,29 @@ httpServer.listen(env.port, () => {
   verifyEmailConnection();
 });
 
+// Graceful shutdown handling
+function gracefulShutdown(signal: string) {
+  console.log(`\n[Server] Received ${signal}. Closing HTTP server and database pools...`);
+  httpServer.close(async () => {
+    try {
+      const { prisma } = await import("./config/prisma");
+      await prisma.$disconnect();
+    } catch {}
+    try {
+      const { closePool } = require("./config/database");
+      await closePool();
+    } catch {}
+    console.log("[Server] Graceful shutdown completed. Exiting.");
+    process.exit(0);
+  });
+
+  // Force exit after 10s if connections do not drain
+  setTimeout(() => {
+    console.error("[Server] Forcefully shutting down due to timeout.");
+    process.exit(1);
+  }, 10000).unref();
+}
+
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+

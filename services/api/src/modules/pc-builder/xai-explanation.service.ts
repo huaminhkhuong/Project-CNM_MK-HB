@@ -106,6 +106,12 @@ class XaiExplanationService {
         return { ruleId: "COMP-002", severity: ok ? "INFO" : "BLOCKER" };
       case "bottleneck":
         return { ruleId: "COMP-003", severity: ok ? "INFO" : "ADVISORY" };
+      case "multi_cpu_mb_vrm":
+        return { ruleId: "COMP-MULTI-001", severity: ok ? "INFO" : "WARNING" };
+      case "multi_gpu_psu_case":
+        return { ruleId: "COMP-MULTI-002", severity: ok ? "INFO" : "BLOCKER" };
+      case "multi_cpu_cooling_case":
+        return { ruleId: "COMP-MULTI-003", severity: ok ? "INFO" : "WARNING" };
       default:
         return { ruleId: "COMP-000", severity: ok ? "INFO" : "ADVISORY" };
     }
@@ -385,6 +391,63 @@ class XaiExplanationService {
           long: `Chênh lệch sức mạnh giữa CPU và GPU khá lớn (${detail}). Một trong hai thành phần sẽ phải chờ thành phần kia xử lý xong khi tải nặng.`,
           suggestion: "Cân đối lại ngân sách giữa CPU và GPU để đạt hiệu năng tối ưu nhất.",
           level: "info"
+        };
+
+      case "multi_cpu_mb_vrm":
+        if (ok) {
+          return {
+            ruleId: meta.ruleId,
+            severity: "INFO",
+            short: "✅ [COMP-MULTI-001] Pha nguồn VRM bo mạch chủ & CPU đồng bộ",
+            long: `Bo mạch chủ trang bị dàn phase VRM đủ khỏe và tản nhiệt nhôm để duy trì xung nhịp ổn định cho CPU (${detail}).`,
+            level: "success"
+          };
+        }
+        return {
+          ruleId: meta.ruleId,
+          severity: "WARNING",
+          short: "⚠️ [COMP-MULTI-001] [WARNING] Bo mạch chủ phổ thông VRM yếu đi cùng CPU công suất lớn",
+          long: `Tổ hợp CPU TDP cao kết hợp Mainboard giá rẻ không có heatsink VRM sẽ khiến mạch nguồn quá nhiệt, gây sụt xung (thermal throttling) và tụt hiệu năng đột ngột (${detail}).`,
+          suggestion: "Nâng cấp Mainboard lên chipset B760/Z790 (Intel) hoặc B650/X670 (AMD) có dàn VRM từ 10+2 phase trở lên.",
+          level: "warning"
+        };
+
+      case "multi_gpu_psu_case":
+        if (ok) {
+          return {
+            ruleId: meta.ruleId,
+            severity: "INFO",
+            short: "✅ [COMP-MULTI-002] Tổ hợp GPU + Nguồn PSU + Vỏ Case tối ưu hoàn chỉnh",
+            long: `Bộ nguồn dư tải bảo vệ chống sụt áp và thùng máy đảm bảo lưu thông gió thông thoáng cho GPU (${detail}).`,
+            level: "success"
+          };
+        }
+        return {
+          ruleId: meta.ruleId,
+          severity: "BLOCKER",
+          short: "❌ [COMP-MULTI-002] [BLOCKER] Xung đột tổ hợp Nguồn / Vỏ case với Card đồ họa cao cấp",
+          long: `Card đồ họa công suất lớn đòi hỏi nguồn chuẩn ATX 3.0 chịu dòng xung kích (transient spikes) và không gian vỏ máy đối lưu gió tốt (${detail}).`,
+          suggestion: "Nâng cấp bộ nguồn lên 850W+ ATX 3.0 và sử dụng vỏ case chuẩn Mid-Tower/Full-Tower có tối thiểu 3 quạt hút gió.",
+          level: "error"
+        };
+
+      case "multi_cpu_cooling_case":
+        if (ok) {
+          return {
+            ruleId: meta.ruleId,
+            severity: "INFO",
+            short: "✅ [COMP-MULTI-003] Tổ hợp CPU + Tản nhiệt + Thùng máy giải nhiệt xuất sắc",
+            long: `Giải pháp tản nhiệt và hướng gió trong thùng máy phối hợp hoàn hảo giúp CPU luôn chạy hết công suất mà không bị quá nhiệt (${detail}).`,
+            level: "success"
+          };
+        }
+        return {
+          ruleId: meta.ruleId,
+          severity: "WARNING",
+          short: "⚠️ [COMP-MULTI-003] [WARNING] CPU đầu bảng cần tản nhiệt nước AIO 360mm",
+          long: `Dòng CPU đầu bảng (TDP >200W) sinh nhiệt lượng cực lớn, tản nhiệt khí phổ thông trong thùng máy kín sẽ không kịp giải nhiệt (${detail}).`,
+          suggestion: "Trang bị tản nhiệt nước AIO 360mm gắn nóc thùng case để thoát nhiệt trực tiếp ra ngoài.",
+          level: "warning"
         };
 
       default:

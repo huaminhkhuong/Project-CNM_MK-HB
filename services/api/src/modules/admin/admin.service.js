@@ -52,27 +52,8 @@ function normalizeRuleType(value) {
 }
 
 async function ensureCompatibilityRuleNameColumn() {
-  if (compatibilityRuleNameColumnReady) {
-    return;
-  }
-
-  const rows = await query(
-    `
-      SELECT COLUMN_NAME
-      FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA = COALESCE(DATABASE(), ?)
-        AND TABLE_NAME = 'compatibility_rules'
-        AND COLUMN_NAME = 'name'
-      LIMIT 1
-    `,
-    [env.dbName]
-  );
-
-  if (!rows[0]) {
-    await query("ALTER TABLE compatibility_rules ADD COLUMN name VARCHAR(255) NULL AFTER id");
-  }
-
-  compatibilityRuleNameColumnReady = true;
+  // CompatibilityRule.name is defined in schema.prisma and managed via migrations
+  return;
 }
 
 function ruleTypeToOperator(ruleType) {

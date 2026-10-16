@@ -5,6 +5,7 @@ const { ROLES, hasAnyRole, normalizeRole } = require("../../utils/role-helpers")
 const { env } = require("../../config/env");
 const { createWarrantyRecordsForDeliveredOrder } = require("../warranties/warranty-sync.service");
 const { publishOrderEvent } = require("../../services/order-events");
+const { createNotification } = require("../notifications/notifications.service");
 
 let schemaCache = null;
 const ORDER_STATUSES = ["PENDING", "PROCESSING", "SHIPPED", "DELIVERED", "COMPLETED", "CANCELED"];
@@ -851,6 +852,25 @@ async function getOrderDetail(userOrUserId, orderId) {
   };
 }
 
+async function restoreStockForCanceledOrder(orderId, connection) {
+  const config = await getSchemaConfig();
+  if (!config.variants.stock) return;
+
+  const orderItems = await getOrderItemsByOrderId(orderId);
+  for (const item of orderItems) {
+    if (item.variantId && item.quantity > 0) {
+      await connection.execute(
+        `
+          UPDATE ${config.variants.table}
+          SET ${config.variants.stock} = ${config.variants.stock} + ?
+          WHERE ${config.variants.id} = ?
+        `,
+        [item.quantity, item.variantId]
+      );
+    }
+  }
+}
+
 async function cancelOrder(userId, orderId) {
   const parsedOrderId = toPositiveInteger(orderId, "orderId");
   const config = await getSchemaConfig();
@@ -878,15 +898,30 @@ async function cancelOrder(userId, orderId) {
 
   params.push(parsedOrderId, userId);
 
-  await query(
-    `
-      UPDATE ${config.orders.table}
-      SET ${updateParts.join(", ")}
-      WHERE ${config.orders.id} = ?
-        AND ${config.orders.userId} = ?
-    `,
-    params
-  );
+  const connection = await getDbPool().getConnection();
+  try {
+    await connection.beginTransaction();
+
+    await connection.execute(
+      `
+        UPDATE ${config.orders.table}
+        SET ${updateParts.join(", ")}
+        WHERE ${config.orders.id} = ?
+          AND ${config.orders.userId} = ?
+      `,
+      params
+    );
+
+    // Hoan lai ton kho san pham
+    await restoreStockForCanceledOrder(parsedOrderId, connection);
+
+    await connection.commit();
+  } catch (err) {
+    await connection.rollback();
+    throw err;
+  } finally {
+    connection.release();
+  }
 
   return getOrderDetail({ id: userId, role: ROLES.CUSTOMER }, parsedOrderId);
 }
@@ -968,25 +1003,61 @@ async function updateOrderStatus(actor, orderId, statusOrPayload) {
     updateParts.push(`${config.orders.updatedAt} = NOW()`);
   }
 
-  await query(
-    `
-      UPDATE ${config.orders.table}
-      SET ${updateParts.join(", ")}
-      WHERE ${config.orders.id} = ?
-    `,
-    [...params, parsedOrderId]
-  );
+  const connection = await getDbPool().getConnection();
+  try {
+    await connection.beginTransaction();
+
+    await connection.execute(
+      `
+        UPDATE ${config.orders.table}
+        SET ${updateParts.join(", ")}
+        WHERE ${config.orders.id} = ?
+      `,
+      [...params, parsedOrderId]
+    );
+
+    if (nextStatus === "CANCELED" && currentStatus !== "CANCELED") {
+      await restoreStockForCanceledOrder(parsedOrderId, connection);
+    }
+
+    await connection.commit();
+  } catch (err) {
+    await connection.rollback();
+    throw err;
+  } finally {
+    connection.release();
+  }
 
   if (nextStatus === "COMPLETED") {
     await createWarrantyRecordsForDeliveredOrder(parsedOrderId);
   }
 
   const updatedOrder = await getOrderDetail(actor, parsedOrderId);
-  publishOrderEvent(updatedOrder?.userId || updatedOrder?.user_id || existingOrder.user_id, {
+  const targetUserId = updatedOrder?.userId || updatedOrder?.user_id || existingOrder.user_id;
+
+  publishOrderEvent(targetUserId, {
     orderId: parsedOrderId,
     status: nextStatus,
     paymentStatus: updatedOrder?.paymentStatus || updatedOrder?.payment_status || existingOrder.payment_status
   });
+
+  if (targetUserId) {
+    const statusTitles = {
+      PROCESSING: "Đơn hàng đang xử lý",
+      SHIPPED: "Đơn hàng đang được giao",
+      DELIVERED: "Đơn hàng đã giao thành công",
+      COMPLETED: "Đơn hàng đã hoàn tất",
+      CANCELED: "Đơn hàng đã bị hủy"
+    };
+    const title = statusTitles[nextStatus] || `Cập nhật đơn hàng #${parsedOrderId}`;
+    createNotification({
+      userId: targetUserId,
+      type: "ORDER",
+      title,
+      message: `Đơn hàng #${parsedOrderId} đã chuyển sang trạng thái: ${nextStatus}.`,
+      link: `/orders/${parsedOrderId}`
+    }).catch(err => console.warn("[Notification] Order notify error:", err?.message));
+  }
 
   return updatedOrder;
 }

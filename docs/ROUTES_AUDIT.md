@@ -27,16 +27,16 @@ The active API router is `services/api/src/routes/index.ts`.
 - `/ai` -> `modules/ai/ai.route.js`
 - `/compatibility` -> `modules/compatibility/compatibility.route.js`
 
-## Duplicate route files not authoritative
-
-The following files duplicate currently mounted TypeScript routers and should not be edited as the primary source of truth:
-
-- `modules/auth/auth.route.js`
-- `modules/cart/cart.route.js`
-- `modules/orders/orders.route.js`
-- `modules/tickets/tickets.route.js`
-- `modules/users/users.route.js`
-- `modules/warranties/warranties.route.js`
+## Archived legacy duplicate route files
+ 
+The following unmounted legacy route files have been safely archived to `services/api/src/legacy/unused_routes/` to keep active module directories clean:
+ 
+- `services/api/src/legacy/unused_routes/auth.route.js`
+- `services/api/src/legacy/unused_routes/cart.route.js`
+- `services/api/src/legacy/unused_routes/orders.route.js`
+- `services/api/src/legacy/unused_routes/tickets.route.js`
+- `services/api/src/legacy/unused_routes/users.route.js`
+- `services/api/src/legacy/unused_routes/warranties.route.js`
 
 ## Current compatibility additions
 

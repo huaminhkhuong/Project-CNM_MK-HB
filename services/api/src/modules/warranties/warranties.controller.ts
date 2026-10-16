@@ -171,7 +171,10 @@ async function ensureColumn(tableName: string, columnName: string, definition: s
   }
 }
 
+let isWarrantyTablesEnsured = false;
+
 async function ensureWarrantyTables() {
+  if (isWarrantyTablesEnsured) return;
   await execute(`
     CREATE TABLE IF NOT EXISTS warranty_requests (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -238,6 +241,7 @@ async function ensureWarrantyTables() {
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  isWarrantyTablesEnsured = true;
 }
 
 function buildFallbackTimeline(status = "RECEIVED") {

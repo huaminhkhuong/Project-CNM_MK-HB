@@ -16,15 +16,19 @@ const _price = (p) =>
   );
 const _product = (item) =>
   item?.product || item?.Product || item?.variant?.product || item || null;
-const _itemPrice = (item) =>
-  Number(item?.variant?.price || item?.price || _price(_product(item)) || 0);
+const _itemPrice = (item) => {
+  const unit = Number(item?.variant?.price || item?.price || _price(_product(item)) || 0);
+  const qty = Math.max(1, Number(item?.quantity || 1));
+  return unit * qty;
+};
 
 const SECTIONS = [
   { type: "cpu",       label: "CPU",              icon: "💻" },
   { type: "mainboard", label: "Mainboard",         icon: "🔌" },
   { type: "ram",       label: "RAM",               icon: "🧠" },
   { type: "gpu",       label: "GPU / VGA",         icon: "🎮" },
-  { type: "storage",   label: "Ổ cứng (SSD/HDD)", icon: "💾" },
+  { type: "storage",   label: "Ổ cứng chính (SSD)", icon: "💾" },
+  { type: "storage_2", label: "Ổ phụ (SSD 2/HDD)",  icon: "💽" },
   { type: "psu",       label: "Nguồn (PSU)",       icon: "⚡" },
   { type: "case",      label: "Case / Vỏ máy",     icon: "📦" },
   { type: "cooling",   label: "Tản nhiệt",         icon: "❄️" },
@@ -80,8 +84,10 @@ function generateBuildHtml({ buildName, selectedItems, totalPrice, insights, xai
   const componentRows = SECTIONS.map((sec, idx) => {
     const item    = si[sec.type];
     const product = _product(item);
+    const qty     = Math.max(1, Number(item?.quantity || 1));
+    const qtyBadge = qty > 1 ? `<span style="display:inline-block;background:#dbeafe;color:#1d4ed8;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px">x${qty} (Dual Channel)</span>` : "";
     const priceTd = product ? `<strong class="price-val">${_fmt(_itemPrice(item))}</strong><span class="price-unit">đ</span>` : `<span class="empty-dash">—</span>`;
-    const nameTd  = product ? `<span class="product-name">${_name(product)}</span>` : `<span class="not-selected">Chưa chọn linh kiện</span>`;
+    const nameTd  = product ? `<span class="product-name">${_name(product)}</span>${qtyBadge}` : `<span class="not-selected">Chưa chọn linh kiện</span>`;
     const brandTd = product ? `<span class="brand-tag">${_brand(product)}</span>` : "";
     const rowCls  = !product ? "row-empty" : idx % 2 === 0 ? "row-even" : "row-odd";
 
