@@ -2,12 +2,12 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Node.js-20+-green?logo=node.js&logoColor=white" />
-  <img src="https://img.shields.io/badge/React-18-blue?logo=react" />
+  <img src="https://img.shields.io/badge/React-19-blue?logo=react" />
   <img src="https://img.shields.io/badge/MySQL-8.0-orange?logo=mysql&logoColor=white" />
   <img src="https://img.shields.io/badge/Express-4.x-black?logo=express" />
   <img src="https://img.shields.io/badge/Prisma-ORM-2D3748?logo=prisma" />
   <img src="https://img.shields.io/badge/JWT-Auth-purple" />
-  <img src="https://img.shields.io/badge/OpenAI-AI_Advisor-412991?logo=openai" />
+  <img src="https://img.shields.io/badge/AI_Engine-Expert_System_%2B_LLM-412991" />
 </p>
 
 ---
@@ -16,11 +16,12 @@
 
 **PC Mall** là hệ thống thương mại điện tử chuyên biệt cho **linh kiện máy tính**, được xây dựng theo kiến trúc monorepo gồm:
 
-- **Frontend** – React 18 + Vite, giao diện premium "Clean Tech"
-- **Backend API** – Node.js + Express, hỗ trợ cả JavaScript và TypeScript
-- **Cơ sở dữ liệu** – MySQL 8, ORM qua Prisma và raw query pool
+- **Frontend** – React 19 + Vite, giao diện premium "Clean Tech", tối ưu tải trang bằng Route-based Code Splitting (React.lazy)
+- **Backend API** – Node.js + Express, Prisma ORM singleton pool, module RESTful API & Socket.io
+- **Cơ sở dữ liệu** – MySQL 8, quản lý schema tập trung qua Prisma
+- **Hệ thống tư vấn & kiểm tra tương thích** – Hệ chuyên gia dựa trên tri thức (Knowledge-Based Expert System) kết hợp thuật toán tối ưu Heuristic và mô hình ngôn ngữ lớn (OpenAI GPT / Google Gemini)
 
-Hệ thống hỗ trợ **5 nhóm người dùng** (Actor) với vai trò và quyền hạn riêng biệt, đồng thời tích hợp **AI Advisor** thông minh để gợi ý cấu hình PC phù hợp với ngân sách và nhu cầu.
+Hệ thống hỗ trợ **5 nhóm người dùng** (Actor) với vai trò và quyền hạn riêng biệt.
 
 ---
 
@@ -84,10 +85,11 @@ Project-CNM_MK-HB/
 - Lưu cấu hình vào tài khoản (cho Customer đã đăng nhập)
 - Hỗ trợ Guest mode: lưu tạm thời vào LocalStorage
 
-### 🤖 AI Advisor
-- Gửi yêu cầu đến OpenAI GPT để tạo cấu hình PC tối ưu
-- Fallback **Demo Mode**: nếu không có API key, tự động chọn linh kiện từ database
-- Chat AI: tư vấn linh kiện qua giao diện chat tại `/ai-advisor`
+### 🤖 AI Advisor & Hệ chuyên gia kiểm tra tương thích
+- **Heuristic Engine**: Thuật toán phân bổ ngân sách tối ưu theo use-case (Gaming, Render, Office, Dev) và lọc linh kiện tự động
+- **XAI Explanation Engine**: Bộ giải thích luật phần cứng (COMP-001 -> COMP-010) với 4 cấp độ nghiêm trọng (Blocker, Warning, Advisory, Info)
+- **LLM Integration**: Hỗ trợ kết nối OpenAI GPT-4o-mini hoặc Google Gemini 1.5 Flash để đàm thoại tư vấn chuyên sâu
+- **Demo Mode**: Tự động fallback sang hệ luật Heuristic nội bộ khi không cấu hình API Key
 
 ### 🛒 Giỏ hàng & Thanh toán
 - Thêm/xóa/cập nhật số lượng sản phẩm trong giỏ
