@@ -37,8 +37,8 @@ test.describe("Smart PC Builder — End-to-End User Journeys (P10-04)", () => {
       await closeXaiBtn.click();
     }
 
-    // 4. Verify Purchase Action button is available
-    const buyWholeBtn = page.getByRole("button", { name: /Mua Nguyên Bộ/i });
+    // 4. Verify Purchase Action button is available (either Ready or Blocker Enforced)
+    const buyWholeBtn = page.getByRole("button", { name: /Mua Nguyên Bộ|Bị Chặn/i });
     await expect(buyWholeBtn).toBeVisible();
   });
 

@@ -29,7 +29,7 @@ export function createRateLimiter(options: RateLimitOptions) {
   }, 5 * 60 * 1000).unref();
 
   return (req: Request, res: Response, next: NextFunction) => {
-    if (process.env.NODE_ENV === "test") {
+    if (process.env.NODE_ENV === "test" || process.env.DISABLE_RATE_LIMIT === "true") {
       return next();
     }
     const ip = req.ip || req.socket.remoteAddress || "127.0.0.1";
@@ -68,23 +68,23 @@ export function createRateLimiter(options: RateLimitOptions) {
   };
 }
 
-// 1. Auth Rate Limiter: Max 10 attempts per 15 minutes per IP (protects login/register/forgot-password)
+// 1. Auth Rate Limiter: Max 10 attempts per 15 minutes in production (protects login/register/forgot-password)
 export const authRateLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === "production" ? 10 : 200,
+  max: process.env.NODE_ENV === "production" ? 10 : 500,
   message: "⛔ Quá nhiều lần thử đăng nhập/đăng ký. Vui lòng thử lại sau 15 phút."
 });
 
 // 2. AI Rate Limiter: Max 20 requests per minute per IP (protects AI Chat & PC Builder AI Suggestion)
 export const aiRateLimiter = createRateLimiter({
   windowMs: 60 * 1000,
-  max: 20,
+  max: process.env.NODE_ENV === "production" ? 20 : 500,
   message: "⚡ Bạn đã vượt quá giới hạn gọi AI Advisor. Vui lòng chờ 1 phút trước khi tiếp tục."
 });
 
-// 3. General API Rate Limiter: Max 200 requests per minute per IP
+// 3. General API Rate Limiter: 200 req/min in prod, 5000 req/min in dev
 export const generalApiLimiter = createRateLimiter({
   windowMs: 60 * 1000,
-  max: 200,
+  max: process.env.NODE_ENV === "production" ? 200 : 5000,
   message: "⚠️ Thao tác quá nhanh. Vui lòng giãn cách các yêu cầu."
 });

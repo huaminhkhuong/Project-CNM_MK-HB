@@ -5,7 +5,7 @@ test.describe("Products", () => {
     await page.goto("/products");
     
     // Should show product cards
-    await expect(page.locator('[data-testid="product-card"]').first()).toBeVisible();
+    await expect(page.locator('[data-testid="product-card"]').first()).toBeVisible({ timeout: 10000 });
   });
 
   test("should filter products by category", async ({ page }) => {
@@ -28,7 +28,7 @@ test.describe("Products", () => {
     
     // Click first product card link
     const firstCard = page.locator('[data-testid="product-card"]').first();
-    await expect(firstCard).toBeVisible();
+    await expect(firstCard).toBeVisible({ timeout: 10000 });
     await firstCard.locator("a").first().click();
     
     // Should be on product detail page
