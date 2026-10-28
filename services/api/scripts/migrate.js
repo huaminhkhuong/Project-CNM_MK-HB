@@ -163,7 +163,21 @@ async function runCanonicalMigrations() {
     `);
     console.log("✅ [Migration] Ensured product_reviews table.");
 
-    // 8. Seed default system_settings
+    // 8. Ensure token_blacklist table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS token_blacklist (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        token VARCHAR(500) NOT NULL UNIQUE,
+        user_id INT NULL,
+        expires_at TIMESTAMP NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_token (token),
+        INDEX idx_expires_at (expires_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    console.log("✅ [Migration] Ensured token_blacklist table.");
+
+    // 9. Seed default system_settings
     for (const item of DEFAULT_SETTINGS) {
       await connection.query(
         `
