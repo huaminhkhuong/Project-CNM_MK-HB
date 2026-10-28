@@ -1,21 +1,18 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
-import axios from "axios";
-
 import { addItemToCart } from "../../services/cart.service";
+import { refreshCart } from "../../store/cartStore";
 import { getProductDetail, getProducts } from "../../services/catalog.service";
 import { useAuth } from "../../hooks/useAuth";
 import { routeConfig } from "../../routes/routeConfig";
 import { addStoredCompareId, buildCompareUrl } from "../../utils/compare";
 import { resolveProductImage } from "../../utils/productImage";
+import { ProductReviewsSection } from "../../components/ProductReviewsSection";
 
 const DIRECT_CHECKOUT_DRAFT_KEY = "checkout_direct_draft_v1";
 
 function getErrorMessage(error, fallbackMessage) {
-  if (axios.isAxiosError(error)) {
-    return error.response?.data?.message || fallbackMessage;
-  }
-  return error.message || fallbackMessage;
+  return error?.response?.data?.message || error?.message || fallbackMessage;
 }
 
 function normalizeProductDetail(response) {
@@ -49,7 +46,19 @@ function getProductCategory(product) {
 }
 
 function getProductBrand(product) {
-  return product?.brand?.name || product?.Brand?.name || product?.brand_name || "PC Mall";
+  const brand = product?.brand?.name || product?.Brand?.name || product?.brand_name || (typeof product?.brand === "string" ? product.brand : null);
+  if (brand && brand.trim() && brand.toLowerCase() !== "unknown" && brand.toLowerCase() !== "thương hiệu") {
+    return brand.trim();
+  }
+  const name = String(product?.name || product?.product_name || "").toUpperCase();
+  const KNOWN = ["INTEL", "AMD", "ASUS", "MSI", "GIGABYTE", "CORSAIR", "KINGSTON", "SAMSUNG", "WD", "DEEPCOOL", "THERMALRIGHT", "NZXT", "MONTECH", "LIAN LI", "COOLER MASTER", "INNO3D", "PALIT", "ZOTAC", "COLORFUL", "G.SKILL", "CRUCIAL", "NOCTUA", "JONSBO", "XIGMATEK", "AIGO", "KENOO", "MIK"];
+  for (const b of KNOWN) {
+    if (name.includes(b)) {
+      if (b === "WD") return "WD";
+      return b.charAt(0) + b.slice(1).toLowerCase();
+    }
+  }
+  return "Chính hãng";
 }
 
 function getSkuId(sku) {
@@ -221,14 +230,14 @@ export function ProductDetailPage() {
       return normalized.map((sku) => ({
         ...sku,
         id: getSkuId(sku),
-        stock: Math.max(getSkuStock(sku), 10),
+        stock: getSkuStock(sku),
         price: getSkuPrice(sku, product?.price)
       }));
     }
     return [{
       id: product?.id || product?.product_id,
       sku: product?.sku || `${product?.slug || "PC-MALL"}-BASE`,
-      stock: Math.max(Number(product?.stock || product?.stock_quantity || 0), 10),
+      stock: Number(product?.stock ?? product?.stock_quantity ?? 0),
       price: Number(product?.price || 0)
     }];
   }, [product]);
@@ -239,7 +248,7 @@ export function ProductDetailPage() {
 
   const attributes = useMemo(() => (Array.isArray(product?.attributes) ? product.attributes : []), [product]);
   const productId = useMemo(() => getProductId(product), [product]);
-  const availableStock = Math.max(getSkuStock(selectedSku), 10);
+  const availableStock = getSkuStock(selectedSku);
   const heroPrice = getSkuPrice(selectedSku, product?.price);
   const productName = getProductName(product);
   const categoryName = getProductCategory(product);
@@ -296,7 +305,12 @@ export function ProductDetailPage() {
       totalItems: quantityValue
     };
 
-    sessionStorage.setItem(DIRECT_CHECKOUT_DRAFT_KEY, JSON.stringify(draft));
+    try {
+      sessionStorage.setItem(DIRECT_CHECKOUT_DRAFT_KEY, JSON.stringify(draft));
+      localStorage.setItem(DIRECT_CHECKOUT_DRAFT_KEY, JSON.stringify(draft));
+    } catch {
+      // ignore storage quota errors
+    }
   }
 
   useEffect(() => {
@@ -340,11 +354,13 @@ export function ProductDetailPage() {
   }, [product, productId]);
 
   async function addCurrentToCart({ goCheckout = false } = {}) {
-    if (!isAuthenticated) {
-      if (goCheckout) {
-        saveDirectCheckoutDraft();
+    if (goCheckout) {
+      saveDirectCheckoutDraft();
+      if (!isAuthenticated) {
+        navigate("/login?redirect=/checkout");
+        return;
       }
-      navigate(routeConfig.public.login);
+      navigate(routeConfig.public.checkout);
       return;
     }
 
@@ -355,12 +371,28 @@ export function ProductDetailPage() {
       if (!productId) {
         throw new Error("Không tìm thấy mã sản phẩm để thêm vào giỏ hàng.");
       }
-      if (goCheckout) {
-        saveDirectCheckoutDraft();
-        navigate(routeConfig.public.checkout);
-        return;
-      }
-      await addItemToCart({ productId, quantity });
+
+      await addItemToCart({
+        productId,
+        productVariantId: selectedSku?.id || productId,
+        quantity,
+        unitPrice: heroPrice,
+        product: {
+          id: productId,
+          name: productName,
+          slug: product?.slug || "",
+          category: categoryName ? { name: categoryName } : null,
+          imageUrl: displayImage
+        },
+        variant: {
+          id: selectedSku?.id || productId,
+          sku: selectedSku?.sku || "",
+          price: heroPrice,
+          stock: availableStock,
+          imageUrl: selectedSku?.imageUrl || selectedSku?.image_url || displayImage
+        }
+      });
+      await refreshCart();
       setSuccessMessage("Đã thêm sản phẩm vào giỏ hàng.");
     } catch (error) {
       setActionError(getErrorMessage(error, "Không thể thêm vào giỏ hàng."));
@@ -485,9 +517,14 @@ export function ProductDetailPage() {
             }}>-12%</span>
           </div>
 
-          <div className="stock-pill">
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", display: "inline-block", marginRight: 6, boxShadow: "0 0 6px rgba(16,185,129,0.6)" }} />
-            Còn hàng · {availableStock} sản phẩm
+          <div className="stock-pill" style={{ color: availableStock > 0 ? "#10b981" : "#ef4444" }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: "50%",
+              background: availableStock > 0 ? "#10b981" : "#ef4444",
+              display: "inline-block", marginRight: 6,
+              boxShadow: availableStock > 0 ? "0 0 6px rgba(16,185,129,0.6)" : "0 0 6px rgba(239,68,68,0.6)"
+            }} />
+            {availableStock > 0 ? `Còn hàng · ${availableStock} sản phẩm` : "Tạm hết hàng"}
           </div>
 
           <label className="sku-select">
@@ -534,32 +571,45 @@ export function ProductDetailPage() {
 
           {/* Primary CTA */}
           <button
+            id="btn-add-to-cart"
+            data-testid="add-to-cart-button"
             className="buy-action buy-action--primary"
             type="button"
-            disabled={submitting}
-            onClick={() => addCurrentToCart()}
+            disabled={submitting || availableStock <= 0}
+            onClick={(e) => {
+              e.preventDefault();
+              addCurrentToCart();
+            }}
             style={{
-              background: submitting ? "#64748b" : "linear-gradient(135deg, #1d4ed8, #3b82f6)",
-              boxShadow: submitting ? "none" : "0 6px 20px rgba(37,99,235,0.4)",
+              background: availableStock <= 0 ? "#94a3b8" : submitting ? "#64748b" : "linear-gradient(135deg, #1d4ed8, #3b82f6)",
+              boxShadow: availableStock <= 0 || submitting ? "none" : "0 6px 20px rgba(37,99,235,0.4)",
               transform: "translateY(0)",
               transition: "all 0.22s cubic-bezier(0.34,1.56,0.64,1)",
+              cursor: availableStock <= 0 || submitting ? "not-allowed" : "pointer",
+              position: "relative",
+              zIndex: 10,
             }}
-            onMouseEnter={e => { if (!submitting) { e.currentTarget.style.transform = "translateY(-2px) scale(1.02)"; e.currentTarget.style.boxShadow = "0 10px 28px rgba(37,99,235,0.5)"; } }}
-            onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0) scale(1)"; e.currentTarget.style.boxShadow = submitting ? "none" : "0 6px 20px rgba(37,99,235,0.4)"; }}
+            onMouseEnter={e => { if (!submitting && availableStock > 0) { e.currentTarget.style.transform = "translateY(-2px) scale(1.02)"; e.currentTarget.style.boxShadow = "0 10px 28px rgba(37,99,235,0.5)"; } }}
+            onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0) scale(1)"; e.currentTarget.style.boxShadow = submitting || availableStock <= 0 ? "none" : "0 6px 20px rgba(37,99,235,0.4)"; }}
           >
-            {submitting ? "⏳ Đang thêm..." : "🛒 Thêm vào giỏ hàng"}
+            {availableStock <= 0 ? "🚫 Tạm hết hàng" : submitting ? "⏳ Đang thêm..." : "🛒 Thêm vào giỏ hàng"}
           </button>
 
           {/* Buy Now CTA */}
           <button
+            id="btn-buy-now"
+            data-testid="buy-now-button"
             className="buy-action buy-action--buy"
             type="button"
-            disabled={submitting}
+            disabled={submitting || availableStock <= 0}
             onClick={() => addCurrentToCart({ goCheckout: true })}
             style={{
-              background: "linear-gradient(135deg, #f97316, #ef4444)",
-              boxShadow: "0 6px 18px rgba(249,115,22,0.35)",
+              background: availableStock <= 0 ? "#cbd5e1" : "linear-gradient(135deg, #f97316, #ef4444)",
+              boxShadow: availableStock <= 0 ? "none" : "0 6px 18px rgba(249,115,22,0.35)",
+              cursor: availableStock <= 0 || submitting ? "not-allowed" : "pointer",
               transition: "all 0.22s cubic-bezier(0.34,1.56,0.64,1)",
+              position: "relative",
+              zIndex: 10,
             }}
             onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 10px 24px rgba(249,115,22,0.5)"; }}
             onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 6px 18px rgba(249,115,22,0.35)"; }}
@@ -681,18 +731,7 @@ export function ProductDetailPage() {
             </div>
           </section>
 
-          <section className="detail-section">
-            <h2>Đánh giá khách hàng</h2>
-            <div className="review-grid">
-              {["Hiệu năng đúng mô tả, đóng gói chắc chắn.", "Tư vấn cấu hình rất nhanh, mua về lắp chạy ổn.", "Giao hàng nhanh, bảo hành điện tử dễ tra cứu."].map((review, index) => (
-                <div key={review}>
-                  <strong>{["Minh K.", "Anh T.", "Hoàng P."][index]}</strong>
-                  <span>★★★★★</span>
-                  <p>{review}</p>
-                </div>
-              ))}
-            </div>
-          </section>
+          <ProductReviewsSection productId={productId} idOrSlug={idOrSlug} />
 
           <section className="detail-section">
             <h2>Sản phẩm tương tự</h2>
@@ -725,7 +764,7 @@ const productDetailStyles = `
 .product-detail-page {
   display: grid;
   gap: 22px;
-  padding: 28px 0 72px;
+  padding: 28px 0 100px; /* Safe bottom clearance against floating widgets */
 }
 
 .product-loading,
@@ -916,6 +955,10 @@ const productDetailStyles = `
   display: grid;
   gap: 14px;
   padding: 22px;
+  z-index: 50;
+  max-height: calc(100vh - 124px);
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .buy-sidebar__label,
@@ -1347,5 +1390,495 @@ const productDetailStyles = `
   .buy-sidebar__price { font-size: 30px; }
   .v2-gallery-thumbs { display: none; }
 }
+
+/* Product Reviews Section Styles (AUD-010) */
+.product-reviews-section {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 32px;
+}
+
+.section-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 16px;
+}
+
+.section-header-row h2 {
+  font-size: 22px;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 0;
+}
+
+.section-subtext {
+  font-size: 14px;
+  color: #64748b;
+  margin: 4px 0 0;
+}
+
+.verified-shield-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+  color: #fff;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
+}
+
+.reviews-summary-card {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 32px;
+  background: #f8fafc;
+  border-radius: 18px;
+  padding: 24px 32px;
+  border: 1px solid #e2e8f0;
+  align-items: center;
+}
+
+.score-column {
+  text-align: center;
+  border-right: 1px solid #e2e8f0;
+  padding-right: 24px;
+}
+
+.big-rating-number {
+  font-size: 54px;
+  font-weight: 900;
+  color: #0f172a;
+  line-height: 1;
+}
+
+.stars-row {
+  font-size: 22px;
+  color: #f59e0b;
+  margin: 8px 0;
+  letter-spacing: 2px;
+}
+
+.rating-total-text {
+  font-size: 13px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.distribution-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rating-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.star-label {
+  width: 52px;
+  font-weight: 600;
+  color: #334155;
+  text-align: right;
+}
+
+.progress-track {
+  flex: 1;
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #f59e0b, #10b981);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+.count-label {
+  width: 70px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.review-action-container {
+  margin: 8px 0;
+}
+
+.auth-required-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 24px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 16px;
+}
+
+.box-icon {
+  font-size: 28px;
+}
+
+.box-content strong {
+  display: block;
+  color: #1e3a8a;
+  font-size: 15px;
+}
+
+.box-content p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #3b82f6;
+}
+
+.btn-review-login {
+  padding: 10px 20px;
+  background: #2563eb;
+  color: #fff !important;
+  font-weight: 700;
+  border-radius: 12px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.2s ease;
+}
+
+.btn-review-login:hover {
+  background: #1d4ed8;
+}
+
+.buyer-restricted-box {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 18px 22px;
+  background: #fffbeb;
+  border: 1px solid #fef3c7;
+  border-radius: 16px;
+}
+
+.restricted-icon {
+  font-size: 28px;
+}
+
+.restricted-text strong {
+  display: block;
+  color: #92400e;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.restricted-text p {
+  margin: 0;
+  font-size: 13px;
+  color: #b45309;
+  line-height: 1.5;
+}
+
+.verified-review-form-card {
+  padding: 24px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 18px;
+}
+
+.buyer-verified-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: #dcfce7;
+  color: #15803d;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.chip-check {
+  font-weight: 900;
+}
+
+.verified-review-form-card h3 {
+  font-size: 18px;
+  color: #0f172a;
+  margin: 0 0 16px;
+}
+
+.review-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.star-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.star-picker-row label {
+  font-weight: 700;
+  font-size: 14px;
+  color: #334155;
+}
+
+.interactive-stars {
+  display: flex;
+  gap: 4px;
+}
+
+.star-btn {
+  background: transparent;
+  border: none;
+  font-size: 28px;
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: transform 0.15s ease, color 0.15s ease;
+  padding: 0;
+}
+
+.star-btn:hover {
+  transform: scale(1.25);
+}
+
+.star-btn.active {
+  color: #f59e0b;
+}
+
+.star-feedback-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #d97706;
+}
+
+.review-form .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.review-form .form-group label {
+  font-weight: 700;
+  font-size: 14px;
+  color: #334155;
+}
+
+.review-form textarea {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  font-family: inherit;
+  font-size: 14px;
+  resize: vertical;
+  background: #fff;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.review-form textarea:focus {
+  outline: none;
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+}
+
+.char-count {
+  font-size: 12px;
+  color: #64748b;
+  text-align: right;
+}
+
+.btn-submit-review {
+  align-self: flex-start;
+  padding: 12px 28px;
+  background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+  color: #fff;
+  font-weight: 800;
+  font-size: 14px;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.btn-submit-review:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(16, 185, 129, 0.45);
+}
+
+.btn-submit-review:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.review-alert {
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.review-alert--success {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+
+.review-alert--error {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+.reviews-items-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.review-item-card {
+  padding: 20px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.review-item-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.review-item-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.author-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2563eb, #6366f1);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+.author-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.author-name {
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.verified-buyer-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #059669;
+  font-weight: 700;
+}
+
+.review-date {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.review-stars {
+  font-size: 16px;
+  color: #f59e0b;
+  letter-spacing: 1px;
+}
+
+.review-comment-body {
+  font-size: 14px;
+  color: #334155;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.reviews-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.reviews-pagination .page-btn {
+  padding: 8px 16px;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.reviews-pagination .page-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.reviews-pagination .page-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.reviews-pagination .page-indicator {
+  font-size: 13px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .reviews-summary-card {
+    grid-template-columns: 1fr;
+    gap: 20px;
+    padding: 20px;
+  }
+  .score-column {
+    border-right: none;
+    border-bottom: 1px solid #e2e8f0;
+    padding-right: 0;
+    padding-bottom: 16px;
+  }
+  .auth-required-box {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
 `;
+
 

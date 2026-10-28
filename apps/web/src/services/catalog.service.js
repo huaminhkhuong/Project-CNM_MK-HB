@@ -38,9 +38,11 @@ export async function getProducts(params = {}) {
   });
 }
 
-export async function getProductFilterOptions() {
-  return cachedRequest("product-filter-options", async () => {
-    const response = await httpClient.get("/products/filter-options");
+export async function getProductFilterOptions(params = {}) {
+  const categoryId = params.category_id ?? params.categoryId ?? "";
+  const cacheKey = `product-filter-options:${categoryId || "all"}`;
+  return cachedRequest(cacheKey, async () => {
+    const response = await httpClient.get("/products/filter-options", { params });
     return response.data;
   });
 }
@@ -81,3 +83,19 @@ export function clearCatalogCache() {
     // Ignore localStorage errors
   }
 }
+
+export async function getProductReviews(idOrSlug, params = {}) {
+  const response = await httpClient.get(`/products/${idOrSlug}/reviews`, { params });
+  return response.data;
+}
+
+export async function getReviewEligibility(idOrSlug) {
+  const response = await httpClient.get(`/products/${idOrSlug}/reviews/eligibility`);
+  return response.data;
+}
+
+export async function submitProductReview(idOrSlug, data) {
+  const response = await httpClient.post(`/products/${idOrSlug}/reviews`, data);
+  return response.data;
+}
+

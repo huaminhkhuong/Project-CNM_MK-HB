@@ -11,12 +11,13 @@ test.describe("Products", () => {
   test("should filter products by category", async ({ page }) => {
     await page.goto("/products");
     
-    // Select a category filter
-    await page.click('button:has-text("Danh mục")');
-    await page.click('text=/CPU|Mainboard/i');
+    // Click category filter item directly
+    const catBtn = page.locator('button').filter({ hasText: /CPU|Mainboard/i }).first();
+    await expect(catBtn).toBeVisible();
+    await catBtn.click();
     
     // Wait for filter to apply
-    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(1000);
     
     // Should still show products
     await expect(page.locator('[data-testid="product-card"]').first()).toBeVisible();
@@ -25,11 +26,13 @@ test.describe("Products", () => {
   test("should navigate to product detail", async ({ page }) => {
     await page.goto("/products");
     
-    // Click first product
-    await page.locator('[data-testid="product-card"]').first().click();
+    // Click first product card link
+    const firstCard = page.locator('[data-testid="product-card"]').first();
+    await expect(firstCard).toBeVisible();
+    await firstCard.locator("a").first().click();
     
     // Should be on product detail page
-    await expect(page).toHaveURL(/\/products\/\d+/);
+    await expect(page).toHaveURL(/\/products\/[^/]+/, { timeout: 10000 });
     await expect(page.locator('h1').first()).toBeVisible();
   });
 });

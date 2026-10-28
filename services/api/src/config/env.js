@@ -55,12 +55,15 @@ const env = {
     : process.env.JWT_REFRESH_SECRET || "change_me_refresh",
   jwtAccessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || "15m",
   jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "7d",
+  geminiApiKey: process.env.GEMINI_API_KEY || "",
   openaiApiKey: process.env.OPENAI_API_KEY || "",
   openaiModel: process.env.OPENAI_MODEL || "gpt-5.2",
   groqApiKey: process.env.GROQ_API_KEY || "",
   paymentMockMode: process.env.PAYMENT_MOCK_MODE === "true",
-  shippingMockMode: process.env.SHIPPING_MOCK_MODE === "true",
   shippingProvider: process.env.SHIPPING_PROVIDER || "manual",
+  backendUrl: process.env.BACKEND_URL || process.env.API_BASE_URL || `http://localhost:${Number(process.env.PORT || 4000)}`,
+  apiBaseUrl: process.env.API_BASE_URL || process.env.BACKEND_URL || `http://localhost:${Number(process.env.PORT || 4000)}`,
+  paymentTimeoutMinutes: Number(process.env.PAYMENT_TIMEOUT_MINUTES || 30),
   chatStoragePath: process.env.CHAT_STORAGE_PATH || "./data/chat-sessions.json"
 };
 

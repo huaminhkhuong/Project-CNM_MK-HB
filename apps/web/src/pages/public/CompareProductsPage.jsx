@@ -416,15 +416,30 @@ export function CompareProductsPage() {
   async function handleAddToCart(product) {
     const productId = getProductId(product);
     if (!productId) return;
-    if (!isAuthenticated) {
-      navigate("/login");
-      return;
-    }
 
     try {
       setCartLoadingId(productId);
       setActionMessage("");
-      await addItemToCart({ productId, variantId: getPrimarySkuId(product), quantity: 1 });
+      const skuId = getPrimarySkuId(product);
+      await addItemToCart({
+        productId,
+        productVariantId: skuId || productId,
+        variantId: skuId || productId,
+        quantity: 1,
+        unitPrice: getProductPrice(product),
+        product: {
+          id: productId,
+          name: getProductName(product),
+          slug: product?.slug || "",
+          imageUrl: resolveProductImage(product)
+        },
+        variant: {
+          id: skuId || productId,
+          sku: product?.sku || `SKU-${productId}`,
+          price: getProductPrice(product),
+          imageUrl: resolveProductImage(product)
+        }
+      });
       setActionMessage(`Đã thêm ${getProductName(product)} vào giỏ hàng.`);
     } catch (error) {
       setCompareError(getErrorMessage(error, "Không thể thêm sản phẩm vào giỏ hàng."));

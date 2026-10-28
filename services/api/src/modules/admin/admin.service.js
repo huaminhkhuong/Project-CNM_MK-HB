@@ -1,4 +1,5 @@
 const { getDbPool, query } = require("../../config/database");
+const { prisma } = require("../../config/prisma");
 const { env } = require("../../config/env");
 const {
   createError,
@@ -10,7 +11,6 @@ const {
 const ROLE_IDENTIFIER_COLUMNS = ["name", "code", "slug"];
 
 let roleIdentifierColumnCache = null;
-let compatibilityRuleNameColumnReady = null;
 
 function slugify(input) {
   return String(input || "")
@@ -49,30 +49,6 @@ function normalizeRuleType(value) {
   }
 
   return normalized;
-}
-
-async function ensureCompatibilityRuleNameColumn() {
-  if (compatibilityRuleNameColumnReady) {
-    return;
-  }
-
-  const rows = await query(
-    `
-      SELECT COLUMN_NAME
-      FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA = COALESCE(DATABASE(), ?)
-        AND TABLE_NAME = 'compatibility_rules'
-        AND COLUMN_NAME = 'name'
-      LIMIT 1
-    `,
-    [env.dbName]
-  );
-
-  if (!rows[0]) {
-    await query("ALTER TABLE compatibility_rules ADD COLUMN name VARCHAR(255) NULL AFTER id");
-  }
-
-  compatibilityRuleNameColumnReady = true;
 }
 
 function ruleTypeToOperator(ruleType) {
@@ -171,6 +147,7 @@ async function findProductById(productId) {
         p.description,
         p.category_id AS categoryId,
         p.brand_id AS brandId,
+        p.warranty_months AS warrantyMonths,
         p.status,
         p.is_active AS isActive,
         p.created_at AS createdAt,
@@ -198,6 +175,7 @@ async function findProductVariants(productId) {
         price,
         stock AS stock,
         image_url AS imageUrl,
+        warranty_months AS warrantyMonths,
         status,
         is_active AS isActive
       FROM product_skus
@@ -213,6 +191,7 @@ async function findProductVariants(productId) {
     price: Number(row.price || 0),
     stock: Number(row.stock || 0),
     imageUrl: row.imageUrl,
+    warrantyMonths: row.warrantyMonths !== null && row.warrantyMonths !== undefined ? Number(row.warrantyMonths) : null,
     status: row.status || (row.isActive === null ? null : row.isActive ? "ACTIVE" : "INACTIVE") || "ACTIVE"
   }));
 }
@@ -231,6 +210,7 @@ async function getProductDetail(productId) {
     name: product.name,
     slug: product.slug,
     description: product.description,
+    warrantyMonths: Number(product.warrantyMonths || 24),
     category: {
       id: product.categoryId,
       name: product.categoryName
@@ -275,6 +255,7 @@ async function getProducts(params = {}) {
           p.description,
           p.category_id AS categoryId,
           p.brand_id AS brandId,
+          p.warranty_months AS warrantyMonths,
           p.status,
           p.is_active AS isActive,
           p.created_at AS createdAt,
@@ -314,6 +295,7 @@ async function getProducts(params = {}) {
       name: row.name,
       slug: row.slug,
       description: row.description,
+      warrantyMonths: Number(row.warrantyMonths || 24),
       category: {
         id: row.categoryId,
         name: row.categoryName
@@ -343,30 +325,27 @@ async function createProduct(payload) {
   const categoryId = toPositiveInteger(payload.categoryId, "categoryId");
   const brandId = toPositiveInteger(payload.brandId, "brandId");
   const description = payload.description !== undefined ? String(payload.description || "").trim() : null;
+  const rawMonths = payload.warrantyMonths ?? payload.warranty_months;
+  const warrantyMonths = rawMonths !== undefined && rawMonths !== null && rawMonths !== "" ? toPositiveInteger(rawMonths, "warrantyMonths") : 24;
 
   await ensureCategoryExists(categoryId);
   await ensureBrandExists(brandId);
   await ensureUniqueProductSlug(slug);
 
-  const [result] = await getDbPool().execute(
-    `
-      INSERT INTO products (
-        name,
-        slug,
-        description,
-        category_id,
-        brand_id,
-        status,
-        is_active,
-        created_at,
-        updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, 'ACTIVE', 1, NOW(), NOW())
-    `,
-    [name, slug, description, categoryId, brandId]
-  );
+  const product = await prisma.product.create({
+    data: {
+      name,
+      slug,
+      description,
+      category_id: categoryId,
+      brand_id: brandId,
+      warranty_months: warrantyMonths,
+      status: "ACTIVE",
+      is_active: true
+    }
+  });
 
-  return getProductDetail(result.insertId);
+  return getProductDetail(product.id);
 }
 
 async function updateProduct(productId, payload) {
@@ -409,6 +388,13 @@ async function updateProduct(productId, payload) {
     await ensureBrandExists(brandId);
     updates.push(`brand_id = ?`);
     params.push(brandId);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "warrantyMonths") || Object.prototype.hasOwnProperty.call(payload, "warranty_months")) {
+    const rawMonths = payload.warrantyMonths ?? payload.warranty_months;
+    const warrantyMonths = toPositiveInteger(rawMonths, "warrantyMonths");
+    updates.push(`warranty_months = ?`);
+    params.push(warrantyMonths);
   }
 
   if (updates.length === 0) {
@@ -490,23 +476,17 @@ async function createVariant(productId, payload) {
 
   await ensureUniqueVariantSku(sku);
 
-  await getDbPool().execute(
-    `
-      INSERT INTO product_skus (
-        product_id,
-        sku,
-        price,
-        stock,
-        image_url,
-        status,
-        is_active,
-        created_at,
-        updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, 'ACTIVE', 1, NOW(), NOW())
-    `,
-    [parsedProductId, sku, price, stock, imageUrl]
-  );
+  await prisma.productSku.create({
+    data: {
+      product_id: parsedProductId,
+      sku,
+      price,
+      stock,
+      image_url: imageUrl,
+      status: "ACTIVE",
+      is_active: true
+    }
+  });
 
   return getProductDetail(parsedProductId);
 }
@@ -638,8 +618,6 @@ async function findCategoryByComponentType(componentType) {
 }
 
 async function findCompatibilityRuleRowById(ruleId) {
-  await ensureCompatibilityRuleNameColumn();
-
   const rows = await query(
     `
       SELECT
@@ -694,8 +672,6 @@ function formatCompatibilityRule(row) {
 }
 
 async function getCompatibilityRules() {
-  await ensureCompatibilityRuleNameColumn();
-
   const rows = await query(
     `
       SELECT
@@ -724,8 +700,6 @@ async function getCompatibilityRules() {
 }
 
 async function createCompatibilityRule(payload) {
-  await ensureCompatibilityRuleNameColumn();
-
   const sourceCategory = await findCategoryByComponentType(payload.sourceComponentType);
   const targetCategory = await findCategoryByComponentType(payload.targetComponentType);
 
@@ -741,40 +715,25 @@ async function createCompatibilityRule(payload) {
   const description = String(payload.description || "").trim() || null;
   const operator = ruleTypeToOperator(normalizeRuleType(payload.ruleType));
 
-  const [result] = await getDbPool().execute(
-    `
-      INSERT INTO compatibility_rules (
-        name,
-        source_category_id,
-        target_category_id,
-        source_attribute_key,
-        target_attribute_key,
-        operator,
-        description,
-        status,
-        is_active,
-        created_at,
-        updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 1, NOW(), NOW())
-    `,
-    [
+  const created = await prisma.compatibilityRule.create({
+    data: {
       name,
-      sourceCategory.id,
-      targetCategory.id,
-      normalizeKey(payload.sourceAttributeKey),
-      normalizeKey(payload.targetAttributeKey),
+      source_category_id: sourceCategory.id,
+      target_category_id: targetCategory.id,
+      source_attribute_key: normalizeKey(payload.sourceAttributeKey),
+      target_attribute_key: normalizeKey(payload.targetAttributeKey),
       operator,
-      description
-    ]
-  );
+      description,
+      status: "ACTIVE",
+      is_active: true
+    }
+  });
 
-  return formatCompatibilityRule(await findCompatibilityRuleRowById(result.insertId));
+  invalidatePcBuilderRulesCache();
+  return formatCompatibilityRule(await findCompatibilityRuleRowById(created.id));
 }
 
 async function updateCompatibilityRule(ruleId, payload) {
-  await ensureCompatibilityRuleNameColumn();
-
   const parsedRuleId = toPositiveInteger(ruleId, "ruleId");
   const existingRule = await findCompatibilityRuleRowById(parsedRuleId);
 
@@ -847,6 +806,7 @@ async function updateCompatibilityRule(ruleId, payload) {
     params
   );
 
+  invalidatePcBuilderRulesCache();
   return formatCompatibilityRule(await findCompatibilityRuleRowById(parsedRuleId));
 }
 
@@ -867,7 +827,20 @@ async function changeCompatibilityRuleStatus(ruleId, status) {
     [status, status === "ACTIVE" ? 1 : 0, parsedRuleId]
   );
 
+  invalidatePcBuilderRulesCache();
   return formatCompatibilityRule(await findCompatibilityRuleRowById(parsedRuleId));
+}
+
+function invalidatePcBuilderRulesCache() {
+  try {
+    const pcBuilderModule = require("../pc-builder/pc-builder.service");
+    const service = pcBuilderModule.pcBuilderService || pcBuilderModule.default;
+    if (service && typeof service.invalidateRulesCache === "function") {
+      service.invalidateRulesCache();
+    }
+  } catch (_err) {
+    // silently ignore if not yet loaded
+  }
 }
 
 function getDashboardSummary() {

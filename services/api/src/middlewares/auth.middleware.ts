@@ -5,14 +5,10 @@ import { env } from "../config/env";
 import { AppError } from "../errors/app-error";
 import type { AuthTokenPayload } from "../types/auth";
 import { ROLES, type Role } from "../constants/roles";
+import { isTokenBlacklisted } from "../services/token-blacklist.service";
 
-export function authenticate(req: Request, _res: Response, next: NextFunction) {
+export async function authenticate(req: Request, _res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
-
-  // Public route exemptions
-  if (req.path.includes("/warranties/lookup/") || req.path.includes("/ai-advisor/")) {
-    return next();
-  }
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return next(new AppError("Unauthorized", 401));
@@ -22,6 +18,10 @@ export function authenticate(req: Request, _res: Response, next: NextFunction) {
 
   try {
     const payload = jwt.verify(token, env.jwtAccessSecret) as AuthTokenPayload;
+    const revoked = await isTokenBlacklisted(token);
+    if (revoked) {
+      return next(new AppError("Token has been revoked", 401));
+    }
     req.user = payload;
     return next();
   } catch (_error) {

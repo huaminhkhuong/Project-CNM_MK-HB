@@ -3,15 +3,15 @@
  * Import toàn bộ dữ liệu linh kiện PC từ C:\Users\ASUS\Downloads\data\data\json
  * vào database PC Mall.
  *
- * Xử lý 6 vấn đề:
- *  1. ✅ Giá bất thường → nhận diện sentinel 30tr, fallback theo category
- *  2. ✅ Key thông số không đồng nhất → normalize về key chuẩn
- *  3. ✅ Slug xấu → regenerate từ tên sản phẩm
- *  4. ✅ Ảnh relative path → map sang /assets/products/hacom/...
- *  5. ✅ Số lượng sản phẩm ít → import toàn bộ 8 danh mục
- *  6. ✅ Thiếu stock → gán mặc định theo danh mục
+ * Xử lý:
+ *  1. ✅ Nhận diện 8 danh mục chuẩn (CPU, Mainboard, RAM, GPU, SSD, PSU, Case, Cooling)
+ *  2. ✅ Brand normalization & extraction (Intel, AMD, ASUS, MSI, Gigabyte, Samsung, Corsair, etc.)
+ *  3. ✅ Giá thực tế & giải quyết lỗi crawler
+ *  4. ✅ Image mapping chính xác sang /assets/products/hacom/...
+ *  5. ✅ Slug sạch và không trùng lặp
+ *  6. ✅ Trích xuất & chuẩn hoá thông số kỹ thuật (Socket, RAM Type, TDP, Form Factor, Wattage, etc.)
  *
- * Chạy: node services/api/prisma/import-hacom-data.js
+ * Chạy: node prisma/import-hacom-data.js
  */
 
 const { PrismaClient } = require("@prisma/client");
@@ -26,332 +26,399 @@ const prisma = new PrismaClient();
 
 const DATA_DIR = path.join("C:\\Users\\ASUS\\Downloads\\data\\data\\json");
 
-// Map file JSON → category name trong DB
+// Map file JSON → Category chuẩn (id + tên chuẩn đồng bộ với hệ thống)
 const FILE_CATEGORY_MAP = {
-  "hacom_cpu.json":       "CPU",
-  "hacom_mainboard.json": "MAINBOARD",
-  "hacom_ram.json":       "RAM",
-  "hacom_vga.json":       "GPU",
-  "hacom_ssd.json":       "SSD",
-  "hacom_psu.json":       "PSU",
-  "hacom_case.json":      "CASE",
-  "hacom_cooling.json":   "COOLING",
+  "hacom_cpu.json":       { id: 1, name: "CPU" },
+  "hacom_mainboard.json": { id: 2, name: "Mainboard" },
+  "hacom_ram.json":       { id: 3, name: "RAM" },
+  "hacom_vga.json":       { id: 4, name: "GPU" },
+  "hacom_ssd.json":       { id: 5, name: "SSD" },
+  "hacom_psu.json":       { id: 6, name: "PSU" },
+  "hacom_case.json":      { id: 7, name: "Case" },
+  "hacom_cooling.json":   { id: 8, name: "Cooling" },
 };
 
-// Stock mặc định theo danh mục (vấn đề 6)
+// Stock mặc định theo danh mục
 const DEFAULT_STOCK = {
   CPU:       20,
   Mainboard: 15,
   RAM:       30,
-  VGA:       12,
+  GPU:       12,
   SSD:       25,
   PSU:       18,
   Case:      15,
   Cooling:   20,
 };
 
-// ============================================================
-// VẤN ĐỀ 2: NORMALIZE KEY THÔNG SỐ
-// Map tất cả variant của tên field → key chuẩn
-// ============================================================
-const SPEC_KEY_NORMALIZE = {
-  // Socket
-  "socket":                       "socket",
-  "spec_socket":                  "socket",
-  "hỗ trợ socket":               "socket",
-  "socket support":               "socket",
-  "cpu hỗ trợ":                  "socket",
-
-  // RAM type
-  "loại ram hỗ trợ":             "ram_type",
-  "loai ram hỗ trợ":             "ram_type",
-  "hỗ trợ bộ nhớ":              "ram_type",
-  "ram hỗ trợ":                  "ram_type",
-
-  // TDP
-  "tdp":                          "tdp",
-  "tdp mặc định":                "tdp",
-  "công suất":                   "tdp",
-  "power":                        "tdp",
-
-  // Form factor
-  "kích cỡ":                     "form_factor",
-  "kích thước":                  "form_factor",
-  "yếu tố hình thức":           "form_factor",
-  "form factor":                  "form_factor",
-
-  // Chipset
-  "chipset":                      "chipset",
-
-  // Cores/Threads
-  "số nhân":                     "cores",
-  "số luồng":                    "threads",
-
-  // Cache
-  "cache":                        "cache",
-  "bộ nhớ đệm":                 "cache",
-
-  // Speed
-  "tốc độ cơ bản":              "base_speed",
-  "tần số cơ bản":              "base_speed",
-  "tốc độ":                     "speed",
-
-  // Storage type
-  "chuẩn kết nối":              "storage_interface",
-  "giao tiếp":                   "storage_interface",
-
-  // PSU wattage
-  "công suất psu":               "psu_wattage",
-  "psu wattage":                  "psu_wattage",
-
-  // Cooler type
-  "loại tản nhiệt":             "cooling_type",
-  "cooling type":                 "cooling_type",
-
-  // Warranty
-  "bảo hành":                   "warranty",
-
-  // Brand
-  "thương hiệu":                "brand_name",
-  "hãng sản xuất":             "brand_name",
+// Thời hạn bảo hành mặc định theo danh mục (tháng)
+const DEFAULT_WARRANTY_MONTHS = {
+  CPU:       36,
+  Mainboard: 36,
+  RAM:       36,
+  GPU:       36,
+  SSD:       60,
+  PSU:       60,
+  Case:      12,
+  Cooling:   24,
 };
 
 // ============================================================
-// VẤN ĐỀ 3: GENERATE SLUG SẠCH TỪ TÊN SẢN PHẨM
+// BRAND EXTRACTION TỪ TÊN SẢN PHẨM KHI BỊ THIẾU
+// ============================================================
+function extractBrandFromName(name) {
+  if (!name) return null;
+  const upper = String(name).toUpperCase();
+  const KNOWN_BRANDS = [
+    { match: "INTEL", name: "Intel" },
+    { match: "AMD", name: "AMD" },
+    { match: "ASUS", name: "ASUS" },
+    { match: "ROG", name: "ASUS" },
+    { match: "TUF", name: "ASUS" },
+    { match: "MSI", name: "MSI" },
+    { match: "GIGABYTE", name: "Gigabyte" },
+    { match: "AORUS", name: "Gigabyte" },
+    { match: "CORSAIR", name: "Corsair" },
+    { match: "KINGSTON", name: "Kingston" },
+    { match: "SAMSUNG", name: "Samsung" },
+    { match: "WESTERN DIGITAL", name: "Western Digital" },
+    { match: "WD", name: "Western Digital" },
+    { match: "DEEPCOOL", name: "DeepCool" },
+    { match: "THERMALRIGHT", name: "Thermalright" },
+    { match: "NZXT", name: "NZXT" },
+    { match: "MONTECH", name: "Montech" },
+    { match: "LIAN LI", name: "Lian Li" },
+    { match: "COOLER MASTER", name: "Cooler Master" },
+    { match: "INNO3D", name: "Inno3D" },
+    { match: "PALIT", name: "Palit" },
+    { match: "ZOTAC", name: "ZOTAC" },
+    { match: "COLORFUL", name: "Colorful" },
+    { match: "G.SKILL", name: "G.Skill" },
+    { match: "GSKILL", name: "G.Skill" },
+    { match: "CRUCIAL", name: "Crucial" },
+    { match: "TEAMGROUP", name: "TeamGroup" },
+    { match: "SEAGATE", name: "Seagate" },
+    { match: "SEASONIC", name: "Seasonic" },
+    { match: "SUPER FLOWER", name: "Super Flower" },
+    { match: "ANTEC", name: "Antec" },
+    { match: "ASROCK", name: "ASRock" },
+  ];
+  for (const b of KNOWN_BRANDS) {
+    if (upper.includes(b.match)) {
+      return b.name;
+    }
+  }
+  return null;
+}
+
+// ============================================================
+// GENERATE SLUG
 // ============================================================
 function generateSlug(name) {
-  return name
+  return String(name || "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")  // bỏ dấu tiếng Việt
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
     .replace(/[^a-z0-9\s-]/g, "")
     .trim()
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")
-    .substring(0, 200);               // giới hạn độ dài
+    .substring(0, 190);
 }
 
 // ============================================================
-// VẤN ĐỀ 1: XỬ LÝ GIÁ BẤT THƯỜNG
-//
-// Phân tích data thực tế (audit đầy đủ):
-//  - Cooling/SSD : price = 30,000,000 (sentinel lỗi crawler) → dùng original_price
-//  - PSU/Case    : price chỉ 4%–50% of original (giá lỗi crawler) → dùng original_price
-//  - Mainboard   : price thấp (sale cũ <30%) → dùng original_price
-//  - CPU/RAM/VGA : price hợp lý (sale 60%–90%) → dùng price bình thường
-//
-// Logic xử lý 3 tầng:
-//  Tầng 1: Sentinel check — price = 30,000,000 → dùng original
-//  Tầng 2: Ratio check   — price < 60% original → dùng original
-//  Tầng 3: Floor check   — giá cuối < MIN_CATEGORY_PRICE → dùng original
+// GIÁ BẤT THƯỜNG / FALLBACK
 // ============================================================
-const SENTINEL_PRICE = 30000000; // Giá lỗi từ crawler của Hacom
+const SENTINEL_PRICE = 30000000;
 
-// Giá sàn hợp lý tối thiểu theo từng category (VNĐ)
-// Nếu giá cuối thấp hơn mức này → bất thường → dùng original_price
 const MIN_CATEGORY_PRICE = {
-  CPU:       800000,   // CPU rẻ nhất thị trường ~800k
-  Mainboard: 1000000,  // Mainboard rẻ nhất ~1tr
-  RAM:       200000,   // RAM rẻ nhất ~200k
-  VGA:       1000000,  // VGA rẻ nhất ~1tr
-  SSD:       250000,   // SSD rẻ nhất ~250k
-  PSU:       400000,   // Nguồn rẻ nhất ~400k
-  Case:      250000,   // Case rẻ nhất ~250k
-  Cooling:   150000,   // Tản nhiệt rẻ nhất ~150k
+  CPU:       800000,
+  Mainboard: 1000000,
+  RAM:       200000,
+  GPU:       1000000,
+  SSD:       250000,
+  PSU:       400000,
+  Case:      250000,
+  Cooling:   150000,
 };
+
+const MAX_DECIMAL_PRICE = 99999000; // DECIMAL(10, 2) max is 99,999,999.99
 
 function resolvePrice(price, originalPrice, categoryName) {
-  // ── Tầng 0: Không có dữ liệu ──────────────────────────────
+  let resolved = price;
   if (!price && !originalPrice) return null;
-  if (!price) return originalPrice;
-  if (!originalPrice) {
+  if (!price) resolved = originalPrice;
+  else if (!originalPrice) {
     if (price === SENTINEL_PRICE) return null;
-    return price;
+    resolved = price;
+  } else if (price === SENTINEL_PRICE) {
+    resolved = originalPrice;
+  } else if (price < originalPrice * 0.6) {
+    resolved = originalPrice;
+  } else {
+    const minPrice = MIN_CATEGORY_PRICE[categoryName];
+    if (minPrice && price < minPrice && originalPrice >= minPrice) {
+      resolved = originalPrice;
+    }
   }
 
-  // ── Tầng 1: Sentinel check ────────────────────────────────
-  // price = chính xác 30,000,000 → lỗi crawler
-  if (price === SENTINEL_PRICE) {
-    return originalPrice;
+  if (resolved != null && Number(resolved) > MAX_DECIMAL_PRICE) {
+    resolved = MAX_DECIMAL_PRICE;
   }
-
-  // ── Tầng 2: Ratio check ───────────────────────────────────
-  // price < 60% của original → giá lỗi/sale cũ bất thường
-  // (Audit: PSU/Case thường chỉ 4%–50%, CPU/GPU thường 60%–90%)
-  if (price < originalPrice * 0.6) {
-    return originalPrice;
-  }
-
-  // ── Tầng 3: Floor check ───────────────────────────────────
-  // Giá cuối vẫn thấp hơn mức sàn hợp lý của category
-  const minPrice = MIN_CATEGORY_PRICE[categoryName];
-  if (minPrice && price < minPrice && originalPrice >= minPrice) {
-    return originalPrice;
-  }
-
-  // ── Bình thường: dùng price ───────────────────────────────
-  return price;
+  return resolved;
 }
 
-// Fallback giá theo category khi CẢ HAI field đều null/lỗi
 const CATEGORY_PRICE_FALLBACK = {
-  CPU:       3000000,
-  Mainboard: 3500000,
-  RAM:       1200000,
-  VGA:       5000000,
-  SSD:       1500000,
+  CPU:       3500000,
+  Mainboard: 3200000,
+  RAM:       1400000,
+  GPU:       7500000,
+  SSD:       1600000,
   PSU:       1500000,
   Case:      1200000,
-  Cooling:    800000,
+  Cooling:    850000,
 };
 
 // ============================================================
-// VẤN ĐỀ 4: MAP ĐƯỜNG DẪN ẢNH
-// data/images/hacom/cpu/... → /assets/products/hacom/cpu/...
+// MAP IMAGE PATH
 // ============================================================
-function mapImagePath(localPath) {
-  if (!localPath) return null;
-  // Chuyển từ "data/images/hacom/..." → "/assets/products/hacom/..."
-  return localPath.replace(/^data\/images\//, "/assets/products/");
+function resolveItemImageUrl(item) {
+  const candidates = [
+    item.thumbnail,
+    ...(Array.isArray(item.local_images) ? item.local_images : []),
+    ...(Array.isArray(item.images) ? item.images : [])
+  ];
+
+  for (const c of candidates) {
+    if (!c || typeof c !== "string") continue;
+    const trimmed = c.trim();
+    if (trimmed.startsWith("data/images/")) {
+      return trimmed.replace(/^data\/images\//, "/assets/products/");
+    }
+    if (trimmed.startsWith("/assets/products/")) {
+      return trimmed;
+    }
+  }
+
+  // Fallback to CDN URL if local image path not found
+  if (Array.isArray(item.source_image_urls) && item.source_image_urls.length > 0) {
+    for (const url of item.source_image_urls) {
+      if (typeof url === "string" && (url.startsWith("http://") || url.startsWith("https://"))) {
+        return url;
+      }
+    }
+  }
+
+  return null;
 }
 
 // ============================================================
 // NORMALIZE SPEC KEY
 // ============================================================
-function normalizeSpecKey(rawKey) {
-  const lower = rawKey.toLowerCase().trim();
-  return SPEC_KEY_NORMALIZE[lower] || null; // null = bỏ qua key không cần
-}
+const SPEC_KEY_NORMALIZE = {
+  "socket":                       "socket",
+  "spec_socket":                  "socket",
+  "hỗ trợ socket":               "socket",
+  "socket support":               "socket",
+  "cpu hỗ trợ":                  "socket",
+  "loại ram hỗ trợ":             "ram_type",
+  "loai ram hỗ trợ":             "ram_type",
+  "hỗ trợ bộ nhớ":              "ram_type",
+  "ram hỗ trợ":                  "ram_type",
+  "chuẩn ram":                   "ram_type",
+  "loại ram":                    "ram_type",
+  "tdp":                          "tdp",
+  "tdp mặc định":                "tdp",
+  "công suất":                   "tdp",
+  "power":                        "tdp",
+  "kích cỡ":                     "form_factor",
+  "kích thước":                  "form_factor",
+  "yếu tố hình thức":           "form_factor",
+  "form factor":                  "form_factor",
+  "chipset":                      "chipset",
+  "số nhân":                     "cores",
+  "số luồng":                    "threads",
+  "cache":                        "cache",
+  "bộ nhớ đệm":                 "cache",
+  "tốc độ cơ bản":              "base_speed",
+  "tần số cơ bản":              "base_speed",
+  "tốc độ":                     "speed",
+  "bus":                          "speed",
+  "chuẩn kết nối":              "storage_interface",
+  "giao tiếp":                   "storage_interface",
+  "dung lượng":                  "capacity",
+  "công suất psu":               "psu_wattage",
+  "công suất thực":             "psu_wattage",
+  "psu wattage":                  "psu_wattage",
+  "loại tản nhiệt":             "cooling_type",
+  "cooling type":                 "cooling_type",
+  "bảo hành":                   "warranty",
+  "vram":                         "vram",
+  "dung lượng vram":             "vram",
+  "bộ nhớ vga":                 "vram"
+};
 
-// ============================================================
-// EXTRACT SOCKET TỪ THÔNG SỐ
-// Trả về giá trị socket chuẩn: "LGA1700", "AM5", "AM4"...
-// ============================================================
-function extractSocket(specValue) {
-  if (!specValue) return null;
-  const v = String(specValue).toUpperCase();
-  if (v.includes("LGA1851")) return "LGA1851";
-  if (v.includes("LGA1700") || v.includes("FCLGA 1700") || v.includes("FCLGA1700")) return "LGA1700";
-  if (v.includes("LGA1200") || v.includes("FCLGA1200")) return "LGA1200";
+function extractSocket(specValue, name = "") {
+  const v = `${specValue || ""} ${name || ""}`.toUpperCase();
+  if (v.includes("LGA1851") || v.includes("LGA 1851")) return "LGA1851";
+  if (v.includes("LGA1700") || v.includes("FCLGA 1700") || v.includes("FCLGA1700") || v.includes("LGA 1700")) return "LGA1700";
+  if (v.includes("LGA1200") || v.includes("FCLGA1200") || v.includes("LGA 1200")) return "LGA1200";
   if (v.includes("AM5")) return "AM5";
   if (v.includes("AM4")) return "AM4";
-  return specValue.trim().substring(0, 50);
+  return specValue ? String(specValue).trim().substring(0, 50) : null;
 }
 
-// ============================================================
-// EXTRACT RAM TYPE TỪ THÔNG SỐ
-// ============================================================
-function extractRamType(specValue) {
-  if (!specValue) return null;
-  const v = String(specValue).toUpperCase();
+function extractRamType(specValue, name = "") {
+  const v = `${specValue || ""} ${name || ""}`.toUpperCase();
   if (v.includes("DDR5")) return "DDR5";
   if (v.includes("DDR4")) return "DDR4";
   if (v.includes("DDR3")) return "DDR3";
   return null;
 }
 
-// ============================================================
-// EXTRACT TDP TỪ THÔNG SỐ
-// ============================================================
-function extractTDP(specValue) {
-  if (!specValue) return null;
-  const match = String(specValue).match(/(\d+)\s*W/i);
+function extractTDP(specValue, name = "") {
+  const combined = `${specValue || ""} ${name || ""}`;
+  const match = combined.match(/(\d+)\s*W/i);
   if (match) return `${match[1]}W`;
   return null;
 }
 
-// ============================================================
-// EXTRACT FORM FACTOR
-// ============================================================
-function extractFormFactor(specValue) {
-  if (!specValue) return null;
-  const v = String(specValue).toUpperCase();
+function extractFormFactor(specValue, name = "") {
+  const v = `${specValue || ""} ${name || ""}`.toUpperCase();
   if (v.includes("ITX") || v.includes("MINI-ITX")) return "ITX";
   if (v.includes("MATX") || v.includes("M-ATX") || v.includes("MICRO-ATX") || v.includes("MICRO ATX")) return "mATX";
+  if (v.includes("E-ATX") || v.includes("EATX")) return "E-ATX";
   if (v.includes("ATX")) return "ATX";
   return null;
 }
 
-// ============================================================
-// EXTRACT PSU WATTAGE
-// ============================================================
-function extractPSUWattage(specValue) {
-  if (!specValue) return null;
-  const match = String(specValue).match(/(\d+)\s*W/i);
+function extractPSUWattage(specValue, name = "") {
+  const combined = `${specValue || ""} ${name || ""}`;
+  const match = combined.match(/(\d+)\s*W/i);
   if (match) return `${match[1]}W`;
   return null;
 }
 
-// ============================================================
-// PARSE THÔNG SỐ KỸ THUẬT VÀ TRẢ VỀ ATTRIBUTES ĐÃ NORMALIZE
-// ============================================================
-function parseSpecifications(specs, categoryName) {
+function parseSpecifications(specs, categoryName, productName) {
   const result = {};
+  if (specs && typeof specs === "object") {
+    for (const [rawKey, value] of Object.entries(specs)) {
+      const lower = rawKey.toLowerCase().trim();
+      const normalKey = SPEC_KEY_NORMALIZE[lower];
+      if (!normalKey || !value) continue;
 
-  if (!specs || typeof specs !== "object") return result;
-
-  for (const [rawKey, value] of Object.entries(specs)) {
-    const normalKey = normalizeSpecKey(rawKey);
-    if (!normalKey || !value) continue;
-
-    switch (normalKey) {
-      case "socket":
-        result.socket = extractSocket(String(value));
-        break;
-      case "ram_type":
-        result.ram_type = extractRamType(String(value));
-        break;
-      case "tdp":
-        result.tdp = extractTDP(String(value));
-        break;
-      case "form_factor":
-        result.form_factor = extractFormFactor(String(value));
-        break;
-      case "psu_wattage":
-        result.psu_wattage = extractPSUWattage(String(value));
-        break;
-      case "chipset":
-        result.chipset = String(value).trim().substring(0, 100);
-        break;
-      case "warranty":
-        result.warranty = String(value).trim().substring(0, 50);
-        break;
+      switch (normalKey) {
+        case "socket":
+          result.socket = extractSocket(value, productName);
+          break;
+        case "ram_type":
+          result.ram_type = extractRamType(value, productName);
+          break;
+        case "tdp":
+          result.tdp = extractTDP(value, productName);
+          break;
+        case "form_factor":
+          result.form_factor = extractFormFactor(value, productName);
+          break;
+        case "psu_wattage":
+          result.psu_wattage = extractPSUWattage(value, productName);
+          break;
+        case "chipset":
+          result.chipset = String(value).trim().substring(0, 100);
+          break;
+        case "capacity":
+          result.capacity = String(value).trim().substring(0, 50);
+          break;
+        case "speed":
+        case "base_speed":
+          result.speed = String(value).trim().substring(0, 100);
+          break;
+        case "storage_interface":
+          result.storage_interface = String(value).trim().substring(0, 100);
+          break;
+        case "cooling_type":
+          result.cooling_type = String(value).trim().substring(0, 100);
+          break;
+        case "vram":
+          result.vram = String(value).trim().substring(0, 50);
+          break;
+      }
     }
   }
 
-  // Fallback: phân tích theo category nếu không tìm được
+  // Fallback từ productName nếu specs còn thiếu
+  if (categoryName === "CPU" && !result.socket) {
+    result.socket = extractSocket("", productName);
+  }
+  if ((categoryName === "CPU" || categoryName === "Mainboard" || categoryName === "RAM") && !result.ram_type) {
+    result.ram_type = extractRamType("", productName);
+  }
   if (categoryName === "PSU" && !result.psu_wattage) {
-    // Tìm wattage trong tên sản phẩm
+    result.psu_wattage = extractPSUWattage("", productName);
+  }
+  if (categoryName === "GPU" && !result.vram) {
+    const vMatch = productName.match(/(\d+)\s*GB/i);
+    if (vMatch) result.vram = `${vMatch[1]}GB`;
+  }
+  if (categoryName === "SSD" && !result.capacity) {
+    const cMatch = productName.match(/(\d+)\s*(TB|GB)/i);
+    if (cMatch) result.capacity = `${cMatch[1]}${cMatch[2].toUpperCase()}`;
   }
 
-  // Lọc bỏ null/undefined
   return Object.fromEntries(
-    Object.entries(result).filter(([, v]) => v != null)
+    Object.entries(result).filter(([, v]) => v != null && String(v).trim().length > 0)
   );
 }
 
 // ============================================================
-// UPSERT CATEGORY
+// ENSURE CATEGORY
 // ============================================================
-async function ensureCategory(name) {
-  let cat = await prisma.category.findFirst({ where: { name } });
+async function ensureCategory(catConfig) {
+  let cat = await prisma.category.findUnique({ where: { id: catConfig.id } });
   if (!cat) {
-    cat = await prisma.category.create({ data: { name } });
-    console.log(`  📂 Tạo category: ${name}`);
+    cat = await prisma.category.findFirst({ where: { name: catConfig.name } });
+  }
+  if (!cat) {
+    cat = await prisma.category.create({
+      data: { id: catConfig.id, name: catConfig.name }
+    });
+    console.log(`  📂 Tạo category: ${catConfig.name} (id: ${catConfig.id})`);
+  } else if (cat.name !== catConfig.name) {
+    cat = await prisma.category.update({
+      where: { id: cat.id },
+      data: { name: catConfig.name }
+    });
   }
   return cat;
 }
 
 // ============================================================
-// UPSERT BRAND
+// ENSURE BRAND
 // ============================================================
-async function ensureBrand(name) {
-  if (!name) name = "Unknown";
-  const cleanName = String(name).trim().substring(0, 100);
-  let brand = await prisma.brand.findFirst({ where: { name: cleanName } });
+const brandCache = new Map();
+
+async function ensureBrand(rawBrand, productName = "") {
+  let cleanName = String(rawBrand || "").trim();
+  if (!cleanName || cleanName.toLowerCase() === "unknown" || cleanName.toLowerCase() === "thương hiệu") {
+    cleanName = extractBrandFromName(productName) || "Chính hãng";
+  }
+  cleanName = cleanName.substring(0, 100);
+
+  if (brandCache.has(cleanName)) {
+    return brandCache.get(cleanName);
+  }
+
+  let brand = await prisma.brand.findFirst({
+    where: {
+      OR: [
+        { name: cleanName },
+        { slug: generateSlug(cleanName) }
+      ]
+    }
+  });
+
   if (!brand) {
-    const slug = generateSlug(cleanName).substring(0, 100);
+    const slug = generateSlug(cleanName) || `brand-${Date.now()}`;
     brand = await prisma.brand.create({
       data: {
         name: cleanName,
@@ -360,19 +427,20 @@ async function ensureBrand(name) {
         is_active: true,
       },
     });
-    console.log(`  🏷️  Tạo brand: ${cleanName}`);
+    console.log(`  🏷️  Tạo brand mới: ${cleanName}`);
   }
+
+  brandCache.set(cleanName, brand);
   return brand;
 }
 
 // ============================================================
-// UPSERT ATTRIBUTE + VALUE
+// ATTRIBUTE & VALUE MANAGEMENT
 // ============================================================
-const attrCache = new Map();    // name → id
-const valCache = new Map();     // "name::value" → id
+const attrCache = new Map();
+const valCache = new Map();
 
 async function ensureAttributeValue(attrName, value) {
-  // Ensure attribute
   if (!attrCache.has(attrName)) {
     let attr = await prisma.attribute.findFirst({ where: { name: attrName } });
     if (!attr) {
@@ -382,7 +450,6 @@ async function ensureAttributeValue(attrName, value) {
   }
   const attrId = attrCache.get(attrName);
 
-  // Ensure value
   const cacheKey = `${attrName}::${value}`;
   if (!valCache.has(cacheKey)) {
     let val = await prisma.attributeValue.findFirst({
@@ -398,9 +465,6 @@ async function ensureAttributeValue(attrName, value) {
   return valCache.get(cacheKey);
 }
 
-// ============================================================
-// LINK SKU → ATTRIBUTE VALUE
-// ============================================================
 async function linkSkuAttribute(skuId, attributeValueId) {
   const existing = await prisma.skuAttribute.findFirst({
     where: { sku_id: skuId, attribute_value_id: attributeValueId },
@@ -413,60 +477,74 @@ async function linkSkuAttribute(skuId, attributeValueId) {
 }
 
 // ============================================================
-// IMPORT MỘT SẢN PHẨM
+// IMPORT SINGLE PRODUCT
 // ============================================================
 async function importProduct(item, category, categoryName) {
-  // VẤN ĐỀ 1: Xử lý giá — 3 tầng kiểm tra, fallback theo category nếu null
   const resolvedPrice = resolvePrice(item.price, item.original_price, categoryName);
-  const price = resolvedPrice ?? CATEGORY_PRICE_FALLBACK[categoryName] ?? 1000000;
-
-  // VẤN ĐỀ 3: Slug sạch
-  const slug = generateSlug(item.name);
-
-  // VẤN ĐỀ 4: Map ảnh
-  const imageUrl = mapImagePath(item.thumbnail || (item.local_images && item.local_images[0]));
-
-  // VẤN ĐỀ 6: Stock mặc định
+  const price = resolvedPrice ?? CATEGORY_PRICE_FALLBACK[categoryName] ?? 1200000;
+  const brand = await ensureBrand(item.brand, item.name);
   const stock = DEFAULT_STOCK[categoryName] || 15;
+  const warrantyMonths = DEFAULT_WARRANTY_MONTHS[categoryName] || 24;
+  const imageUrl = resolveItemImageUrl(item);
 
-  // Brand
-  const brand = await ensureBrand(item.brand);
+  // Generate unique slug
+  let baseSlug = item.slug ? generateSlug(item.slug) : generateSlug(item.name);
+  if (!baseSlug) baseSlug = `prod-${Date.now()}`;
 
-  // Upsert Product (tìm theo slug)
-  let product = await prisma.product.findFirst({ where: { slug } });
+  let product = await prisma.product.findFirst({
+    where: {
+      OR: [
+        { slug: baseSlug },
+        { name: item.name }
+      ]
+    }
+  });
+
+  const description = item.description || 
+    `Sản phẩm ${categoryName} chính hãng ${brand.name}: ${item.name}. Bảo hành ${warrantyMonths} tháng, mới 100% fullbox.`;
 
   if (!product) {
     product = await prisma.product.create({
       data: {
         name: item.name,
-        slug,
-        description: `Sản phẩm ${categoryName} chính hãng từ ${item.brand}. Nguồn: ${item.url || "hacom.vn"}`,
+        slug: baseSlug,
+        description,
         price,
         category_id: category.id,
         brand_id: brand.id,
+        warranty_months: warrantyMonths,
         status: "ACTIVE",
         is_active: true,
       },
     });
   } else {
-    // Update giá và brand nếu cần
-    await prisma.product.update({
+    product = await prisma.product.update({
       where: { id: product.id },
       data: {
+        name: item.name,
         price,
         category_id: category.id,
         brand_id: brand.id,
+        warranty_months: warrantyMonths,
+        description: description || product.description,
         is_active: true,
         status: "ACTIVE",
       },
     });
   }
 
-  // Tạo SKU code từ id của data
-  const skuCode = `HACOM-${String(item.id || item.product_id || item.slug).toUpperCase().substring(0, 60)}`;
+  // SKU code
+  const rawSkuCode = item.id || item.product_id || item.slug || baseSlug;
+  const skuCode = `HACOM-${String(rawSkuCode).toUpperCase().replace(/[^A-Z0-9_-]/g, "-").substring(0, 60)}`;
 
-  // Upsert ProductSku
-  let sku = await prisma.productSku.findFirst({ where: { sku: skuCode } });
+  let sku = await prisma.productSku.findFirst({
+    where: {
+      OR: [
+        { sku: skuCode },
+        { product_id: product.id }
+      ]
+    }
+  });
 
   if (!sku) {
     sku = await prisma.productSku.create({
@@ -476,64 +554,71 @@ async function importProduct(item, category, categoryName) {
         price,
         stock,
         image_url: imageUrl,
+        warranty_months: warrantyMonths,
         status: "ACTIVE",
         is_active: true,
       },
     });
   } else {
-    await prisma.productSku.update({
+    sku = await prisma.productSku.update({
       where: { id: sku.id },
-      data: { price, stock, image_url: imageUrl, is_active: true, status: "ACTIVE" },
+      data: {
+        price,
+        stock,
+        image_url: imageUrl || sku.image_url,
+        warranty_months: warrantyMonths,
+        is_active: true,
+        status: "ACTIVE"
+      },
     });
   }
 
-  // VẤN ĐỀ 2: Normalize và lưu attributes
+  // Parse and save specifications
   const specs = item.specifications || {};
-  const parsedAttrs = parseSpecifications(specs, categoryName);
+  const parsedAttrs = parseSpecifications(specs, categoryName, item.name);
 
   for (const [attrName, attrValue] of Object.entries(parsedAttrs)) {
     if (!attrValue) continue;
     try {
       const attrValueId = await ensureAttributeValue(attrName, String(attrValue));
       await linkSkuAttribute(sku.id, attrValueId);
-    } catch (e) {
-      // Bỏ qua lỗi duplicate
+    } catch {
+      // Ignore duplicate sku-attribute associations
     }
   }
 
-  return { product, sku, price, parsedAttrs };
+  return { product, sku, brand: brand.name, price, imageUrl };
 }
 
 // ============================================================
-// MAIN
+// MAIN EXECUTION
 // ============================================================
 async function main() {
-  console.log("═══════════════════════════════════════════════════");
-  console.log("  📦 HACOM DATA IMPORT — PC Mall");
-  console.log("═══════════════════════════════════════════════════\n");
+  console.log("═══════════════════════════════════════════════════════════");
+  console.log("  📦 HACOM DATA IMPORT & SYNCHRONIZATION — PC MALL");
+  console.log("═══════════════════════════════════════════════════════════\n");
 
-  let totalProducts = 0;
+  let totalProcessed = 0;
   let totalCreated = 0;
   let totalUpdated = 0;
   let totalErrors = 0;
 
-  const summary = [];
+  const categoryStats = [];
 
-  for (const [fileName, categoryName] of Object.entries(FILE_CATEGORY_MAP)) {
+  for (const [fileName, catDef] of Object.entries(FILE_CATEGORY_MAP)) {
     const filePath = path.join(DATA_DIR, fileName);
 
     if (!fs.existsSync(filePath)) {
-      console.warn(`  ⚠️  Không tìm thấy file: ${fileName} — bỏ qua`);
+      console.warn(`  ⚠️ Không tìm thấy file: ${fileName} — bỏ qua`);
       continue;
     }
 
-    console.log(`\n📂 Đang import: [${categoryName}] từ ${fileName}`);
-    console.log("─".repeat(50));
+    console.log(`\n📂 Đang import: [${catDef.name}] từ ${fileName}...`);
+    console.log("─".repeat(55));
 
     const raw = fs.readFileSync(filePath, "utf-8");
     const items = JSON.parse(raw);
-
-    const category = await ensureCategory(categoryName);
+    const category = await ensureCategory(catDef);
 
     let catCreated = 0;
     let catUpdated = 0;
@@ -541,64 +626,64 @@ async function main() {
 
     for (const item of items) {
       try {
+        const slug = item.slug ? generateSlug(item.slug) : generateSlug(item.name);
         const existing = await prisma.product.findFirst({
-          where: { slug: generateSlug(item.name) },
+          where: { OR: [{ slug }, { name: item.name }] }
         });
 
-        const result = await importProduct(item, category, categoryName);
+        const res = await importProduct(item, category, catDef.name);
 
         if (existing) {
           catUpdated++;
-          console.log(`  ♻️  Updated: ${item.name.substring(0, 60)} — ${Number(result.price).toLocaleString("vi-VN")}đ`);
+          console.log(`  ♻️  Update: [${res.brand}] ${item.name.substring(0, 50)} — ${Number(res.price).toLocaleString("vi-VN")}đ`);
         } else {
           catCreated++;
-          console.log(`  ✅ Created: ${item.name.substring(0, 60)} — ${Number(result.price).toLocaleString("vi-VN")}đ`);
+          console.log(`  ✅ Create: [${res.brand}] ${item.name.substring(0, 50)} — ${Number(res.price).toLocaleString("vi-VN")}đ`);
         }
-        totalProducts++;
+        totalProcessed++;
       } catch (err) {
         catErrors++;
         totalErrors++;
-        console.error(`  ❌ Lỗi: ${item.name?.substring(0, 50)} — ${err.message}`);
+        console.error(`  ❌ Lỗi: ${item.name?.substring(0, 40)}: ${err.message}`);
       }
     }
 
     totalCreated += catCreated;
     totalUpdated += catUpdated;
 
-    summary.push({
-      category: categoryName,
+    categoryStats.push({
+      category: catDef.name,
       total: items.length,
       created: catCreated,
       updated: catUpdated,
-      errors: catErrors,
+      errors: catErrors
     });
 
     console.log(`  → ${catCreated} tạo mới, ${catUpdated} cập nhật, ${catErrors} lỗi`);
   }
 
-  // ============================================================
-  // KẾT QUẢ CUỐI
-  // ============================================================
-  console.log("\n═══════════════════════════════════════════════════");
-  console.log("  📊 KẾT QUẢ IMPORT");
-  console.log("═══════════════════════════════════════════════════");
-  console.log(`  Tổng sản phẩm xử lý : ${totalProducts}`);
-  console.log(`  Tạo mới             : ${totalCreated}`);
-  console.log(`  Cập nhật            : ${totalUpdated}`);
-  console.log(`  Lỗi                 : ${totalErrors}`);
-  console.log("\n  Chi tiết theo danh mục:");
-  for (const s of summary) {
-    console.log(`  - ${s.category.padEnd(10)}: ${s.total} sản phẩm | ✅ ${s.created} tạo | ♻️  ${s.updated} cập nhật | ❌ ${s.errors} lỗi`);
+  // Cập nhật lại cache / tổng kết
+  console.log("\n═══════════════════════════════════════════════════════════");
+  console.log("  📊 TỔNG KẾT KẾT QUẢ IMPORT");
+  console.log("═══════════════════════════════════════════════════════════");
+  console.log(`  Tổng số sản phẩm xử lý : ${totalProcessed}`);
+  console.log(`  Sản phẩm tạo mới       : ${totalCreated}`);
+  console.log(`  Sản phẩm cập nhật      : ${totalUpdated}`);
+  console.log(`  Lỗi                    : ${totalErrors}`);
+  console.log("\n  Chi tiết từng danh mục:");
+  for (const s of categoryStats) {
+    console.log(`  - ${s.category.padEnd(10)}: ${s.total} items | ✅ ${s.created} tạo mới | ♻️ ${s.updated} cập nhật | ❌ ${s.errors} lỗi`);
   }
-  console.log("\n✅ Hoàn tất import!\n");
-  console.log("💡 Lưu ý: Copy ảnh từ:");
-  console.log("   C:\\Users\\ASUS\\Downloads\\data\\data\\images\\hacom\\");
-  console.log("   → d:\\Project CNM_MK-HB\\apps\\web\\public\\assets\\products\\hacom\\");
+
+  // Đếm tổng số sản phẩm hiện có trong DB
+  const finalCount = await prisma.product.count({ where: { is_active: true } });
+  console.log(`\n🎉 Tổng số sản phẩm đang ACTIVE trong database: ${finalCount}`);
+  console.log("═══════════════════════════════════════════════════════════\n");
 }
 
 main()
   .catch((e) => {
-    console.error("❌ Import thất bại:", e.message);
+    console.error("❌ Lỗi nghiêm trọng khi import:", e);
     process.exit(1);
   })
   .finally(async () => {

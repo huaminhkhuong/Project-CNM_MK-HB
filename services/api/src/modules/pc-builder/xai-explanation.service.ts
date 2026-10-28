@@ -72,9 +72,18 @@ export interface CompleteXaiReport {
  */
 class XaiExplanationService {
   /**
-   * Trích xuất Mã Luật (COMP-001 -> COMP-010) và Mức độ Severity
+   * Trích xuất Mã Luật (COMP-001 -> COMP-010 hoặc RULE-xxx) và Mức độ Severity
    */
-  resolveRuleMeta(key: string, ok: boolean): { ruleId: string; severity: SeverityLevel } {
+  resolveRuleMeta(key: string, ok: boolean, meta?: Record<string, any>): { ruleId: string; severity: SeverityLevel } {
+    if (key.startsWith("rule_")) {
+      const ruleNum = key.replace("rule_", "");
+      const ruleId = meta?.ruleId || `RULE-${ruleNum}`;
+      const severity: SeverityLevel = ok ? "INFO" : (meta?.severity || "BLOCKER");
+      return { ruleId, severity };
+    }
+    if (meta?.ruleId) {
+      return { ruleId: meta.ruleId, severity: ok ? "INFO" : (meta.severity || "BLOCKER") };
+    }
     switch (key) {
       case "socket":
         return { ruleId: "COMP-001", severity: ok ? "INFO" : "BLOCKER" };
@@ -100,6 +109,8 @@ class XaiExplanationService {
         return { ruleId: "COMP-008", severity: ok ? "INFO" : "BLOCKER" };
       case "storage_m2":
         return { ruleId: "COMP-009", severity: ok ? "INFO" : "WARNING" };
+      case "storage_m2_gen":
+        return { ruleId: "COMP-011", severity: ok ? "INFO" : "WARNING" };
       case "case_form_factor":
         return { ruleId: "COMP-010", severity: ok ? "INFO" : "BLOCKER" };
       case "ram_slots":
@@ -118,7 +129,29 @@ class XaiExplanationService {
     const key = check.key;
     const ok = check.ok;
     const detail = check.detail || "";
-    const meta = this.resolveRuleMeta(key, ok);
+    const meta = this.resolveRuleMeta(key, ok, check.meta);
+
+    if (key.startsWith("rule_")) {
+      const ruleName = check.meta?.ruleName || `Quy tắc #${key.replace("rule_", "")}`;
+      const ruleDesc = check.meta?.ruleDescription || detail;
+      if (ok) {
+        return {
+          ruleId: meta.ruleId,
+          severity: "INFO",
+          short: `✅ [${meta.ruleId}] ${ruleName} — Tương thích`,
+          long: ruleDesc || `Linh kiện tuân thủ quy tắc tương thích cấu hình (${detail}).`,
+          level: "success"
+        };
+      }
+      return {
+        ruleId: meta.ruleId,
+        severity: meta.severity,
+        short: `❌ [${meta.ruleId}] [${meta.severity}] ${ruleName} — Không tương thích`,
+        long: ruleDesc || `Linh kiện vi phạm quy tắc kỹ thuật do Admin/Kỹ thuật viên cấu hình: ${detail}`,
+        suggestion: `Vui lòng thay đổi linh kiện để tuân thủ quy tắc "${ruleName}".`,
+        level: "error"
+      };
+    }
 
     switch (key) {
       case "socket":
@@ -330,6 +363,25 @@ class XaiExplanationService {
           level: "warning"
         };
 
+      case "storage_m2_gen":
+        if (ok) {
+          return {
+            ruleId: meta.ruleId,
+            severity: "INFO",
+            short: "✅ [COMP-011] Chuẩn giao tiếp M.2 PCIe SSD tương thích hoàn hảo với Mainboard",
+            long: `Chuẩn tốc độ PCIe của ổ cứng SSD M.2 (${detail}) tương thích tối đa với băng thông khe cắm M.2 trên bo mạch chủ.`,
+            level: "success"
+          };
+        }
+        return {
+          ruleId: meta.ruleId,
+          severity: "WARNING",
+          short: "⚠️ [COMP-011] [WARNING] Băng thông khe M.2 Mainboard thấp hơn chuẩn SSD",
+          long: `Ổ cứng SSD (${detail}) có thể bị nghẽn băng thông do khe cắm M.2 trên bo mạch chủ không hỗ trợ đầy đủ thế hệ PCIe Gen 4 / Gen 5. Ổ cứng vẫn nhận và hoạt động nhưng sẽ bị giới hạn tốc độ đọc/ghi tối đa.`,
+          suggestion: "Nâng cấp Mainboard có hỗ trợ khe cắm M.2 PCIe Gen 4 / Gen 5 hoặc chọn SSD chuẩn PCIe tương ứng để tối ưu chi phí. [Xem Mainboard phù hợp →]",
+          level: "warning"
+        };
+
       case "case_form_factor":
         if (ok) {
           return {
@@ -412,7 +464,7 @@ class XaiExplanationService {
     const compatibilityScore = blockers.length > 0 ? 0 : Math.max(20, Math.round(100 - warnings.length * 15 - advisories.length * 5));
     const perfScore = Math.min(100, Math.max(30, performanceScore));
     const valueScore = Math.min(98, Math.round(perfScore * 0.95 + (compatibilityScore > 80 ? 8 : 0)));
-    const powerThermalFailures = checks.filter((c) => (c.key === "psu" || c.key.startsWith("cooling") || c.key === "radiator_fit") && !c.ok).length;
+    const powerThermalFailures = checks.filter((c) => (c.key === "psu" || c.key.startsWith("cooling") || c.key === "radiator_fit" || c.key === "cooler_height") && !c.ok).length;
     const powerThermalScore = Math.max(25, Math.round(100 - powerThermalFailures * 25));
     const upgradeScore = Math.min(95, Math.max(40, Math.round(compatibilityScore * 0.4 + perfScore * 0.5 + 10)));
     const requirementMatchScore = blockers.length > 0 ? 30 : Math.round((compatibilityScore + perfScore) / 2);
@@ -466,7 +518,7 @@ class XaiExplanationService {
     componentsMap: Record<string, any> = {}
   ): CompleteXaiReport {
     const enrichedChecks: EnrichedCheckResult[] = checks.map((c) => {
-      const meta = this.resolveRuleMeta(c.key, c.ok);
+      const meta = this.resolveRuleMeta(c.key, c.ok, c.meta);
       return {
         ...c,
         ruleId: meta.ruleId,

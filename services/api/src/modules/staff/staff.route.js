@@ -13,4 +13,9 @@ router.patch("/orders/:orderId/status", controller.updateStaffOrderStatus);
 router.post("/orders/:orderId/shipment", controller.createShipment);
 router.patch("/orders/:orderId/consultation-note", controller.updateConsultationNote);
 
+// Serial numbers & Fulfillment routes
+router.get("/orders/:orderId/serials", controller.getOrderSerials);
+router.post("/orders/:orderId/serials", controller.assignOrderSerials);
+router.post("/orders/:orderId/serials/auto-generate", controller.autoGenerateMockSerials);
+
 module.exports = router;

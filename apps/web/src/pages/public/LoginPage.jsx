@@ -84,13 +84,14 @@ export function LoginPage() {
         password: formValues.password
       });
 
-      const returnPath = location.state?.from?.pathname || result.redirectPath;
-      const state =
-        result.onboarding?.buildsMigrated > 0
-          ? { buildsMigrated: result.onboarding.buildsMigrated }
-          : undefined;
+      const redirectParam = new URLSearchParams(location.search).get("redirect");
+      const returnPath = location.state?.from?.pathname || redirectParam || result.redirectPath;
+      const state = {
+        ...(result.onboarding?.buildsMigrated > 0 ? { buildsMigrated: result.onboarding.buildsMigrated } : {}),
+        ...(result.onboarding?.cartItemsMerged > 0 ? { cartItemsMerged: result.onboarding.cartItemsMerged } : {})
+      };
 
-      navigate(returnPath, { replace: true, state });
+      navigate(returnPath, { replace: true, state: Object.keys(state).length > 0 ? state : undefined });
     } catch (error) {
       if (axios.isAxiosError(error)) {
         setServerError(error.response?.data?.message || "Đăng nhập thất bại");

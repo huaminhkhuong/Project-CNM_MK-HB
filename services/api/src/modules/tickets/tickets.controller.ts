@@ -8,6 +8,7 @@ import {
   emitToTicketRoom,
   emitToTechQueue
 } from "../../socket/socket.service";
+import { sendTicketNotification } from "../notifications/notifications.service";
 import {
   createTicketMessage,
   createTicket,
@@ -186,6 +187,18 @@ export const patchTicket = asyncHandler(async (req: Request, res: Response) => {
   // 🔔 Real-time: Cập nhật danh sách cho kỹ thuật viên
   emitToTechQueue("tickets:queue_updated", { ticketId: req.params.id, status: payload.status });
 
+  // 🔔 Gửi thông báo in-app cho người tạo ticket khi có thay đổi trạng thái
+  const ticketCreatorId = (ticket as any).userId || (ticket as any).user_id;
+  if (payload.status && ticketCreatorId) {
+    sendTicketNotification({
+      userId: Number(ticketCreatorId),
+      ticketId: req.params.id,
+      ticketTitle: (ticket as any).title || "Yêu cầu hỗ trợ kỹ thuật",
+      action: "STATUS_CHANGED",
+      status: payload.status
+    }).catch((err) => console.warn("[Notification] Ticket notification failed:", err.message));
+  }
+
   res.status(200).json({
     success: true,
     data: updated
@@ -224,6 +237,19 @@ export const postTicketMessage = asyncHandler(async (req: Request, res: Response
     visibility,
     userId: req.user.userId
   });
+
+  // 🔔 Gửi thông báo in-app cho người tạo ticket khi kỹ thuật viên trả lời công khai
+  const ticketCreatorId = (ticket as any).userId || (ticket as any).user_id;
+  const senderId = Number(req.user.userId);
+  if (visibility === "PUBLIC" && ticketCreatorId && Number(ticketCreatorId) !== senderId) {
+    sendTicketNotification({
+      userId: Number(ticketCreatorId),
+      ticketId: req.params.id,
+      ticketTitle: (ticket as any).title || "Yêu cầu hỗ trợ kỹ thuật",
+      action: "NEW_REPLY",
+      detailMessage: payload.message ? payload.message.slice(0, 150) : undefined
+    }).catch((err) => console.warn("[Notification] Ticket reply notification failed:", err.message));
+  }
 
   res.status(201).json({
     success: true,

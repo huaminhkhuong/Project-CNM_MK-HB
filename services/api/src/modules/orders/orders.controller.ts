@@ -6,7 +6,6 @@ import { AppError } from "../../errors/app-error";
 import { asyncHandler } from "../../utils/async-handler";
 import {
   completeDeliveredOrder,
-  ensurePaymentProofColumn,
   getOrderById,
   getOrdersByUser,
   listOrders,
@@ -27,6 +26,7 @@ import { buildPaymentResultEmail } from "../../templates/email-payment-result";
 
 import { createWarrantyRecordsForDeliveredOrder } from "../warranties/warranty-sync.service";
 import { publishOrderEvent, subscribeOrderEvents } from "../../services/order-events";
+import { validateAndCalculateCoupon } from "../coupons/coupons.service";
 
 type UploadedPaymentProofFile = {
   filename: string;
@@ -90,6 +90,7 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
         return {
           product_variant_id: variant.id,
           product_id: variant.product_id,
+          category_id: variant.Product?.category_id,
           sku_snapshot: variant.sku,
           name_snapshot: variant.Product?.name || variant.sku,
           unitPrice: Number(variant.price),
@@ -127,6 +128,7 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
       orderSourceItems = cartWithItems.CartItem.map((item: any) => ({
         product_variant_id: item.product_variant_id,
         product_id: item.ProductSku.product_id,
+        category_id: item.ProductSku.Product?.category_id,
         sku_snapshot: item.ProductSku.sku,
         name_snapshot: item.ProductSku.Product?.name || item.ProductSku.sku,
         unitPrice: Number(item.ProductSku.price),
@@ -153,7 +155,30 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
     }
 
     const shippingFee = Number(payload.shippingFee || 0);
-    const finalAmount = total + shippingFee;
+
+    let discountAmount = 0;
+    let appliedCoupon: any = null;
+
+    if (payload.couponCode) {
+      const couponResult = await validateAndCalculateCoupon({
+        code: payload.couponCode,
+        userId: Number(currentUser.userId),
+        items: orderSourceItems.map((item) => ({
+          productId: item.product_id,
+          categoryId: (item as any).category_id,
+          unitPrice: item.unitPrice,
+          quantity: item.quantity,
+          lineTotal: item.unitPrice * item.quantity
+        })),
+        totalAmount: total,
+        shippingFee
+      });
+
+      discountAmount = couponResult.discountAmount;
+      appliedCoupon = couponResult.coupon;
+    }
+
+    const finalAmount = Math.max(0, total - discountAmount + shippingFee);
     
     const order = await tx.order.create({
       data: {
@@ -162,6 +187,9 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
         total_price: total, // Just backward compat
         total_amount: total,
         shipping_fee: shippingFee,
+        discount_amount: discountAmount,
+        coupon_id: appliedCoupon ? appliedCoupon.id : null,
+        coupon_code: appliedCoupon ? appliedCoupon.code : null,
         final_amount: finalAmount,
         payment_method: payload.paymentMethod,
         shipping_address: payload.shippingAddress,
@@ -172,6 +200,24 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
         updated_at: new Date()
       }
     });
+
+    if (appliedCoupon && discountAmount > 0) {
+      await tx.couponUsage.create({
+        data: {
+          coupon_id: appliedCoupon.id,
+          user_id: Number(currentUser.userId),
+          order_id: order.id,
+          discount_amount: discountAmount
+        }
+      });
+
+      await tx.coupon.update({
+        where: { id: appliedCoupon.id },
+        data: {
+          used_count: { increment: 1 }
+        }
+      });
+    }
 
     for (const item of orderSourceItems) {
       const unitPrice = Number(item.unitPrice);
@@ -327,8 +373,9 @@ export const getAllOrders = asyncHandler(async (_req: Request, res: Response) =>
 
 export const patchOrderStatus = asyncHandler(async (req: Request, res: Response) => {
   const payload = updateOrderStatusSchema.parse(req.body);
+  const orderId = Number(req.params.id);
 
-  const current = await getOrderById(req.params.id);
+  const current = await getOrderById(orderId);
   if (!current) {
     throw new AppError("Order not found", 404);
   }
@@ -339,14 +386,54 @@ export const patchOrderStatus = asyncHandler(async (req: Request, res: Response)
       // Shipment tracking can be managed via Shipment model instead
     }
 
+    // Atomically restore inventory when transitioning to CANCELED from an active status
+    if (payload.status === "CANCELED") {
+      const orderToCancel = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { OrderItem: true }
+      });
+
+      if (orderToCancel && orderToCancel.status !== "CANCELED") {
+        for (const item of orderToCancel.OrderItem || []) {
+          const variantId = item.product_variant_id;
+          const quantity = Number(item.quantity || 0);
+          if (variantId && quantity > 0) {
+            await tx.productSku.update({
+              where: { id: variantId },
+              data: {
+                stock: {
+                  increment: quantity
+                }
+              }
+            });
+          }
+        }
+
+        await tx.shipment.updateMany({
+          where: { order_id: orderId },
+          data: { status: "CANCELED" }
+        });
+
+        if (orderToCancel.coupon_id) {
+          await tx.coupon.update({
+            where: { id: orderToCancel.coupon_id },
+            data: { used_count: { decrement: 1 } }
+          }).catch(() => {});
+          await tx.couponUsage.deleteMany({
+            where: { order_id: orderId }
+          }).catch(() => {});
+        }
+      }
+    }
+
     return await tx.order.update({
-      where: { id: Number(req.params.id) },
-        data: { status: payload.status, updated_at: new Date() }
+      where: { id: orderId },
+      data: { status: payload.status, updated_at: new Date() }
     });
   });
 
   // Return full order to show new trackingCode or details
-  const finalOrder = await getOrderById(req.params.id);
+  const finalOrder = await getOrderById(orderId);
   if (finalOrder?.user_id) {
     publishOrderEvent(finalOrder.user_id, {
       orderId: finalOrder.id,
@@ -567,8 +654,6 @@ export const approvePaymentProof = asyncHandler(async (req: Request, res: Respon
     throw new AppError("Payment approval is only available for QR Banking orders", 400);
   }
 
-  await ensurePaymentProofColumn();
-
   const approved = Boolean(req.body?.approved);
   if (approved) {
     await prisma.$executeRawUnsafe(
@@ -638,11 +723,12 @@ export const vnpayReturn = asyncHandler(async (req: Request, res: Response) => {
   const vnp_Params = req.query;
   const isSecure = verifyVnpayReturn(vnp_Params);
 
+  const frontendBase = (env.frontendUrl || process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, "");
   if (isSecure) {
     const responseCode = vnp_Params["vnp_ResponseCode"];
-    res.redirect(`${process.env.FRONTEND_URL || "http://localhost:5173"}/payment/result?success=${responseCode === "00"}&orderId=${vnp_Params["vnp_TxnRef"]}`);
+    res.redirect(`${frontendBase}/payment/result?success=${responseCode === "00"}&orderId=${vnp_Params["vnp_TxnRef"]}`);
   } else {
-    res.redirect(`${process.env.FRONTEND_URL || "http://localhost:5173"}/payment/result?success=false&reason=invalid_signature`);
+    res.redirect(`${frontendBase}/payment/result?success=false&reason=invalid_signature`);
   }
 });
 
@@ -805,18 +891,37 @@ export const cancelMyOrder = asyncHandler(async (req: Request, res: Response) =>
     // Update order status
     const updatedOrder = await tx.order.update({
       where: { id: order.id },
-      data: { status: "CANCELED" }
+      data: { status: "CANCELED", updated_at: new Date() }
     });
 
     // Restore stock
     for (const item of order.OrderItem) {
-      await tx.productSku.update({
-        where: { id: item.product_variant_id },
-        data: {
-          stock: {
-            increment: item.quantity
+      const variantId = item.product_variant_id;
+      const quantity = Number(item.quantity || 0);
+      if (variantId && quantity > 0) {
+        await tx.productSku.update({
+          where: { id: variantId },
+          data: {
+            stock: {
+              increment: quantity
+            }
           }
-        }
+        });
+      }
+    }
+
+    await tx.shipment.updateMany({
+      where: { order_id: order.id },
+      data: { status: "CANCELED" }
+    });
+
+    if (order.coupon_id) {
+      await tx.coupon.update({
+        where: { id: order.coupon_id },
+        data: { used_count: { decrement: 1 } }
+      }).catch(() => {});
+      await tx.couponUsage.deleteMany({
+        where: { order_id: order.id }
       });
     }
 
@@ -835,3 +940,15 @@ export const cancelMyOrder = asyncHandler(async (req: Request, res: Response) =>
     paymentStatus: result.payment_status
   });
 });
+
+export const cleanupExpiredOrders = asyncHandler(async (req: Request, res: Response) => {
+  const timeoutMinutes = req.query.timeoutMinutes ? Number(req.query.timeoutMinutes) : undefined;
+  const { processPaymentTimeouts } = await import("../../workers/payment-timeout.worker");
+  const result = await processPaymentTimeouts(timeoutMinutes);
+  res.status(200).json({
+    success: true,
+    message: "Expired orders cleanup completed",
+    data: result
+  });
+});
+

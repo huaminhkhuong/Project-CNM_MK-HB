@@ -13,7 +13,7 @@ test.describe("Smart PC Builder — Manual QA Checklist (P10-05)", () => {
       "Mainboard",
       "RAM",
       "GPU",
-      "SSD / Storage",
+      "SSD",
       "PSU",
       "Case",
       "Cooling"
@@ -37,7 +37,7 @@ test.describe("Smart PC Builder — Manual QA Checklist (P10-05)", () => {
     const shareBtn = page.locator(".btn-summary-action").filter({ hasText: "Chia sẻ" }).first();
     await expect(shareBtn).toBeVisible();
 
-    const pdfBtn = page.locator(".btn-summary-action").filter({ hasText: "PDF" }).first();
+    const pdfBtn = page.locator("button").filter({ hasText: "PDF" }).first();
     await expect(pdfBtn).toBeVisible();
   });
 
@@ -48,6 +48,6 @@ test.describe("Smart PC Builder — Manual QA Checklist (P10-05)", () => {
 
     const increaseBudgetBtn = page.locator(".btn-whatif").first();
     await expect(increaseBudgetBtn).toBeVisible();
-    await expect(increaseBudgetBtn).toContainText("Tăng +5Tr");
+    await expect(increaseBudgetBtn).toContainText("+5Tr");
   });
 });

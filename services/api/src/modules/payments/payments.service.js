@@ -6,7 +6,7 @@ const { env } = require("../../config/env");
 let schemaCache = null;
 
 const PAYMENT_STATUSES = ["PENDING_GATEWAY", "PAID", "FAILED", "CANCELED"];
-const ONLINE_METHODS = ["VNPAY", "BANK_TRANSFER", "ONLINE"];
+const ONLINE_METHODS = ["VNPAY", "BANK_TRANSFER", "ONLINE", "MOMO"];
 
 function normalizePaymentStatus(status) {
   const normalized = String(status || "").trim().toUpperCase();
@@ -18,12 +18,59 @@ function normalizePaymentStatus(status) {
   return normalized;
 }
 
-function buildFrontendResultUrl(paymentId) {
-  return `${env.frontendUrl}/payment/result?paymentId=${paymentId}`;
+function getBackendBaseUrl(reqOrBaseUrl = null) {
+  if (typeof reqOrBaseUrl === "string" && reqOrBaseUrl.trim()) {
+    return reqOrBaseUrl.trim().replace(/\/+$/, "");
+  }
+
+  if (reqOrBaseUrl && typeof reqOrBaseUrl.get === "function") {
+    const proto = reqOrBaseUrl.get("x-forwarded-proto") || reqOrBaseUrl.protocol || "http";
+    const host = reqOrBaseUrl.get("x-forwarded-host") || reqOrBaseUrl.get("host");
+    if (host) {
+      return `${proto}://${host}`.replace(/\/+$/, "");
+    }
+  }
+
+  const backend = env.backendUrl || env.apiBaseUrl || process.env.BACKEND_URL || process.env.API_BASE_URL;
+  if (backend) {
+    return backend.trim().replace(/\/+$/, "");
+  }
+
+  const port = env.port || process.env.PORT || 4000;
+  return `http://localhost:${port}`;
 }
 
-function buildApiCallbackUrl(paymentId, result) {
-  return `http://localhost:${env.port}/api/payments/${paymentId}/callback?result=${result}`;
+function getFrontendBaseUrl(reqOrBaseUrl = null) {
+  if (typeof reqOrBaseUrl === "string" && reqOrBaseUrl.trim()) {
+    return reqOrBaseUrl.trim().replace(/\/+$/, "");
+  }
+
+  if (reqOrBaseUrl && typeof reqOrBaseUrl.get === "function") {
+    const origin = reqOrBaseUrl.get("origin") || reqOrBaseUrl.get("referer");
+    if (origin) {
+      try {
+        const u = new URL(origin);
+        return `${u.protocol}//${u.host}`.replace(/\/+$/, "");
+      } catch {}
+    }
+  }
+
+  const frontend = env.frontendUrl || process.env.FRONTEND_URL;
+  if (frontend) {
+    return frontend.trim().replace(/\/+$/, "");
+  }
+
+  return "http://localhost:5173";
+}
+
+function buildFrontendResultUrl(paymentId, reqOrBaseUrl = null) {
+  const base = getFrontendBaseUrl(reqOrBaseUrl);
+  return `${base}/payment/result?paymentId=${paymentId}`;
+}
+
+function buildApiCallbackUrl(paymentId, result, reqOrBaseUrl = null) {
+  const base = getBackendBaseUrl(reqOrBaseUrl);
+  return `${base}/api/payments/${paymentId}/callback?result=${result}`;
 }
 
 async function getSchema() {
@@ -53,6 +100,7 @@ async function getSchema() {
       transactionCode: pickColumn(paymentColumns, ["transaction_code"], null),
       redirectUrl: pickColumn(paymentColumns, ["redirect_url"], null),
       note: pickColumn(paymentColumns, ["note"], null),
+      proofImageUrl: pickColumn(paymentColumns, ["proof_image_url"], null),
       createdAt: pickColumn(paymentColumns, ["created_at"], null),
       updatedAt: pickColumn(paymentColumns, ["updated_at"], null)
     },
@@ -80,7 +128,7 @@ async function getSchema() {
   return schema;
 }
 
-function mapPayment(row) {
+function mapPayment(row, reqOrBaseUrl = null) {
   if (!row) {
     return null;
   }
@@ -94,13 +142,15 @@ function mapPayment(row) {
     amount: Number(row.amount || 0),
     status: row.status,
     transactionCode: row.transactionCode || null,
-    redirectUrl: row.redirectUrl || buildFrontendResultUrl(row.id),
+    redirectUrl: row.redirectUrl || buildFrontendResultUrl(row.id, reqOrBaseUrl),
     note: row.note || null,
+    proofImageUrl: row.proofImageUrl || row.proof_image_url || null,
+    proof_image_url: row.proofImageUrl || row.proof_image_url || null,
     createdAt: row.createdAt || null,
     updatedAt: row.updatedAt || null,
-    paymentUrl: buildFrontendResultUrl(row.id),
-    callbackSuccessUrl: buildApiCallbackUrl(row.id, "PAID"),
-    callbackFailedUrl: buildApiCallbackUrl(row.id, "FAILED")
+    paymentUrl: buildFrontendResultUrl(row.id, reqOrBaseUrl),
+    callbackSuccessUrl: buildApiCallbackUrl(row.id, "PAID", reqOrBaseUrl),
+    callbackFailedUrl: buildApiCallbackUrl(row.id, "FAILED", reqOrBaseUrl)
   };
 }
 
@@ -140,6 +190,7 @@ async function getPaymentRowById(paymentId) {
         ${schema.payments.transactionCode ? `p.${schema.payments.transactionCode}` : "NULL"} AS transactionCode,
         ${schema.payments.redirectUrl ? `p.${schema.payments.redirectUrl}` : "NULL"} AS redirectUrl,
         ${schema.payments.note ? `p.${schema.payments.note}` : "NULL"} AS note,
+        ${schema.payments.proofImageUrl ? `p.${schema.payments.proofImageUrl}` : "NULL"} AS proofImageUrl,
         ${schema.payments.createdAt ? `p.${schema.payments.createdAt}` : "NULL"} AS createdAt,
         ${schema.payments.updatedAt ? `p.${schema.payments.updatedAt}` : "NULL"} AS updatedAt
       FROM ${schema.payments.table} p
@@ -167,6 +218,7 @@ async function getPaymentRowByOrderId(orderId) {
         ${schema.payments.transactionCode ? `p.${schema.payments.transactionCode}` : "NULL"} AS transactionCode,
         ${schema.payments.redirectUrl ? `p.${schema.payments.redirectUrl}` : "NULL"} AS redirectUrl,
         ${schema.payments.note ? `p.${schema.payments.note}` : "NULL"} AS note,
+        ${schema.payments.proofImageUrl ? `p.${schema.payments.proofImageUrl}` : "NULL"} AS proofImageUrl,
         ${schema.payments.createdAt ? `p.${schema.payments.createdAt}` : "NULL"} AS createdAt,
         ${schema.payments.updatedAt ? `p.${schema.payments.updatedAt}` : "NULL"} AS updatedAt
       FROM ${schema.payments.table} p
@@ -198,7 +250,7 @@ async function syncOrderPayment(orderId, paymentStatus) {
   await query(`UPDATE ${schema.orders.table} SET ${updates.join(", ")} WHERE ${schema.orders.id} = ?`, params);
 }
 
-async function createPayment(userId, payload = {}) {
+async function createPayment(userId, payload = {}, reqOrBaseUrl = null) {
   const schema = await getSchema();
   const orderId = toPositiveInteger(payload.orderId || payload.order_id, "orderId");
   const order = await getOrderById(orderId);
@@ -219,7 +271,7 @@ async function createPayment(userId, payload = {}) {
 
   const existingPayment = await getPaymentRowByOrderId(orderId);
   if (existingPayment && existingPayment.status === "PAID") {
-    return mapPayment(existingPayment);
+    return mapPayment(existingPayment, reqOrBaseUrl);
   }
 
   if (existingPayment) {
@@ -228,7 +280,7 @@ async function createPayment(userId, payload = {}) {
 
     if (schema.payments.redirectUrl) {
       updates.push(`${schema.payments.redirectUrl} = ?`);
-      params.push(buildFrontendResultUrl(existingPayment.id));
+      params.push(buildFrontendResultUrl(existingPayment.id, reqOrBaseUrl));
     }
 
     if (schema.payments.updatedAt) {
@@ -239,7 +291,7 @@ async function createPayment(userId, payload = {}) {
     await query(`UPDATE ${schema.payments.table} SET ${updates.join(", ")} WHERE ${schema.payments.id} = ?`, params);
     await syncOrderPayment(orderId, "PENDING_GATEWAY");
     const refreshed = await getPaymentRowById(existingPayment.id);
-    return mapPayment(refreshed);
+    return mapPayment(refreshed, reqOrBaseUrl);
   }
 
   const fields = [schema.payments.orderId, schema.payments.amount, schema.payments.status];
@@ -255,7 +307,7 @@ async function createPayment(userId, payload = {}) {
   if (schema.payments.provider) {
     fields.push(schema.payments.provider);
     values.push("?");
-    params.push("VNPAY_SANDBOX_MOCK");
+    params.push(method === "MOMO" ? "MOMO_SANDBOX_MOCK" : "VNPAY_SANDBOX_MOCK");
   }
 
   if (schema.payments.paymentMethod) {
@@ -290,15 +342,15 @@ async function createPayment(userId, payload = {}) {
   const paymentId = result.insertId;
 
   if (schema.payments.redirectUrl) {
-    await query(`UPDATE ${schema.payments.table} SET ${schema.payments.redirectUrl} = ?${schema.payments.updatedAt ? `, ${schema.payments.updatedAt} = NOW()` : ""} WHERE ${schema.payments.id} = ?`, [buildFrontendResultUrl(paymentId), paymentId]);
+    await query(`UPDATE ${schema.payments.table} SET ${schema.payments.redirectUrl} = ?${schema.payments.updatedAt ? `, ${schema.payments.updatedAt} = NOW()` : ""} WHERE ${schema.payments.id} = ?`, [buildFrontendResultUrl(paymentId, reqOrBaseUrl), paymentId]);
   }
 
   await syncOrderPayment(orderId, "PENDING_GATEWAY");
   const created = await getPaymentRowById(paymentId);
-  return mapPayment(created);
+  return mapPayment(created, reqOrBaseUrl);
 }
 
-async function getPaymentStatus(userId, paymentId) {
+async function getPaymentStatus(userId, paymentId, reqOrBaseUrl = null) {
   const parsedPaymentId = toPositiveInteger(paymentId, "paymentId");
   const payment = await getPaymentRowById(parsedPaymentId);
 
@@ -310,10 +362,10 @@ async function getPaymentStatus(userId, paymentId) {
     throw createError("Forbidden: you do not have permission to view this payment", 403);
   }
 
-  return mapPayment(payment);
+  return mapPayment(payment, reqOrBaseUrl);
 }
 
-async function confirmPayment(userId, paymentId, payload = {}) {
+async function confirmPayment(userId, paymentId, payload = {}, reqOrBaseUrl = null) {
   const parsedPaymentId = toPositiveInteger(paymentId, "paymentId");
   const payment = await getPaymentRowById(parsedPaymentId);
 
@@ -325,10 +377,10 @@ async function confirmPayment(userId, paymentId, payload = {}) {
     throw createError("Forbidden: you do not have permission to confirm this payment", 403);
   }
 
-  return confirmPaymentByGateway(parsedPaymentId, payload.status || payload.result || "PAID", payload.note || null);
+  return confirmPaymentByGateway(parsedPaymentId, payload.status || payload.result || "PAID", payload.note || null, reqOrBaseUrl);
 }
 
-async function confirmPaymentByGateway(paymentId, status, note = null) {
+async function confirmPaymentByGateway(paymentId, status, note = null, reqOrBaseUrl = null) {
   const schema = await getSchema();
   const parsedPaymentId = toPositiveInteger(paymentId, "paymentId");
   const payment = await getPaymentRowById(parsedPaymentId);
@@ -360,7 +412,50 @@ async function confirmPaymentByGateway(paymentId, status, note = null) {
   await query(`UPDATE ${schema.payments.table} SET ${updates.join(", ")} WHERE ${schema.payments.id} = ?`, params);
   await syncOrderPayment(payment.orderId, nextStatus);
   const refreshed = await getPaymentRowById(parsedPaymentId);
-  return mapPayment(refreshed);
+  return mapPayment(refreshed, reqOrBaseUrl);
+}
+
+async function uploadPaymentProof(orderOrPaymentId, file, reqOrBaseUrl = null) {
+  if (!file) {
+    throw createError("Vui lòng tải lên file ảnh biên lai thanh toán (JPG, PNG, GIF)", 400);
+  }
+
+  const proofUrl = `/uploads/payment-proofs/${file.filename}`;
+  const id = toPositiveInteger(orderOrPaymentId, "orderId");
+  const schema = await getSchema();
+
+  // Determine whether id is orderId or paymentId
+  let orderId = id;
+  const orderRows = await query(`SELECT id FROM orders WHERE id = ? LIMIT 1`, [id]);
+  if (!orderRows || orderRows.length === 0) {
+    const paymentRows = await query(`SELECT order_id FROM ${schema.payments.table} WHERE id = ? LIMIT 1`, [id]);
+    if (paymentRows && paymentRows.length > 0) {
+      orderId = paymentRows[0].order_id;
+    } else {
+      throw createError(`Không tìm thấy đơn hàng hoặc thanh toán với mã #${id}`, 404);
+    }
+  }
+
+  // Update payments table if record exists
+  if (schema.payments.proofImageUrl) {
+    await query(
+      `UPDATE ${schema.payments.table} SET ${schema.payments.proofImageUrl} = ? WHERE ${schema.payments.orderId} = ? OR ${schema.payments.id} = ?`,
+      [proofUrl, orderId, id]
+    );
+  }
+
+  // Update orders table
+  await query(
+    `UPDATE orders SET payment_proof = ?, payment_status = 'AWAITING_ADMIN_CONFIRMATION' WHERE id = ?`,
+    [proofUrl, orderId]
+  );
+
+  return {
+    success: true,
+    orderId,
+    proof_image_url: proofUrl,
+    proofImageUrl: proofUrl
+  };
 }
 
 module.exports = {
@@ -368,5 +463,10 @@ module.exports = {
   createPayment,
   getPaymentStatus,
   confirmPayment,
-  confirmPaymentByGateway
+  confirmPaymentByGateway,
+  uploadPaymentProof,
+  buildApiCallbackUrl,
+  buildFrontendResultUrl,
+  getBackendBaseUrl,
+  getFrontendBaseUrl
 };

@@ -18,7 +18,7 @@ const ALLOWED_KEYS = new Set(DEFAULT_SETTINGS.map((item) => item.key));
 async function ensureSettingsTable() {
   const columns = await getTableColumns("system_settings").catch(() => []);
   if (columns.length === 0) {
-    throw createError("system_settings table is not available. Please import phase9_system_settings_migration.sql", 500);
+    throw createError("system_settings table is not available. Please run npm run db:migrate", 500);
   }
   return columns;
 }

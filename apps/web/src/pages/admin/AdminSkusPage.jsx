@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   AdminAlerts,
@@ -31,6 +31,7 @@ function createInitialSkuForm() {
     sku: "",
     price: "",
     stock: "",
+    warrantyMonths: "",
     imageUrl: "",
     status: "ACTIVE",
     attributeValueIds: []
@@ -130,6 +131,7 @@ export function AdminSkusPage() {
       sku: sku.sku || "",
       price: String(sku.price ?? ""),
       stock: String(sku.stock ?? ""),
+      warrantyMonths: sku.warrantyMonths !== null && sku.warrantyMonths !== undefined ? String(sku.warrantyMonths) : "",
       imageUrl: sku.imageUrl || "",
       status: sku.status || "ACTIVE",
       attributeValueIds: Array.isArray(sku.attributes) ? sku.attributes.map((item) => Number(item.attributeValueId)) : []
@@ -176,6 +178,10 @@ export function AdminSkusPage() {
         sku: formValues.sku,
         price: Number(formValues.price),
         stock: Number(formValues.stock || 0),
+        warrantyMonths:
+          formValues.warrantyMonths !== "" && formValues.warrantyMonths !== null && !isNaN(Number(formValues.warrantyMonths))
+            ? Number(formValues.warrantyMonths)
+            : null,
         imageUrl: formValues.imageUrl,
         status: formValues.status,
         attributeValueIds: formValues.attributeValueIds
@@ -257,6 +263,16 @@ export function AdminSkusPage() {
               <input name="price" className="admin-input" value={formValues.price} onChange={handleChange} placeholder="Giá" />
               <input name="stock" className="admin-input" value={formValues.stock} onChange={handleChange} placeholder="Tồn kho" />
             </div>
+            <input
+              name="warrantyMonths"
+              type="number"
+              min="0"
+              max="240"
+              className="admin-input"
+              value={formValues.warrantyMonths}
+              onChange={handleChange}
+              placeholder="Bảo hành riêng SKU (tháng, để trống để theo SP)"
+            />
             <input name="imageUrl" className="admin-input" value={formValues.imageUrl} onChange={handleChange} placeholder="URL ảnh" />
             <select name="status" className="admin-input" value={formValues.status} onChange={handleChange}>
               <option value="ACTIVE">Đang bán</option>
@@ -313,6 +329,7 @@ export function AdminSkusPage() {
                     <th>SKU</th>
                     <th>Sản phẩm</th>
                     <th>Giá / tồn</th>
+                    <th>Bảo hành</th>
                     <th>Thuộc tính</th>
                     <th>Trạng thái</th>
                     <th>Tác vụ</th>
@@ -333,6 +350,14 @@ export function AdminSkusPage() {
                       <td>
                         {Number(sku.price || 0).toLocaleString("vi-VN")} đ<br />
                         <small>Tồn: {sku.stock}</small>
+                      </td>
+                      <td>
+                        <strong>{sku.effectiveWarrantyMonths || sku.warrantyMonths || sku.product?.warrantyMonths || 24} tháng</strong>
+                        {sku.warrantyMonths !== null && sku.warrantyMonths !== undefined ? (
+                          <div style={{ fontSize: 12, color: "#2563eb" }}>Riêng SKU</div>
+                        ) : (
+                          <div style={{ fontSize: 12, color: "#64748b" }}>Theo SP ({sku.product?.warrantyMonths || 24} thg)</div>
+                        )}
                       </td>
                       <td>
                         <div className="admin-tag-list">

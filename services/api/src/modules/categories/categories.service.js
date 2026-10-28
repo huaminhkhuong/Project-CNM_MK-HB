@@ -1,15 +1,12 @@
-const { query } = require("../../config/database");
+﻿const { prisma } = require("../../config/prisma");
 const { createError } = require("../../utils/service-helpers");
-const { buildActiveCondition, getTableColumns, pickColumn } = require("../../utils/schema-helpers");
-
-let schemaCache = null;
 
 function mapCategory(row) {
   return {
     id: row.id,
     name: row.name,
-    slug: row.slug,
-    parentId: row.parentId
+    slug: null,    // categories table has no slug in Prisma schema
+    parentId: null // categories table has no parent_id in Prisma schema
   };
 }
 
@@ -18,65 +15,28 @@ function buildCategoryTree(items) {
   const roots = [];
 
   for (const item of items) {
-    categoryMap.set(String(item.id), {
-      ...item,
-      children: []
-    });
+    categoryMap.set(String(item.id), { ...item, children: [] });
   }
 
   for (const item of categoryMap.values()) {
-    if (item.parentId !== null && item.parentId !== undefined && categoryMap.has(String(item.parentId))) {
+    if (
+      item.parentId !== null &&
+      item.parentId !== undefined &&
+      categoryMap.has(String(item.parentId))
+    ) {
       categoryMap.get(String(item.parentId)).children.push(item);
       continue;
     }
-
     roots.push(item);
   }
-
   return roots;
 }
 
-async function getSchemaConfig() {
-  if (schemaCache) {
-    return schemaCache;
-  }
-
-  const columns = await getTableColumns("categories");
-  const config = {
-    table: "categories",
-    id: pickColumn(columns, ["id"]),
-    name: pickColumn(columns, ["name"]),
-    slug: pickColumn(columns, ["slug"], null),
-    parentId: pickColumn(columns, ["parent_id"], null),
-    sortOrder: pickColumn(columns, ["sort_order", "display_order"], null),
-    activeCondition: buildActiveCondition("c", columns)
-  };
-
-  if (!config.id || !config.name) {
-    throw createError("Categories table does not have the required columns", 500);
-  }
-
-  schemaCache = config;
-  return config;
-}
-
 async function getAllCategories() {
-  const config = await getSchemaConfig();
-  const orderParts = [config.sortOrder ? `c.${config.sortOrder} ASC` : null, `c.${config.name} ASC`].filter(Boolean);
-
-  const rows = await query(
-    `
-      SELECT
-        c.${config.id} AS id,
-        c.${config.name} AS name,
-        ${config.slug ? `c.${config.slug}` : "NULL"} AS slug,
-        ${config.parentId ? `c.${config.parentId}` : "NULL"} AS parentId
-      FROM ${config.table} c
-      WHERE ${config.activeCondition}
-      ORDER BY ${orderParts.join(", ")}
-    `
-  );
-
+  const rows = await prisma.category.findMany({
+    orderBy: { name: "asc" },
+    select: { id: true, name: true }
+  });
   return rows.map(mapCategory);
 }
 

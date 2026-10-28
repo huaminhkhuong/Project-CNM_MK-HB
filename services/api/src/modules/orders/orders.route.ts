@@ -24,7 +24,8 @@ import {
   uploadPaymentProof,
   approvePaymentProof,
   confirmOrderReceived,
-  streamOrderEvents
+  streamOrderEvents,
+  cleanupExpiredOrders
 } from "./orders.controller";
 
 export const ordersRouter = Router();
@@ -90,6 +91,7 @@ ordersRouter.post("/:id/confirm-received", confirmOrderReceived);
 ordersRouter.post("/:id/cancel", cancelMyOrder);
 
 ordersRouter.get("/", authorize([ROLES.ADMIN, ROLES.SALES]), getAllOrders);
+ordersRouter.post("/cleanup-expired", authorize([ROLES.ADMIN, ROLES.SALES]), cleanupExpiredOrders);
 ordersRouter.patch("/:id/status", authorize([ROLES.ADMIN, ROLES.SALES]), patchOrderStatus);
 ordersRouter.patch("/:id/payment-proof/approve", authorize([ROLES.ADMIN, ROLES.SALES]), approvePaymentProof);
 ordersRouter.post("/:id/pay", authorize([ROLES.ADMIN, ROLES.SALES]), payOrderMock);

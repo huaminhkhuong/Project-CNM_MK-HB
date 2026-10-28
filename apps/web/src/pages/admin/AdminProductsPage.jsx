@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   AdminAlerts,
@@ -36,6 +36,7 @@ function normalizeProductRow(product) {
     name: product?.product_name || product?.name || "",
     slug: product?.slug || "",
     description: product?.description || "",
+    warrantyMonths: Number(product?.warranty_months || product?.warrantyMonths || 24),
     categoryId: product?.category_id || product?.category?.id || "",
     categoryName: product?.category_name || product?.category?.name || "",
     brandId: product?.brand_id || product?.brand?.id || "",
@@ -50,6 +51,7 @@ function createInitialFormState() {
     name: "",
     slug: "",
     description: "",
+    warrantyMonths: "24",
     categoryId: "",
     brandId: ""
   };
@@ -199,6 +201,7 @@ export function AdminProductsPage() {
         name: detailName,
         slug: detail.slug || "",
         description: detail.description || "",
+        warrantyMonths: String(detail.warrantyMonths ?? detail.warranty_months ?? 24),
         categoryId: String(detailCategoryId),
         brandId: String(detailBrandId)
       });
@@ -229,6 +232,7 @@ export function AdminProductsPage() {
         name: formValues.name.trim(),
         slug: formValues.slug.trim(),
         description: String(formValues.description || "").trim(),
+        warrantyMonths: Number(formValues.warrantyMonths) || 24,
         categoryId: Number(formValues.categoryId),
         brandId: Number(formValues.brandId)
       };
@@ -371,6 +375,19 @@ export function AdminProductsPage() {
                 ))}
               </select>
             </AdminField>
+            <AdminField label="Thời hạn bảo hành (tháng)" htmlFor="warrantyMonths" error={formErrors.warrantyMonths}>
+              <input
+                id="warrantyMonths"
+                name="warrantyMonths"
+                type="number"
+                min="0"
+                max="240"
+                className="admin-input"
+                value={formValues.warrantyMonths}
+                onChange={handleFormChange}
+                placeholder="VD: 36 (CPU/GPU), 60 (SSD Pro), 120 (Nguồn cao cấp)"
+              />
+            </AdminField>
             <AdminBtn type="submit" variant="primary" disabled={submitting}>
               {submitting ? "Đang lưu…" : editingProductId ? "Cập nhật" : "Thêm sản phẩm"}
             </AdminBtn>
@@ -403,6 +420,7 @@ export function AdminProductsPage() {
                     <th>Slug</th>
                     <th>Danh mục</th>
                     <th>Thương hiệu</th>
+                    <th>Bảo hành</th>
                     <th>TT</th>
                     <th>Tác vụ</th>
                   </tr>
@@ -417,6 +435,9 @@ export function AdminProductsPage() {
                       <td>{product.slug || "—"}</td>
                       <td>{product.categoryName || "—"}</td>
                       <td>{product.brandName || "—"}</td>
+                      <td>
+                        <strong>{product.warrantyMonths || 24} tháng</strong>
+                      </td>
                       <td>
                         <AdminBadge tone={product.status === "ACTIVE" ? "success" : "neutral"}>
                           {getProductStatusLabel(product.status)}

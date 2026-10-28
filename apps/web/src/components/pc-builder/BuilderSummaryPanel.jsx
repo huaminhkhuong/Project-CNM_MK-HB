@@ -124,7 +124,7 @@ export function BuilderSummaryPanel({
       )}
 
       <header
-        className="builder-topbar-v2"
+        className="builder-topbar builder-topbar-v2"
         style={{
           position: "relative",
           zIndex: isMegaOpen ? 9999 : 100,

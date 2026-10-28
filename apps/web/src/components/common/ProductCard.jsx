@@ -9,7 +9,19 @@ function getProductName(product) {
   return product?.product_name || product?.name || "Sản phẩm đang cập nhật";
 }
 function getBrandName(product) {
-  return product?.brand_name || product?.brand?.name || "Thương hiệu";
+  const brand = product?.brand_name || product?.Brand?.name || product?.brand?.name || (typeof product?.brand === "string" ? product.brand : null);
+  if (brand && brand.trim() && brand.toLowerCase() !== "thương hiệu" && brand.toLowerCase() !== "unknown") {
+    return brand.trim();
+  }
+  const name = String(product?.product_name || product?.name || "").toUpperCase();
+  const KNOWN_BRANDS = ["INTEL", "AMD", "ASUS", "MSI", "GIGABYTE", "CORSAIR", "KINGSTON", "SAMSUNG", "WD", "DEEPCOOL", "THERMALRIGHT", "NZXT", "MONTECH", "LIAN LI", "COOLER MASTER", "INNO3D", "PALIT", "ZOTAC", "COLORFUL", "G.SKILL", "CRUCIAL", "NOCTUA", "JONSBO", "XIGMATEK", "AIGO", "KENOO", "MIK"];
+  for (const b of KNOWN_BRANDS) {
+    if (name.includes(b)) {
+      if (b === "WD") return "WD";
+      return b.charAt(0) + b.slice(1).toLowerCase();
+    }
+  }
+  return "Chính hãng";
 }
 function getProductCategory(product) {
   return String(product?.category_name || product?.category?.name || "");
@@ -179,6 +191,7 @@ export function ProductCard({ product, eager = false }) {
       <article
         ref={cardRef}
         className="market-product-card v2-product-card"
+        data-testid="product-card"
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         style={{ overflow: "hidden" }}
@@ -255,7 +268,7 @@ export function ProductCard({ product, eager = false }) {
             {/* Brand + Category */}
             <div className="market-product-card__brand-row">
               <span className="market-product-card__brand">{brandName}</span>
-              <span className="market-product-card__category">{categoryName || "PC Mall"}</span>
+              <span className="market-product-card__category" data-testid="product-card-category">{categoryName || "PC Mall"}</span>
             </div>
 
             {/* Product Name */}

@@ -2,6 +2,9 @@ import { Request, Response } from "express";
 import { prisma } from "../../config/prisma";
 import { AppError } from "../../errors/app-error";
 import { asyncHandler } from "../../utils/async-handler";
+import { AiLlmProvider } from "../ai/ai-llm.provider";
+import { AiContextService, UserHardwareContext } from "../ai/ai-context.service";
+import { aiOrchestratorService } from "../ai/ai-orchestrator.service";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BUDGET ALLOCATION RATIOS THEO USE CASE
@@ -387,7 +390,15 @@ async function buildSmartSuggestion(budget: number, requirements: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 // BUILD OPENAI PROMPT với dữ liệu thực từ DB
 // ─────────────────────────────────────────────────────────────────────────────
-function buildOpenAIPrompt(products: any[], budget: number, requirements: string): string {
+// ─────────────────────────────────────────────────────────────────────────────
+// BUILD LLM PROMPT với dữ liệu thực từ DB & Ngữ cảnh khách hàng
+// ─────────────────────────────────────────────────────────────────────────────
+function buildLlmPrompt(
+  products: any[],
+  budget: number,
+  requirements: string,
+  userContext?: UserHardwareContext | null
+): string {
   const useCase = detectUseCase(requirements);
   const ratios = BUDGET_RATIOS[useCase] || BUDGET_RATIOS.gaming;
 
@@ -407,13 +418,17 @@ function buildOpenAIPrompt(products: any[], budget: number, requirements: string
     .map(([type, ratio]) => `${type}: ${Math.round(ratio * 100)}% (~${Math.round(budget * ratio).toLocaleString("vi-VN")}đ)`)
     .join(", ");
 
+  const contextNote = userContext?.hasActiveBuild
+    ? `\n- NGỮ CẢNH CẤU HÌNH TRƯỚC ĐÓ CỦA KHÁCH: Khách đã từng cấu hình dàn "${userContext.buildName}" (${userContext.buildTotalPrice?.toLocaleString("vi-VN")}đ) trên PC Builder.\n`
+    : "";
+
   return `Bạn là chuyên gia tư vấn cấu hình PC tại cửa hàng PC Mall Việt Nam.
 
 THÔNG TIN KHÁCH HÀNG:
 - Ngân sách: ${budget.toLocaleString("vi-VN")} VNĐ
 - Nhu cầu: ${requirements}
 - Use case phát hiện: ${useCase}
-
+${contextNote}
 TỶ LỆ PHÂN BỔ NGÂN SÁCH GỢI Ý:
 ${allocationText}
 
@@ -433,132 +448,115 @@ ${productListText}`;
 // MAIN HANDLER
 // ─────────────────────────────────────────────────────────────────────────────
 export const suggestBuild = asyncHandler(async (req: Request, res: Response) => {
-  const { requirements, budget } = req.body;
+  const { requirements, budget } = req.body || {};
   const numericBudget = Number(budget);
 
   if (!requirements || !Number.isFinite(numericBudget) || numericBudget <= 0) {
     throw new AppError("Vui lòng cung cấp 'requirements' và 'budget' hợp lệ", 400);
   }
 
-  const openAiApiKey = process.env.OPENAI_API_KEY;
-  const geminiApiKey = process.env.GEMINI_API_KEY;
+  // 1. Thu thập ngữ cảnh phần cứng thống nhất của khách hàng (nếu đã đăng nhập hoặc có session)
+  const userId = (req as any).user?.userId || (req as any).user?.id || req.body?.userId || req.query?.userId;
+  let userContext: UserHardwareContext | null = null;
+  if (userId) {
+    try {
+      userContext = await AiContextService.aggregateUserContext(Number(userId));
+    } catch (_ctxErr) {
+      // Non-blocking
+    }
+  }
 
-  // ─── SMART DEMO MODE (không cần API key) ───────────────────────────────────
-  // Luôn chạy smart suggestion từ DB thật, không dùng fallback cứng
-  if (!openAiApiKey && !geminiApiKey) {
+  // 2. Lấy danh sách sản phẩm thật từ MySQL Database
+  const products = await prisma.product.findMany({
+    where: { is_active: true },
+    include: {
+      Category: { select: { name: true } },
+      ProductSku: {
+        take: 1,
+        orderBy: { id: "asc" },
+        where: { is_active: true, stock: { gt: 0 } }
+      }
+    },
+    orderBy: { category_id: "asc" }
+  });
+
+  // 3. Thực thi thông qua Unified AiOrchestratorService (quản lý Prompt, Token, Fallback tập trung)
+  const orchestratorRes = await aiOrchestratorService.recommendBuild({
+    budget: numericBudget,
+    requirements: String(requirements),
+    userId: userId ? Number(userId) : undefined
+  });
+  const llmRes = orchestratorRes;
+
+  let suggestedIds: number[] = [];
+  if (llmRes.parsedJson && Array.isArray(llmRes.parsedJson)) {
+    suggestedIds = llmRes.parsedJson.map((v: unknown) => Number(v)).filter((v: number) => Number.isInteger(v) && v > 0);
+  } else if (llmRes.text) {
+    try {
+      const cleaned = llmRes.text.replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+      const match = cleaned.match(/\[[\d\s,]+\]/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        if (Array.isArray(parsed)) {
+          suggestedIds = parsed.map((v: unknown) => Number(v)).filter((v: number) => Number.isInteger(v) && v > 0);
+        }
+      }
+    } catch (_e) {}
+  }
+
+  // 4. Nếu không lấy được ID từ LLM hoặc LLM dùng fallback -> chạy Smart Suggestion từ DB
+  if (suggestedIds.length === 0) {
     const suggestion = await buildSmartSuggestion(numericBudget, String(requirements));
     res.status(200).json({
       success: true,
       data: {
         ...suggestion,
         mode: "smart-db",
+        userContextSummary: userContext?.hasActiveBuild ? `Cấu hình trước: ${userContext.buildName}` : undefined,
         note: "Gợi ý được tạo bởi PC Mall AI Engine — bám sát dữ liệu thực tế trong kho hàng."
       }
     });
     return;
   }
 
-  // ─── OPENAI MODE ───────────────────────────────────────────────────────────
-  if (openAiApiKey) {
-    const products = await prisma.product.findMany({
-      where: { is_active: true },
-      include: {
-        Category: { select: { name: true } },
-        ProductSku: {
-          take: 1,
-          orderBy: { id: "asc" },
-          where: { is_active: true, stock: { gt: 0 } }
-        }
-      },
-      orderBy: { category_id: "asc" }
-    });
-
-    let aiResponse: globalThis.Response;
-    try {
-      aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openAiApiKey}`
-        },
-        body: JSON.stringify({
-          model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-          messages: [{ role: "user", content: buildOpenAIPrompt(products, numericBudget, String(requirements)) }],
-          temperature: 0.2
-        })
-      });
-    } catch (_err) {
-      // Nếu OpenAI fail → fallback smart DB
-      const suggestion = await buildSmartSuggestion(numericBudget, String(requirements));
-      res.status(200).json({ success: true, data: { ...suggestion, mode: "smart-db-fallback" } });
-      return;
+  // 5. Query chi tiết các sản phẩm đã được chọn
+  const suggestedProducts = await prisma.product.findMany({
+    where: { id: { in: suggestedIds }, is_active: true },
+    include: {
+      Category: { select: { name: true } },
+      ProductSku: { take: 1, orderBy: { id: "asc" } }
     }
+  });
 
-    if (!aiResponse.ok) {
-      const suggestion = await buildSmartSuggestion(numericBudget, String(requirements));
-      res.status(200).json({ success: true, data: { ...suggestion, mode: "smart-db-fallback" } });
-      return;
+  const useCase = detectUseCase(String(requirements));
+  const orderedProducts = suggestedIds
+    .map((id) => suggestedProducts.find((p) => p.id === id))
+    .filter(Boolean) as typeof suggestedProducts;
+
+  const items = orderedProducts.map((product) => {
+    const sku = product.ProductSku?.[0];
+    const price = Number(sku?.price || product.price || 0);
+    const type = CATEGORY_TO_COMPONENT[product.Category?.name?.toLowerCase() || ""] || "other";
+    return {
+      componentType: type,
+      product: { id: product.id, name: product.name, categoryName: product.Category?.name },
+      variant: { id: sku?.id || product.id, sku: sku?.sku || "", price, imageUrl: sku?.image_url || null },
+      explanation: generateExplanation(type, product.name || "", price, numericBudget, useCase)
+    };
+  });
+
+  const totalPrice = items.reduce((sum, item) => sum + item.variant.price, 0);
+
+  res.status(200).json({
+    success: true,
+    data: {
+      budget: numericBudget,
+      totalPrice,
+      useCase,
+      explanation: `🤖 AI đã phân tích và gợi ý cấu hình ${useCase.toUpperCase()} tối ưu cho ngân sách ${numericBudget.toLocaleString("vi-VN")}đ.`,
+      items,
+      mode: llmRes.provider,
+      userContextSummary: userContext?.hasActiveBuild ? `Cấu hình trước: ${userContext.buildName}` : undefined
     }
-
-    const aiData = await aiResponse.json();
-    let content = aiData.choices?.[0]?.message?.content?.trim() || "";
-
-    // Strip markdown fences
-    content = content.replace(/^```(?:json)?/, "").replace(/```$/, "").trim();
-
-    let suggestedIds: number[] = [];
-    try {
-      const parsed = JSON.parse(content);
-      if (!Array.isArray(parsed)) throw new Error("Not an array");
-      suggestedIds = parsed.map((v: unknown) => Number(v)).filter(v => Number.isInteger(v) && v > 0);
-    } catch (_err) {
-      const suggestion = await buildSmartSuggestion(numericBudget, String(requirements));
-      res.status(200).json({ success: true, data: { ...suggestion, mode: "smart-db-fallback" } });
-      return;
-    }
-
-    const suggestedProducts = await prisma.product.findMany({
-      where: { id: { in: suggestedIds }, is_active: true },
-      include: {
-        Category: { select: { name: true } },
-        ProductSku: { take: 1, orderBy: { id: "asc" } }
-      }
-    });
-
-    const useCase = detectUseCase(String(requirements));
-    const orderedProducts = suggestedIds
-      .map(id => suggestedProducts.find(p => p.id === id))
-      .filter(Boolean) as typeof suggestedProducts;
-
-    const items = orderedProducts.map(product => {
-      const sku = product.ProductSku?.[0];
-      const price = Number(sku?.price || product.price || 0);
-      const type = CATEGORY_TO_COMPONENT[product.Category?.name?.toLowerCase() || ""] || "other";
-      return {
-        componentType: type,
-        product: { id: product.id, name: product.name, categoryName: product.Category?.name },
-        variant: { id: sku?.id || product.id, sku: sku?.sku || "", price, imageUrl: sku?.image_url || null },
-        explanation: generateExplanation(type, product.name || "", price, numericBudget, useCase)
-      };
-    });
-
-    const totalPrice = items.reduce((sum, item) => sum + item.variant.price, 0);
-
-    res.status(200).json({
-      success: true,
-      data: {
-        budget: numericBudget,
-        totalPrice,
-        useCase,
-        explanation: `🤖 AI đã phân tích và gợi ý cấu hình ${useCase.toUpperCase()} tối ưu cho ngân sách ${numericBudget.toLocaleString("vi-VN")}đ.`,
-        items,
-        mode: "openai"
-      }
-    });
-    return;
-  }
-
-  // ─── Fallback cuối cùng ────────────────────────────────────────────────────
-  const suggestion = await buildSmartSuggestion(numericBudget, String(requirements));
-  res.status(200).json({ success: true, data: { ...suggestion, mode: "smart-db" } });
+  });
 });

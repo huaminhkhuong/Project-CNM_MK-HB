@@ -48,6 +48,7 @@ function isBrokenImage(url) {
   if (value.startsWith("data:image/svg+xml")) return false;
   if (value.startsWith("data:image") && value.length < 1000) return true;
   if (value.includes("placehold.co") && /0f172a|111827|black/i.test(value)) return true;
+  if (value.includes("via.placeholder.com") || value.includes("placeholder.com")) return true;
   if (value.includes("null") || value.includes("undefined")) return true;
   return false;
 }

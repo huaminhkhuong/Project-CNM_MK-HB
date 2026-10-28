@@ -29,7 +29,7 @@ export function createApp() {
       contentSecurityPolicy: false
     })
   );
-  app.use(cors({ origin: env.frontendUrl, credentials: true }));
+  app.use(cors({ origin: [env.frontendUrl, "http://localhost:5173", "http://127.0.0.1:5173"], credentials: true }));
   app.use(requestLogger);
   app.use(express.json());
 

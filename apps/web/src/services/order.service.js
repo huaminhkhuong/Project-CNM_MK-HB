@@ -18,8 +18,20 @@ export async function getOrderDetail(orderId) {
 export async function uploadPaymentProof(orderId, file) {
   const formData = new FormData();
   formData.append("paymentProof", file);
+  formData.append("proof_image", file);
 
   const response = await httpClient.post(`/orders/${orderId}/payment-proof`, formData, {
+    headers: { "Content-Type": "multipart/form-data" }
+  });
+  return response.data;
+}
+
+export async function uploadPaymentReceipt(orderId, file) {
+  const formData = new FormData();
+  formData.append("proof_image", file);
+  formData.append("paymentProof", file);
+
+  const response = await httpClient.post(`/payments/${orderId}/proof`, formData, {
     headers: { "Content-Type": "multipart/form-data" }
   });
   return response.data;

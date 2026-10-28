@@ -12,7 +12,8 @@ export const checkoutSchema = z.object({
   addressId: z.coerce.number().int().positive().optional(),
   shippingFee: z.coerce.number().min(0).default(0),
   note: z.string().trim().max(1000).optional(),
-  items: z.array(checkoutItemSchema).min(1).optional()
+  items: z.array(checkoutItemSchema).min(1).optional(),
+  couponCode: z.string().trim().max(50).optional()
 });
 
 export const updateOrderStatusSchema = z.object({

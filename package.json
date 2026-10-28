@@ -24,6 +24,8 @@
     "test:api": "npm test -w services/api",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
+    "seed": "npm run seed -w services/api",
+    "seed:master": "npm run seed:master -w services/api",
     "seed:production": "npm run seed:production -w services/api",
     "smoke:sales": "node test-sales-flow.js",
     "seed:guest-demo": "npm run seed:guest-demo -w services/api",

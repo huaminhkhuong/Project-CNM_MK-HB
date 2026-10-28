@@ -6,21 +6,25 @@ test.describe("Checkout", () => {
     await page.goto("/login");
     await page.fill('input[name="email"]', "admin@cnm.local");
     await page.fill('input[name="password"]', "Admin@123");
-    await page.click('button[type="submit"]');
-    await page.waitForURL(/\/(admin|home|$)/);
+    await page.getByRole("button", { name: "Đăng nhập" }).click();
+    await expect(page).toHaveURL(/\/(admin|profile|home)/, { timeout: 10000 });
   });
 
   test("should add product to cart", async ({ page }) => {
     await page.goto("/products");
     
-    // Click first product
-    await page.locator('[data-testid="product-card"]').first().click();
+    // Click first product card link
+    const firstCard = page.locator('[data-testid="product-card"]').first();
+    await expect(firstCard).toBeVisible();
+    await firstCard.locator("a").first().click();
     
     // Add to cart
-    await page.click('button:has-text("Thêm vào giỏ")');
+    const addCartBtn = page.locator('button').filter({ hasText: "Thêm vào giỏ hàng" }).first();
+    await expect(addCartBtn).toBeVisible();
+    await addCartBtn.click();
     
     // Should show success message
-    await expect(page.locator('text=/đã thêm|thành công/i')).toBeVisible();
+    await expect(page.locator('text=/đã thêm|thành công/i')).toBeVisible({ timeout: 10000 });
   });
 
   test("should view cart", async ({ page }) => {

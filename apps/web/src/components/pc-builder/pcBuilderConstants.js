@@ -66,5 +66,9 @@ export const SPEC_ALIASES = {
   boardFormFactor:  ["form_factor", "kích thước main", "chuẩn mainboard"],
   caseFormFactor:   ["form_factor", "form_factor_support", "hỗ trợ main", "hỗ trợ form factor"],
   m2Slots:          ["m2_slots", "khe m2", "m.2 slots", "m2"],
-  ramSlots:         ["ram_slots", "khe ram", "ram slots"]
+  ramSlots:         ["ram_slots", "khe ram", "ram slots"],
+  caseCoolerClearance: ["case_cooler_clearance", "cpu cooler clearance", "giới hạn chiều cao tản", "cooler clearance", "max cooler height"],
+  pcieGen:          ["pcie_gen", "pcie generation", "interface", "giao tiếp", "chuẩn giao tiếp", "m.2 type"],
+  m2Gen5Slots:      ["m2_gen5_slots", "m.2 gen5", "pcie gen 5 m.2", "khe m2 gen5"],
+  m2Gen4Slots:      ["m2_gen4_slots", "m.2 gen4", "pcie gen 4 m.2", "khe m2 gen4"]
 };

@@ -5,6 +5,7 @@
  * Usage: <RealtimeToast /> in RootApp.jsx
  */
 import { useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { useSocket } from "../hooks/useSocket";
 import { useAuth } from "../hooks/useAuth";
 
@@ -21,7 +22,7 @@ const ICONS = {
 
 let toastId = 0;
 
-function Toast({ toast, onDismiss }) {
+function Toast({ toast, onDismiss, onNavigate }) {
   useEffect(() => {
     const timer = setTimeout(() => onDismiss(toast.id), TOAST_DURATION);
     return () => clearTimeout(timer);
@@ -33,7 +34,11 @@ function Toast({ toast, onDismiss }) {
       data-type={toast.type || "info"}
       role="alert"
       aria-live="polite"
-      onClick={() => onDismiss(toast.id)}
+      onClick={() => {
+        onDismiss(toast.id);
+        if (toast.link && onNavigate) onNavigate(toast.link);
+      }}
+      style={{ cursor: toast.link ? "pointer" : "default" }}
     >
       <span className="rt-toast-icon">{ICONS[toast.type] || ICONS.info}</span>
       <div className="rt-toast-body">
@@ -56,6 +61,7 @@ export function RealtimeToast() {
   const [toasts, setToasts] = useState([]);
   const { authState } = useAuth();
   const { joinRoom, on } = useSocket();
+  const navigate = useNavigate();
 
   const addToast = useCallback((toast) => {
     setToasts((prev) => [
@@ -69,8 +75,29 @@ export function RealtimeToast() {
   }, []);
 
   const role = authState?.user?.role?.toUpperCase();
+  const currentUserId = authState?.user?.id || authState?.user?.userId;
 
   useEffect(() => {
+    // 🔔 Nhận thông báo in-app realtime cho tất cả người dùng đăng nhập
+    if (currentUserId) {
+      joinRoom("join_user", currentUserId);
+
+      on("notification:new", (data) => {
+        const typeMap = {
+          ORDER: "info",
+          WARRANTY: "success",
+          TICKET: "ticket",
+          SYSTEM: "info"
+        };
+        addToast({
+          type: typeMap[data?.type] || "info",
+          title: data?.title || "Thông báo mới",
+          message: data?.message || "Bạn vừa nhận được một thông báo mới.",
+          link: data?.link
+        });
+      });
+    }
+
     if (!role) return;
 
     // Nhân viên bán hàng: nhận thông báo chat mới
@@ -121,7 +148,7 @@ export function RealtimeToast() {
         }
       });
     }
-  }, [role, joinRoom, on, addToast]);
+  }, [role, currentUserId, joinRoom, on, addToast]);
 
   if (toasts.length === 0) return null;
 
@@ -254,7 +281,7 @@ export function RealtimeToast() {
       `}</style>
       <div className="rt-container" role="region" aria-label="Thông báo real-time">
         {toasts.map((toast) => (
-          <Toast key={toast.id} toast={toast} onDismiss={dismissToast} />
+          <Toast key={toast.id} toast={toast} onDismiss={dismissToast} onNavigate={navigate} />
         ))}
       </div>
     </>

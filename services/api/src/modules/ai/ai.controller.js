@@ -3,9 +3,10 @@ const asyncHandler = require("../../utils/async-handler");
 const aiService = require("./ai.service");
 
 const chat = asyncHandler(async (req, res) => {
-  const result = await aiService.askTechnicalAdvisor(req.body || {});
-  if (req.user?.id) {
-    await aiService.saveUserAiChat(req.user.id, req.body?.message, result);
+  const userId = req.user?.id || req.body?.userId;
+  const result = await aiService.askTechnicalAdvisor({ ...(req.body || {}), userId });
+  if (userId) {
+    await aiService.saveUserAiChat(userId, req.body?.message, result);
   }
   return sendSuccess(res, "AI technical advice generated successfully", result);
 });

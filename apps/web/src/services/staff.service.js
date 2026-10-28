@@ -24,3 +24,18 @@ export async function updateStaffConsultationNote(orderId, note) {
   const response = await httpClient.patch(`/staff/orders/${orderId}/consultation-note`, { note });
   return response.data;
 }
+
+export async function getStaffOrderSerials(orderId) {
+  const response = await httpClient.get(`/staff/orders/${orderId}/serials`);
+  return response.data;
+}
+
+export async function assignStaffOrderSerials(orderId, assignments) {
+  const response = await httpClient.post(`/staff/orders/${orderId}/serials`, { assignments });
+  return response.data;
+}
+
+export async function autoGenerateStaffOrderSerials(orderId) {
+  const response = await httpClient.post(`/staff/orders/${orderId}/serials/auto-generate`);
+  return response.data;
+}

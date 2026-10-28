@@ -4,8 +4,13 @@ import { v4 as uuidv4 } from "uuid";
 import { PrismaClient } from "@prisma/client";
 import {
   emitToChatRoom,
-  emitToStaffChatQueue
+  emitToStaff,
+  emitToStaffChatQueue,
+  findNextAvailableStaff,
+  getOnlineStaffList,
+  releaseStaffSession
 } from "../../socket/socket.service";
+import { AiContextService } from "../ai/ai-context.service";
 
 const prisma = new PrismaClient();
 
@@ -67,7 +72,15 @@ function mapSession(session: any) {
 
 export const createSession = async (req: Request, res: Response) => {
   try {
-    const { customerName, linkedOrderId, initialMessage, conversationType } = req.body || {};
+    const {
+      customerName,
+      linkedOrderId,
+      initialMessage,
+      conversationType,
+      aiHistory,
+      criteria,
+      clientBuild
+    } = req.body || {};
     const sessionId = uuidv4();
     const now = new Date();
     const normalizedType = normalizeConversationType(conversationType);
@@ -77,31 +90,75 @@ export const createSession = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: "Tin nhắn ban đầu vượt quá 2000 ký tự" });
     }
 
+    const userId = (req as any).user?.userId || (req as any).user?.id || req.body?.userId;
+
+    // 1. Phân phối phiên chat (Queue / Round-robin / Least-busy routing) tới nhân viên đang online
+    const isHumanSupport = normalizedType === "SALES_CONSULTATION" || normalizedType === "HUMAN_SUPPORT";
+    const assignedStaff = isHumanSupport ? findNextAvailableStaff("SALES_STAFF") : null;
+    const sessionStatus = assignedStaff ? "assigned" : "waiting";
+    const staffName = assignedStaff ? assignedStaff.staffName : null;
+
+    // 2. Chuyển toàn bộ tóm tắt ngữ cảnh (Context Summary) mà AI đã trao đổi trước đó sang cho nhân viên
+    const messagesToCreate: any[] = [];
+
+    // Nếu có lịch sử AI, tiêu chí criteria hoặc user đăng nhập có cấu hình PC/giỏ hàng
+    if (aiHistory?.length || criteria || clientBuild || userId) {
+      const userHardwareContext = await AiContextService.aggregateUserContext(
+        userId ? Number(userId) : undefined,
+        sessionId
+      );
+
+      const briefing = AiContextService.buildHandoffBriefing({
+        userContext: userHardwareContext,
+        aiHistory: Array.isArray(aiHistory) ? aiHistory : undefined,
+        criteria,
+        clientBuild,
+        note: openingQuestion || undefined
+      });
+
+      // Tạo tin nhắn tóm tắt ngữ cảnh briefing hệ thống
+      messagesToCreate.push({
+        sender: "system",
+        text: briefing.briefingText,
+        build_data: JSON.stringify(briefing.metadata),
+        created_at: now
+      });
+    }
+
+    // Tin nhắn hệ thống thông báo trạng thái kết nối
+    if (assignedStaff) {
+      messagesToCreate.push({
+        sender: "system",
+        text: `Hệ thống đã tự động kết nối bạn với nhân viên tư vấn ${assignedStaff.staffName}. Nhân viên đang xem lại tóm tắt nhu cầu của bạn.`,
+        created_at: new Date(now.getTime() + 10)
+      });
+    } else {
+      messagesToCreate.push({
+        sender: "system",
+        text: "Yêu cầu tư vấn đã được gửi vào hàng đợi. Nhân viên bán hàng sẽ phản hồi sớm nhất.",
+        created_at: new Date(now.getTime() + 10)
+      });
+    }
+
+    if (openingQuestion) {
+      messagesToCreate.push({
+        sender: "customer",
+        text: openingQuestion,
+        created_at: new Date(now.getTime() + 20)
+      });
+    }
+
     const session = await prisma.chatSession.create({
       data: {
         session_id: sessionId,
-        status: "waiting",
+        status: sessionStatus,
         customer_name: customerName || "Khach hang PC Mall",
+        staff_name: staffName,
         linked_order_id: linkedOrderId ? Number(linkedOrderId) : null,
         created_at: now,
         updated_at: now,
         messages: {
-          create: [
-            {
-              sender: "system",
-              text: "Yeu cau tu van da duoc gui. Nhan vien ban hang se phan hoi som nhat.",
-              created_at: now
-            },
-            ...(openingQuestion
-              ? [
-                  {
-                    sender: "customer",
-                    text: openingQuestion,
-                    created_at: now
-                  }
-                ]
-              : [])
-          ]
+          create: messagesToCreate
         }
       },
       include: { messages: { orderBy: { created_at: "asc" } } }
@@ -109,7 +166,12 @@ export const createSession = async (req: Request, res: Response) => {
 
     const sessionData = mapSession(session);
 
-    // 🔔 Real-time: Thông báo đến tất cả nhân viên đang online có yêu cầu chat mới
+    // 🔔 Real-time: Nếu đã chỉ định nhân viên qua Round-robin, gửi trực tiếp tới socket của nhân viên đó
+    if (assignedStaff?.socketId) {
+      emitToStaff(assignedStaff.socketId, "staff:session_assigned", sessionData);
+    }
+
+    // 🔔 Real-time: Thông báo đến hàng đợi nhân viên bán hàng
     emitToStaffChatQueue("queue:new_session", sessionData);
 
     res.status(201).json({ success: true, data: sessionData });
@@ -224,13 +286,20 @@ export const getQueueStats = async (_req: Request, res: Response) => {
     const all = await prisma.chatSession.findMany({
       where: { status: { notIn: ["closed", "resolved"] } }
     });
+    const onlineStaff = getOnlineStaffList();
 
     res.status(200).json({
       success: true,
       data: {
         waiting: all.filter((session) => ["waiting", "waiting_staff", "open"].includes(session.status)).length,
         active: all.filter((session) => ["active", "assigned", "waiting_customer"].includes(session.status)).length,
-        total: all.length
+        total: all.length,
+        onlineStaffCount: onlineStaff.length,
+        onlineStaff: onlineStaff.map((s) => ({
+          staffId: s.staffId,
+          staffName: s.staffName,
+          activeSessionsCount: s.activeSessionsCount
+        }))
       }
     });
   } catch (error) {
@@ -300,6 +369,11 @@ export const closeSession = async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, message: "Session not found" });
     }
 
+    // Giảm số phiên đang xử lý của nhân viên trong routing registry
+    if (session.staff_name) {
+      releaseStaffSession(session.staff_name);
+    }
+
     await prisma.chatSession.update({
       where: { id: session.id },
       data: {
@@ -336,73 +410,163 @@ export const closeSession = async (req: Request, res: Response) => {
 };
 
 /**
+ * POST /api/chat/session/:id/handoff
+ * Chuyển giao hỗ trợ từ AI sang Nhân viên bán hàng:
+ * 1. Phân phối phiên chat (Round-robin / Least-busy routing) tới nhân viên đang online.
+ * 2. Tổng hợp Context Summary (Nhu cầu, PC Builder, Giỏ hàng, Q&A AI) đưa vào luồng chat
+ *    để nhân viên nắm bắt toàn bộ ngữ cảnh, không bắt khách phải giải thích lại từ đầu.
+ */
+export const handoffToHuman = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { aiHistory, criteria, clientBuild, note } = req.body || {};
+    const userId = (req as any).user?.userId || (req as any).user?.id || req.body?.userId;
+
+    const session = await prisma.chatSession.findUnique({
+      where: { session_id: id },
+      include: { messages: { orderBy: { created_at: "asc" } } }
+    });
+
+    if (!session) {
+      return res.status(404).json({ success: false, message: "Session not found" });
+    }
+
+    if (["closed", "resolved"].includes(session.status)) {
+      return res.status(400).json({ success: false, message: "Phiên tư vấn đã kết thúc, không thể chuyển giao" });
+    }
+
+    // 1. Phân phối round-robin / least-busy tới nhân viên đang online (nếu chưa có nhân viên nhận)
+    let assignedStaff = null;
+    let staffName = session.staff_name;
+    let nextStatus = session.status;
+
+    if (!staffName || ["waiting", "waiting_staff", "open"].includes(session.status)) {
+      assignedStaff = findNextAvailableStaff("SALES_STAFF");
+      if (assignedStaff) {
+        staffName = assignedStaff.staffName;
+        nextStatus = "active";
+      } else {
+        nextStatus = "waiting_staff";
+      }
+    }
+
+    // 2. Thu thập Context Summary (Cấu hình PC, Giỏ hàng, Lịch sử hỏi đáp AI)
+    const userHardwareContext = await AiContextService.aggregateUserContext(
+      userId ? Number(userId) : undefined,
+      session.session_id
+    );
+
+    const briefing = AiContextService.buildHandoffBriefing({
+      userContext: userHardwareContext,
+      aiHistory: Array.isArray(aiHistory) ? aiHistory : undefined,
+      criteria,
+      clientBuild,
+      note: note ? String(note).trim() : undefined
+    });
+
+    const now = new Date();
+
+    // 3. Lưu tin nhắn Briefing tóm tắt ngữ cảnh vào ChatMessage
+    await prisma.chatMessage.create({
+      data: {
+        session_id: session.id,
+        sender: "system",
+        text: briefing.briefingText,
+        build_data: JSON.stringify(briefing.metadata),
+        created_at: now
+      }
+    });
+
+    // Thông báo điều phối nhân viên
+    if (assignedStaff) {
+      await prisma.chatMessage.create({
+        data: {
+          session_id: session.id,
+          sender: "system",
+          text: `Hệ thống đã tự động kết nối bạn với nhân viên tư vấn ${assignedStaff.staffName}.`,
+          created_at: new Date(now.getTime() + 10)
+        }
+      });
+    }
+
+    // Nếu khách có lời nhắn mở đầu khi bấm gặp nhân viên
+    if (note && String(note).trim()) {
+      await prisma.chatMessage.create({
+        data: {
+          session_id: session.id,
+          sender: "customer",
+          text: String(note).trim(),
+          created_at: new Date(now.getTime() + 20)
+        }
+      });
+    }
+
+    // Cập nhật trạng thái session
+    await prisma.chatSession.update({
+      where: { id: session.id },
+      data: {
+        status: nextStatus,
+        staff_name: staffName,
+        updated_at: new Date()
+      }
+    });
+
+    const refreshed = await prisma.chatSession.findUnique({
+      where: { id: session.id },
+      include: { messages: { orderBy: { created_at: "asc" } } }
+    });
+
+    const refreshedData = mapSession(refreshed);
+
+    // 🔔 Real-time notifications
+    emitToChatRoom(id, "chat:session_updated", refreshedData);
+    if (assignedStaff?.socketId) {
+      emitToStaff(assignedStaff.socketId, "staff:session_assigned", refreshedData);
+    }
+    emitToStaffChatQueue("queue:updated", {
+      sessionId: id,
+      status: nextStatus,
+      staffName
+    });
+
+    return res.status(200).json({ success: true, data: refreshedData });
+  } catch (error) {
+    console.error("Error handing off chat session:", error);
+    res.status(500).json({ success: false, message: "Failed to handoff session" });
+  }
+};
+
+/**
  * POST /api/chat/ai-consultation
- * Controller tiếp nhận tư vấn AI, tiêu chí chọn, linh kiện có sẵn và thắc mắc lý thuyết phần cứng.
+ * Controller tiếp nhận tư vấn AI, tiêu chí chọn, linh kiện có sẵn và thắc mắc lý thuyết phần cứng qua RAG Engine.
  */
 export const handleAiConsultation = async (req: Request, res: Response) => {
   try {
-    const { message, criteria } = req.body;
+    const { message, criteria, sessionId } = req.body || {};
     const text = String(message || "").trim();
 
     if (text.length > 2000) {
       return res.status(400).json({ success: false, message: "Câu hỏi vượt quá 2000 ký tự" });
     }
 
+    const userId = (req as any).user?.userId || (req as any).user?.id || req.body?.userId;
+
     const { aiAssistantService } = await import("./ai-assistant.service");
 
-    // 1. Check hardware theory questions (downclocking, PSU watt, bottleneck...)
-    if (text) {
-      const theoryExplanation = aiAssistantService.explainHardwareTheory(text);
-      if (theoryExplanation) {
-        return res.status(200).json({
-          success: true,
-          data: {
-            text: theoryExplanation,
-            type: "theory_explanation"
-          }
-        });
-      }
+    // 🚀 Sử dụng RAG Engine toàn diện + Unified Shared Hardware Context (Active PC Build, Cart, Orders)
+    const ragResult = await aiAssistantService.consultWithRag(text, criteria, {
+      userId: userId ? Number(userId) : undefined,
+      sessionId: sessionId ? String(sessionId) : undefined
+    });
 
-      // 2. Database grounded query (e.g. "cpu đi", "RAM dưới 3tr", "gợi ý vga")
-      try {
-        // @ts-ignore
-        const { askTechnicalAdvisor } = await import("../ai/ai.service");
-        const advisorResult = await askTechnicalAdvisor({ message: text });
-        if (advisorResult && (advisorResult.reply || advisorResult.products?.length)) {
-          return res.status(200).json({
-            success: true,
-            data: {
-              text: advisorResult.reply,
-              products: advisorResult.products || [],
-              buildPayload: advisorResult.build ? {
-                label: "Cấu hình đề xuất từ DB",
-                totalPrice: advisorResult.build.totalPrice,
-                components: advisorResult.build.components
-              } : null,
-              type: advisorResult.products?.length ? "product_recommendation" : "advisor_reply"
-            }
-          });
-        }
-      } catch (dbAiErr) {
-        console.warn("[ChatController] askTechnicalAdvisor failed, falling back:", dbAiErr);
-      }
-    }
-
-    // 3. Fallback to Form criteria build generation
-    const buildResult = await aiAssistantService.generateConsultationBuild(criteria || { budget: 25000000 });
-
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       data: {
-        text: buildResult.summaryText,
-        buildPayload: {
-          label: buildResult.label,
-          totalPrice: buildResult.totalPrice,
-          budgetUtilization: buildResult.budgetUtilization,
-          components: buildResult.components,
-          compatibilityScore: buildResult.compatibilityScore
-        },
-        type: "build_recommendation"
+        text: ragResult.text,
+        products: ragResult.products || [],
+        buildPayload: ragResult.buildPayload || null,
+        type: ragResult.type,
+        userContextSummary: (ragResult as any).userContextSummary || null
       }
     });
   } catch (error) {
@@ -410,4 +574,5 @@ export const handleAiConsultation = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, message: "AI Consultation failed" });
   }
 };
+
 

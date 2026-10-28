@@ -60,6 +60,7 @@ export function AdminPaymentApprovalPage() {
   const [successMessage, setSuccessMessage] = useState("");
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [zoomUrl, setZoomUrl] = useState(null);
 
   useEffect(() => {
     loadPendingPayments();
@@ -242,15 +243,31 @@ export function AdminPaymentApprovalPage() {
               </div>
             </div>
 
-            {selectedOrder.payment_proof || selectedOrder.paymentProof ? (
+            {selectedOrder.payment_proof || selectedOrder.paymentProof || selectedOrder.proof_image_url || selectedOrder.proofImageUrl ? (
               <div style={{ marginBottom: 24 }}>
-                <h3 style={{ margin: "0 0 12", fontSize: 16, fontWeight: 700 }}>Bằng chứng thanh toán</h3>
-                <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Bằng chứng thanh toán</h3>
+                  <button
+                    type="button"
+                    onClick={() => setZoomUrl(resolveUploadUrl(selectedOrder.payment_proof || selectedOrder.paymentProof || selectedOrder.proof_image_url || selectedOrder.proofImageUrl))}
+                    style={{ fontSize: 12, fontWeight: 700, color: "#2563eb", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}
+                  >
+                    🔍 Phóng to toàn màn hình
+                  </button>
+                </div>
+                <div
+                  style={{ border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden", cursor: "zoom-in", position: "relative" }}
+                  onClick={() => setZoomUrl(resolveUploadUrl(selectedOrder.payment_proof || selectedOrder.paymentProof || selectedOrder.proof_image_url || selectedOrder.proofImageUrl))}
+                  title="Nhấp để phóng to toàn màn hình"
+                >
                   <img
-                    src={resolveUploadUrl(selectedOrder.payment_proof || selectedOrder.paymentProof)}
+                    src={resolveUploadUrl(selectedOrder.payment_proof || selectedOrder.paymentProof || selectedOrder.proof_image_url || selectedOrder.proofImageUrl)}
                     alt="Bằng chứng thanh toán"
-                    style={{ width: "100%", height: "auto" }}
+                    style={{ width: "100%", maxHeight: "360px", objectFit: "contain", display: "block", background: "#f8fafc" }}
                   />
+                  <div style={{ position: "absolute", bottom: 8, right: 8, background: "rgba(15,23,42,0.8)", color: "#fff", padding: "4px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
+                    🔍 Nhấp để phóng to
+                  </div>
                 </div>
               </div>
             ) : (
@@ -300,6 +317,65 @@ export function AdminPaymentApprovalPage() {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Fullscreen Zoom Preview Modal */}
+      {zoomUrl && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(15, 23, 42, 0.85)",
+            backdropFilter: "blur(8px)",
+            display: "grid",
+            placeItems: "center",
+            zIndex: 10000,
+            padding: 24,
+            cursor: "zoom-out"
+          }}
+          onClick={() => setZoomUrl(null)}
+        >
+          <div style={{ position: "relative", maxWidth: "90vw", maxHeight: "90vh" }} onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setZoomUrl(null)}
+              style={{
+                position: "absolute",
+                top: -16,
+                right: -16,
+                background: "#ef4444",
+                color: "#fff",
+                border: "none",
+                borderRadius: "50%",
+                width: 36,
+                height: 36,
+                fontSize: 20,
+                fontWeight: 900,
+                cursor: "pointer",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+                display: "grid",
+                placeItems: "center"
+              }}
+              title="Đóng"
+            >
+              ×
+            </button>
+            <img
+              src={zoomUrl}
+              alt="Biên lai phóng to"
+              style={{
+                maxWidth: "100%",
+                maxHeight: "85vh",
+                borderRadius: 16,
+                boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
+                objectFit: "contain",
+                background: "#fff"
+              }}
+            />
           </div>
         </div>
       )}

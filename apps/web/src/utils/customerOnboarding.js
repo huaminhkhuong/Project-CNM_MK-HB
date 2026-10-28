@@ -1,5 +1,6 @@
 import { createBuild, addBuildItem, saveBuild } from "../services/pc-builder.service";
 import { getGuestPcBuildStore, setGuestPcBuildStore } from "./guestStorage";
+import { migrateGuestCartToAccount } from "../services/cart.service";
 
 /**
  * Đồng bộ cấu hình PC khách (localStorage) lên tài khoản sau đăng nhập/đăng ký.
@@ -58,8 +59,13 @@ export async function migrateGuestBuildsToAccount() {
 }
 
 export async function runCustomerOnboarding() {
-  const buildResult = await migrateGuestBuildsToAccount();
+  const [buildResult, cartResult] = await Promise.allSettled([
+    migrateGuestBuildsToAccount(),
+    migrateGuestCartToAccount()
+  ]);
+
   return {
-    buildsMigrated: buildResult.migrated
+    buildsMigrated: buildResult.status === "fulfilled" ? buildResult.value?.migrated || 0 : 0,
+    cartItemsMerged: cartResult.status === "fulfilled" ? cartResult.value?.merged || 0 : 0
   };
 }

@@ -3,7 +3,7 @@ import { createApp } from "./app";
 import { env } from "./config/env";
 import { initSocketIO } from "./socket/socket.service";
 import { verifyEmailConnection } from "./services/email.service";
-import pcBuilderService from "./modules/pc-builder/pc-builder.service";
+import { startPaymentTimeoutWorker, stopPaymentTimeoutWorker } from "./workers/payment-timeout.worker";
 
 const app = createApp();
 const httpServer = createServer(app);
@@ -21,12 +21,18 @@ httpServer.listen(env.port, () => {
     console.log(`[AI Advisor] Notice: GEMINI_API_KEY & OPENAI_API_KEY are empty. AI Advisor will fallback to PC Mall Rule-Based Knowledge Engine.`);
   }
 
-  // Ensure DB columns once on startup (non-blocking)
-  pcBuilderService.ensurePcBuildColumns().catch((err) => {
-    console.warn("[PC Builder] Startup column check notice:", err.message);
-  });
-
   // Verify email config on startup (non-blocking)
   verifyEmailConnection();
+
+  // Start Payment Timeout Worker to sweep expired pending gateway orders and release inventory
+  startPaymentTimeoutWorker();
+});
+
+process.on("SIGTERM", () => {
+  stopPaymentTimeoutWorker();
+});
+
+process.on("SIGINT", () => {
+  stopPaymentTimeoutWorker();
 });
 

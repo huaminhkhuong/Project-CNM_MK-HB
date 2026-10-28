@@ -207,6 +207,80 @@ async function checkBuildCompatibility(userId, buildId) {
         }
       }
 
+      // 1.1 Kiểm tra Chiều dài GPU vs Khoảng trống Case (GPU 4 ↔ Case 7) [COMP-004]
+      if ((catA === 4 && catB === 7) || (catA === 7 && catB === 4)) {
+        const gpuItem = catA === 4 ? itemA : itemB;
+        const caseItem = catA === 7 ? itemA : itemB;
+        const gpuLengthVal = gpuItem.attributes?.gpu_length?.attributeValue || gpuItem.attributes?.length?.attributeValue;
+        const caseGpuClearanceVal = caseItem.attributes?.case_gpu_clearance?.attributeValue || caseItem.attributes?.gpu_clearance?.attributeValue;
+
+        const gpuLen = parseFloat(String(gpuLengthVal || "").match(/\d+/)?.[0] || 0);
+        const caseClearance = parseFloat(String(caseGpuClearanceVal || "").match(/\d+/)?.[0] || 0);
+
+        if (gpuLen > 0 && caseClearance > 0 && gpuLen > caseClearance) {
+          const gpuClearanceRule = {
+            ruleId: 1004,
+            name: "Card màn hình quá dài so với Vỏ Case",
+            description: `Card màn hình dài ${gpuLen}mm vượt quá khoảng không gian tối đa ${caseClearance}mm của thùng máy.`
+          };
+          issues.push(buildIssue(
+            gpuClearanceRule,
+            gpuItem,
+            caseItem,
+            gpuItem.attributes?.gpu_length || { attributeKey: "gpu_length", attributeValue: `${gpuLen}mm` },
+            caseItem.attributes?.case_gpu_clearance || { attributeKey: "case_gpu_clearance", attributeValue: `${caseClearance}mm` }
+          ));
+        }
+      }
+
+      // 1.2 Kiểm tra Chiều cao Tản khí & Kích thước Radiator AIO vs Vỏ Case (Cooling 8 ↔ Case 7) [COMP-006]
+      if ((catA === 8 && catB === 7) || (catA === 7 && catB === 8)) {
+        const coolingItem = catA === 8 ? itemA : itemB;
+        const caseItem = catA === 7 ? itemA : itemB;
+
+        // Tản nhiệt khí: cooler_height vs case_cooler_clearance
+        const coolerHeightVal = coolingItem.attributes?.cooler_height?.attributeValue || coolingItem.attributes?.height?.attributeValue;
+        const caseCoolerClearanceVal = caseItem.attributes?.case_cooler_clearance?.attributeValue || caseItem.attributes?.cooler_clearance?.attributeValue;
+        const coolerH = parseFloat(String(coolerHeightVal || "").match(/\d+/)?.[0] || 0);
+        const caseCoolerClearance = parseFloat(String(caseCoolerClearanceVal || "").match(/\d+/)?.[0] || 0);
+
+        if (coolerH > 0 && caseCoolerClearance > 0 && coolerH > caseCoolerClearance) {
+          const coolerHeightRule = {
+            ruleId: 1006,
+            name: "Tản nhiệt khí quá cao so với bề rộng Vỏ Case",
+            description: `Tản nhiệt CPU cao ${coolerH}mm vượt quá giới hạn chiều cao ${caseCoolerClearance}mm của thùng máy (sẽ cấn kính hông).`
+          };
+          issues.push(buildIssue(
+            coolerHeightRule,
+            coolingItem,
+            caseItem,
+            coolingItem.attributes?.cooler_height || { attributeKey: "cooler_height", attributeValue: `${coolerH}mm` },
+            caseItem.attributes?.case_cooler_clearance || { attributeKey: "case_cooler_clearance", attributeValue: `${caseCoolerClearance}mm` }
+          ));
+        }
+
+        // Tản nước AIO: radiator_size vs case_radiator_support
+        const radSizeVal = coolingItem.attributes?.radiator_size?.attributeValue;
+        const caseRadVal = caseItem.attributes?.case_radiator_support?.attributeValue;
+        const radSize = parseFloat(String(radSizeVal || "").match(/\d{3}/)?.[0] || 0);
+        const caseRad = parseFloat(String(caseRadVal || "").match(/\d{3}/)?.[0] || 0);
+
+        if (radSize > 0 && caseRad > 0 && radSize > caseRad) {
+          const radRule = {
+            ruleId: 1007,
+            name: "Radiator tản nước AIO quá lớn so với Vỏ Case",
+            description: `Két nước Radiator ${radSize}mm không lắp vừa thùng máy chỉ hỗ trợ tối đa ${caseRad}mm.`
+          };
+          issues.push(buildIssue(
+            radRule,
+            coolingItem,
+            caseItem,
+            coolingItem.attributes?.radiator_size || { attributeKey: "radiator_size", attributeValue: `${radSize}mm` },
+            caseItem.attributes?.case_radiator_support || { attributeKey: "case_radiator_support", attributeValue: `${caseRad}mm` }
+          ));
+        }
+      }
+
       // 2. Kiểm tra thông qua bộ rules trong DB
       const attrsA = Object.values(itemA.attributes);
       const attrsB = Object.values(itemB.attributes);
@@ -234,6 +308,52 @@ async function checkBuildCompatibility(userId, buildId) {
                 }
                 issues.push(buildIssue(rule, itemA, itemB, attrA, attrB));
               }
+            }
+          }
+        }
+      }
+
+      // 3. Kiểm tra các rules dạng Key & Operator (do Admin / Tech cấu hình qua giao diện)
+      for (const rule of rules) {
+        if (!rule.sourceAttributeKey || !rule.targetAttributeKey) continue;
+        const matchesDirect = (!rule.sourceCategoryId || rule.sourceCategoryId === catA) && (!rule.targetCategoryId || rule.targetCategoryId === catB);
+        const matchesReverse = (!rule.sourceCategoryId || rule.sourceCategoryId === catB) && (!rule.targetCategoryId || rule.targetCategoryId === catA);
+        if (!matchesDirect && !matchesReverse) continue;
+
+        const srcItem = matchesDirect ? itemA : itemB;
+        const tgtItem = matchesDirect ? itemB : itemA;
+        const srcAttr = srcItem.attributes[rule.sourceAttributeKey];
+        const tgtAttr = tgtItem.attributes[rule.targetAttributeKey];
+
+        if (srcAttr && tgtAttr) {
+          const sVal = String(srcAttr.attributeValue || "").trim().toLowerCase();
+          const tVal = String(tgtAttr.attributeValue || "").trim().toLowerCase();
+          let matched = false;
+
+          if (rule.operator === "EQ" || rule.operator === "=") {
+            matched = sVal === tVal || sVal.includes(tVal) || tVal.includes(sVal);
+          } else if (rule.operator === "NEQ" || rule.operator === "!=" || rule.operator === "<>") {
+            matched = sVal !== tVal && !sVal.includes(tVal) && !tVal.includes(sVal);
+          } else if (rule.operator === "GTE" || rule.operator === ">=") {
+            const sNum = parseFloat(sVal) || 0;
+            const tNum = parseFloat(tVal) || 0;
+            matched = sNum >= tNum;
+          } else if (rule.operator === "LTE" || rule.operator === "<=") {
+            const sNum = parseFloat(sVal) || 0;
+            const tNum = parseFloat(tVal) || 0;
+            matched = sNum <= tNum;
+          } else if (rule.operator === "CONTAINS") {
+            matched = sVal.includes(tVal) || tVal.includes(sVal);
+          } else {
+            matched = sVal === tVal;
+          }
+
+          const isConflict = rule.isCompatible ? !matched : matched;
+          if (isConflict) {
+            const pairKey = `key_rule:${rule.ruleId}:${srcItem.buildItemId}:${tgtItem.buildItemId}`;
+            if (!reportedRulePairs.has(pairKey)) {
+              reportedRulePairs.add(pairKey);
+              issues.push(buildIssue(rule, srcItem, tgtItem, srcAttr, tgtAttr));
             }
           }
         }

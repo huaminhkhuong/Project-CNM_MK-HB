@@ -17,10 +17,6 @@ async function repairLegacyPaidOrders(orderId?: number | string | null) {
   });
 }
 
-export async function ensurePaymentProofColumn() {
-  return true;
-}
-
 async function getPaymentProof(orderId: number | string | null | undefined) {
   if (!orderId) return null;
   const numericId = typeof orderId === "string" ? parseInt(orderId, 10) : Number(orderId);
@@ -149,10 +145,37 @@ export function listOrders() {
   );
 }
 
-export function updateOrderStatus(orderId: string | number, status: string) {
-  return prisma.order.update({
-    where: { id: typeof orderId === "string" ? parseInt(orderId, 10) : orderId },
-    data: { status, updated_at: new Date() }
+export async function updateOrderStatus(orderId: string | number, status: string) {
+  const numericId = typeof orderId === "string" ? parseInt(orderId, 10) : Number(orderId);
+  return prisma.$transaction(async (tx: any) => {
+    if (status === "CANCELED") {
+      const order = await tx.order.findUnique({
+        where: { id: numericId },
+        include: { OrderItem: true }
+      });
+      if (order && order.status !== "CANCELED") {
+        for (const item of order.OrderItem || []) {
+          const variantId = item.product_variant_id;
+          const quantity = Number(item.quantity || 0);
+          if (variantId && quantity > 0) {
+            await tx.productSku.update({
+              where: { id: variantId },
+              data: {
+                stock: { increment: quantity }
+              }
+            });
+          }
+        }
+        await tx.shipment.updateMany({
+          where: { order_id: numericId },
+          data: { status: "CANCELED" }
+        });
+      }
+    }
+    return tx.order.update({
+      where: { id: numericId },
+      data: { status, updated_at: new Date() }
+    });
   });
 }
 

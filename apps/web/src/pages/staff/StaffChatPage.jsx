@@ -159,10 +159,25 @@ export default function StaffChatPage() {
     loadQueue();
   }, [loadQueue]);
 
-  // 🔌 Socket.io: Đăng ký nhận thông báo real-time cho nhân viên bán hàng
+  // 🔌 Socket.io: Đăng ký nhận thông báo real-time cho nhân viên bán hàng & tham gia routing pool
   useEffect(() => {
-    // Tham gia room hàng đợi nhân viên
-    joinRoom("join_staff_queue");
+    // Tham gia room hàng đợi nhân viên kèm thông tin danh tính nhân viên
+    joinRoom("join_staff_queue", {
+      staffId: authState?.user?.id,
+      staffName: staffName,
+      role: authState?.user?.role || "SALES_STAFF"
+    });
+
+    // Khi session được phân phối tự động trực tiếp cho nhân viên này (Round-robin / Least-busy)
+    on("staff:session_assigned", (assignedSession) => {
+      setSessions((prev) => {
+        const filtered = prev.filter((s) => s.sessionId !== assignedSession.sessionId && s.id !== assignedSession.id);
+        return [assignedSession, ...filtered];
+      });
+      // Nếu chưa chọn phiên nào hoặc đang rảnh, tự động mở phiên được giao
+      setActiveSession((current) => current ? current : assignedSession);
+      setSuccessMessage(`Bạn vừa được hệ thống tự động phân phối phiên tư vấn của ${assignedSession.customerName || "khách hàng"}!`);
+    });
 
     // Khi có session mới từ khách hàng
     on("queue:new_session", (newSession) => {
@@ -182,7 +197,11 @@ export default function StaffChatPage() {
         )
       );
     });
-  }, [joinRoom, on]);
+
+    return () => {
+      leaveRoom("leave_staff_queue");
+    };
+  }, [joinRoom, leaveRoom, on, authState?.user?.id, authState?.user?.role, staffName]);
 
   // 🔌 Socket.io: Lắng nghe tin nhắn real-time trong session đang xem
   useEffect(() => {
@@ -739,7 +758,52 @@ export default function StaffChatPage() {
           background: #eff6ff;
           color: #334155;
           font-weight: 600;
+          white-space: pre-wrap;
           animation: salesChatFadeUp 180ms ease;
+        }
+        .sales-chat-briefing-card {
+          justify-self: center;
+          max-width: 95%;
+          width: 100%;
+          border-radius: 18px;
+          background: #ffffff;
+          border: 1.5px solid #93c5fd;
+          box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.12), 0 8px 10px -6px rgba(59, 130, 246, 0.08);
+          overflow: hidden;
+          margin-bottom: 8px;
+          animation: salesChatFadeUp 180ms ease;
+        }
+        .sales-chat-briefing-header {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 12px 18px;
+          background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+          color: #ffffff;
+        }
+        .sales-chat-briefing-badge {
+          display: inline-block;
+          padding: 4px 10px;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.22);
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: 0.5px;
+          text-transform: uppercase;
+        }
+        .sales-chat-briefing-title {
+          font-size: 13px;
+          font-weight: 800;
+          letter-spacing: 0.3px;
+        }
+        .sales-chat-briefing-content {
+          padding: 16px 20px;
+          font-size: 13.5px;
+          line-height: 1.65;
+          color: #1e293b;
+          white-space: pre-wrap;
+          font-family: inherit;
+          background: #f8fafc;
         }
         .sales-chat-row {
           display: flex;
@@ -1132,6 +1196,21 @@ export default function StaffChatPage() {
               <div ref={messagesContainerRef} className="sales-chat-messages">
                 {(activeSession.messages || []).map((m) => {
                   if (m.sender === "system") {
+                    const isBriefing = m.buildData?.isHandoffSummary || String(m.text || "").includes("TÓM TẮT NGỮ CẢNH TƯ VẤN (AI ➔ NHÂN VIÊN BÁN HÀNG)");
+                    if (isBriefing) {
+                      return (
+                        <div key={m.id} className="sales-chat-briefing-card">
+                          <div className="sales-chat-briefing-header">
+                            <span className="sales-chat-briefing-badge">🤖 AI ➔ HUMAN HANDOFF</span>
+                            <span className="sales-chat-briefing-title">HỒ SƠ TÓM TẮT NGỮ CẢNH TƯ VẤN TỪ AI CHATBOT</span>
+                          </div>
+                          <div className="sales-chat-briefing-content">
+                            {m.text}
+                          </div>
+                        </div>
+                      );
+                    }
+
                     return (
                       <div key={m.id} className="sales-chat-system">
                         {m.text}

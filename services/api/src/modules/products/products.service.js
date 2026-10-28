@@ -19,7 +19,7 @@ function normalizeListParams(params = {}) {
     maxPrice: params.max_price !== undefined && params.max_price !== "" ? Number(String(params.max_price).replace(/[^0-9]/g, "")) : null,
     keyword: String(params.keyword || params.search || "").trim() || null,
     attributeValueIds: normalizeAttributeValueIds(params.attribute_value_ids || params.attributeValueIds || []),
-    sort: String(params.sort || "newest").trim().toLowerCase(),
+    sort: String(params.sort || "featured").trim().toLowerCase(),
     page: toPositiveNumber(params.page, 1),
     limit: Math.min(toPositiveNumber(params.limit, 20), 200)
   };
@@ -38,8 +38,12 @@ function resolveSortClause(sort, config) {
     case "name_asc":
       return `p.${config.products.name} ASC`;
     case "newest":
-    default:
       return `p.${config.products.id} DESC`;
+    case "featured":
+    case "popular":
+    default:
+      // Featured: Diversify across core components by prioritizing canonical curated items (1-17) first
+      return `CASE WHEN p.${config.products.id} <= 17 THEN 0 ELSE 1 END ASC, p.${config.products.id} ASC`;
   }
 }
 
@@ -88,6 +92,7 @@ async function getProductSchema() {
       price: pickColumn(productColumns, ["price"], null),
       categoryId: pickColumn(productColumns, ["category_id"], null),
       brandId: pickColumn(productColumns, ["brand_id"], null),
+      warrantyMonths: pickColumn(productColumns, ["warranty_months"], null),
       slug: pickColumn(productColumns, ["slug"], null),
       createdAt: pickColumn(productColumns, ["created_at"], null)
     },
@@ -104,6 +109,7 @@ async function getProductSchema() {
       stock: pickColumn(skuColumns, ["stock"], null),
       sku: pickColumn(skuColumns, ["sku"], null),
       imageUrl: pickColumn(skuColumns, ["image_url"], null),
+      warrantyMonths: pickColumn(skuColumns, ["warranty_months"], null),
       status: pickColumn(skuColumns, ["status"], null)
     },
     skuAttributes: skuAttributeColumns.length === 0 ? null : {
@@ -139,7 +145,7 @@ async function getProductSchema() {
   return config;
 }
 
-function createListConditions(filters, config) {
+async function createListConditions(filters, config) {
   const clauses = [];
   const params = [];
 
@@ -164,26 +170,71 @@ function createListConditions(filters, config) {
   }
 
   if (filters.keyword) {
-    clauses.push(`(p.${config.products.name} LIKE CONCAT('%', ?, '%')${config.products.slug ? ` OR p.${config.products.slug} LIKE CONCAT('%', ?, '%')` : ""} OR c.${config.categories.name || "name"} LIKE CONCAT('%', ?, '%'))`);
+    const searchConditions = [
+      `p.${config.products.name} LIKE CONCAT('%', ?, '%')`
+    ];
     params.push(filters.keyword);
+
     if (config.products.slug) {
+      searchConditions.push(`p.${config.products.slug} LIKE CONCAT('%', ?, '%')`);
       params.push(filters.keyword);
     }
-    params.push(filters.keyword);
+
+    if (config.products.description) {
+      searchConditions.push(`p.${config.products.description} LIKE CONCAT('%', ?, '%')`);
+      params.push(filters.keyword);
+    }
+
+    if (config.categories) {
+      searchConditions.push(`c.${config.categories.name || "name"} LIKE CONCAT('%', ?, '%')`);
+      params.push(filters.keyword);
+    }
+
+    if (config.brands) {
+      searchConditions.push(`b.${config.brands.name || "name"} LIKE CONCAT('%', ?, '%')`);
+      params.push(filters.keyword);
+    }
+
+    if (config.skus && config.skus.sku) {
+      searchConditions.push(`s.${config.skus.sku} LIKE CONCAT('%', ?, '%')`);
+      params.push(filters.keyword);
+    }
+
+    clauses.push(`(${searchConditions.join(" OR ")})`);
   }
 
-  if (filters.attributeValueIds.length > 0 && config.skus && config.skuAttributes) {
-    const placeholders = filters.attributeValueIds.map(() => "?").join(", ");
-    clauses.push(`EXISTS (
-      SELECT 1
-      FROM ${config.skus.table} fs
-      INNER JOIN ${config.skuAttributes.table} fsa ON fsa.${config.skuAttributes.skuId} = fs.${config.skus.id}
-      WHERE fs.${config.skus.productId} = p.${config.products.id}
-        AND fsa.${config.skuAttributes.attributeValueId} IN (${placeholders})
-      GROUP BY fs.${config.skus.id}
-      HAVING COUNT(DISTINCT fsa.${config.skuAttributes.attributeValueId}) = ${filters.attributeValueIds.length}
-    )`);
-    params.push(...filters.attributeValueIds);
+  if (filters.attributeValueIds && filters.attributeValueIds.length > 0 && config.skus && config.skuAttributes && config.attributeValues) {
+    // 1. Group selected value IDs by their parent attribute_id
+    const valPlaceholders = filters.attributeValueIds.map(() => "?").join(", ");
+    const valRows = await query(
+      `SELECT ${config.attributeValues.id} AS id, ${config.attributeValues.attributeId} AS attribute_id 
+       FROM ${config.attributeValues.table} 
+       WHERE ${config.attributeValues.id} IN (${valPlaceholders})`,
+      filters.attributeValueIds
+    );
+
+    const attrGroupMap = new Map();
+    for (const r of valRows) {
+      if (!attrGroupMap.has(r.attribute_id)) {
+        attrGroupMap.set(r.attribute_id, []);
+      }
+      attrGroupMap.get(r.attribute_id).push(r.id);
+    }
+
+    // 2. Faceted Search Rule:
+    // OR within the same attribute group (e.g. DDR4 OR DDR5)
+    // AND across different attribute groups (e.g. (DDR4 OR DDR5) AND (3200MHz OR 3600MHz))
+    for (const [attrId, valueIds] of attrGroupMap.entries()) {
+      const placeholders = valueIds.map(() => "?").join(", ");
+      clauses.push(`EXISTS (
+        SELECT 1
+        FROM ${config.skus.table} fs
+        INNER JOIN ${config.skuAttributes.table} fsa ON fsa.${config.skuAttributes.skuId} = fs.${config.skus.id}
+        WHERE fs.${config.skus.productId} = p.${config.products.id}
+          AND fsa.${config.skuAttributes.attributeValueId} IN (${placeholders})
+      )`);
+      params.push(...valueIds);
+    }
   }
 
   return {
@@ -361,6 +412,7 @@ function mapVariantRow(row) {
     price: Number(row.price || 0),
     image_url: row.image_url,
     stock_quantity: Number(row.stock_quantity || 0),
+    warranty_months: row.warranty_months !== null && row.warranty_months !== undefined ? Number(row.warranty_months) : null,
     status: row.status || "ACTIVE",
     specs: []
   };
@@ -368,57 +420,57 @@ function mapVariantRow(row) {
 
 const DEFAULT_MOCK_CATALOG_ITEMS = [
   // CPU (category_id: 1)
-  { product_id: 101, category_id: 1, category_name: "CPU", product_name: "Intel Core i5-13400F (10 nhân 16 luồng)", price: 3990000, stock_quantity: 20, image_url: "/assets/products/i5.png" },
-  { product_id: 102, category_id: 1, category_name: "CPU", product_name: "AMD Ryzen 5 7600 (6 nhân 12 luồng)", price: 5290000, stock_quantity: 15, image_url: "https://images.unsplash.com/photo-1555680202-c86f0e12f086?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 103, category_id: 1, category_name: "CPU", product_name: "Intel Core i7-13700K (16 nhân 24 luồng)", price: 9490000, stock_quantity: 12, image_url: "/assets/products/i5.png" },
-  { product_id: 104, category_id: 1, category_name: "CPU", product_name: "AMD Ryzen 7 7800X3D (8 nhân 16 luồng 3D V-Cache)", price: 10990000, stock_quantity: 10, image_url: "https://images.unsplash.com/photo-1555680202-c86f0e12f086?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 105, category_id: 1, category_name: "CPU", product_name: "Intel Core i9-13900K (24 nhân 32 luồng)", price: 14990000, stock_quantity: 8, image_url: "/assets/products/i5.png" },
-  { product_id: 106, category_id: 1, category_name: "CPU", product_name: "AMD Ryzen 5 5600X (6 nhân 12 luồng)", price: 3490000, stock_quantity: 25, image_url: "https://images.unsplash.com/photo-1555680202-c86f0e12f086?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 101, category_id: 1, category_name: "CPU", product_name: "Intel Core i5-13400F (10 nhân 16 luồng)", price: 3990000, warranty_months: 36, stock_quantity: 20, image_url: "/assets/products/i5.png" },
+  { product_id: 102, category_id: 1, category_name: "CPU", product_name: "AMD Ryzen 5 7600 (6 nhân 12 luồng)", price: 5290000, warranty_months: 36, stock_quantity: 15, image_url: "https://images.unsplash.com/photo-1555680202-c86f0e12f086?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 103, category_id: 1, category_name: "CPU", product_name: "Intel Core i7-13700K (16 nhân 24 luồng)", price: 9490000, warranty_months: 36, stock_quantity: 12, image_url: "/assets/products/i5.png" },
+  { product_id: 104, category_id: 1, category_name: "CPU", product_name: "AMD Ryzen 7 7800X3D (8 nhân 16 luồng 3D V-Cache)", price: 10990000, warranty_months: 36, stock_quantity: 10, image_url: "https://images.unsplash.com/photo-1555680202-c86f0e12f086?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 105, category_id: 1, category_name: "CPU", product_name: "Intel Core i9-13900K (24 nhân 32 luồng)", price: 14990000, warranty_months: 36, stock_quantity: 8, image_url: "/assets/products/i5.png" },
+  { product_id: 106, category_id: 1, category_name: "CPU", product_name: "AMD Ryzen 5 5600X (6 nhân 12 luồng)", price: 3490000, warranty_months: 36, stock_quantity: 25, image_url: "https://images.unsplash.com/photo-1555680202-c86f0e12f086?w=600&auto=format&fit=crop&q=80" },
 
   // MAINBOARD (category_id: 2)
-  { product_id: 201, category_id: 2, category_name: "Mainboard", product_name: "ASUS Prime B760M-A WIFI DDR5", price: 3690000, stock_quantity: 18, image_url: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 202, category_id: 2, category_name: "Mainboard", product_name: "MSI B650 Gaming Plus WIFI AM5", price: 4490000, stock_quantity: 14, image_url: "https://images.unsplash.com/photo-1563770660941-20978e870e26?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 203, category_id: 2, category_name: "Mainboard", product_name: "Gigabyte B550M AORUS ELITE DDR4", price: 2690000, stock_quantity: 22, image_url: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 204, category_id: 2, category_name: "Mainboard", product_name: "ASRock Z790 Pro RS DDR5", price: 5890000, stock_quantity: 9, image_url: "https://images.unsplash.com/photo-1563770660941-20978e870e26?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 205, category_id: 2, category_name: "Mainboard", product_name: "MSI MAG B650M MORTAR WIFI AM5", price: 4990000, stock_quantity: 11, image_url: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 201, category_id: 2, category_name: "Mainboard", product_name: "ASUS Prime B760M-A WIFI DDR5", price: 3690000, warranty_months: 36, stock_quantity: 18, image_url: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 202, category_id: 2, category_name: "Mainboard", product_name: "MSI B650 Gaming Plus WIFI AM5", price: 4490000, warranty_months: 36, stock_quantity: 14, image_url: "https://images.unsplash.com/photo-1563770660941-20978e870e26?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 203, category_id: 2, category_name: "Mainboard", product_name: "Gigabyte B550M AORUS ELITE DDR4", price: 2690000, warranty_months: 36, stock_quantity: 22, image_url: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 204, category_id: 2, category_name: "Mainboard", product_name: "ASRock Z790 Pro RS DDR5", price: 5890000, warranty_months: 36, stock_quantity: 9, image_url: "https://images.unsplash.com/photo-1563770660941-20978e870e26?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 205, category_id: 2, category_name: "Mainboard", product_name: "MSI MAG B650M MORTAR WIFI AM5", price: 4990000, warranty_months: 36, stock_quantity: 11, image_url: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&auto=format&fit=crop&q=80" },
 
   // RAM (category_id: 3)
-  { product_id: 301, category_id: 3, category_name: "RAM", product_name: "Kingston FURY Beast 16GB (2x8GB) DDR4 3200MHz", price: 1050000, stock_quantity: 30, image_url: "https://images.unsplash.com/photo-1562976540-1502c2145186?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 302, category_id: 3, category_name: "RAM", product_name: "Corsair Vengeance RGB 32GB (2x16GB) DDR5 6000MHz", price: 3190000, stock_quantity: 16, image_url: "https://images.unsplash.com/photo-1541029071515-84cc54f84dc5?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 303, category_id: 3, category_name: "RAM", product_name: "G.SKILL Trident Z5 RGB 32GB (2x16GB) DDR5 6400MHz", price: 3790000, stock_quantity: 12, image_url: "https://images.unsplash.com/photo-1562976540-1502c2145186?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 304, category_id: 3, category_name: "RAM", product_name: "Kingston FURY Beast 32GB (2x16GB) DDR4 3600MHz", price: 1990000, stock_quantity: 20, image_url: "https://images.unsplash.com/photo-1541029071515-84cc54f84dc5?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 301, category_id: 3, category_name: "RAM", product_name: "Kingston FURY Beast 16GB (2x8GB) DDR4 3200MHz", price: 1050000, warranty_months: 36, stock_quantity: 30, image_url: "https://images.unsplash.com/photo-1562976540-1502c2145186?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 302, category_id: 3, category_name: "RAM", product_name: "Corsair Vengeance RGB 32GB (2x16GB) DDR5 6000MHz", price: 3190000, warranty_months: 36, stock_quantity: 16, image_url: "https://images.unsplash.com/photo-1541029071515-84cc54f84dc5?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 303, category_id: 3, category_name: "RAM", product_name: "G.SKILL Trident Z5 RGB 32GB (2x16GB) DDR5 6400MHz", price: 3790000, warranty_months: 36, stock_quantity: 12, image_url: "https://images.unsplash.com/photo-1562976540-1502c2145186?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 304, category_id: 3, category_name: "RAM", product_name: "Kingston FURY Beast 32GB (2x16GB) DDR4 3600MHz", price: 1990000, warranty_months: 36, stock_quantity: 20, image_url: "https://images.unsplash.com/photo-1541029071515-84cc54f84dc5?w=600&auto=format&fit=crop&q=80" },
 
   // GPU (category_id: 4)
-  { product_id: 401, category_id: 4, category_name: "VGA", product_name: "NVIDIA GeForce RTX 4060 8GB GDDR6", price: 7890000, stock_quantity: 15, image_url: "/assets/products/rtx4060.png" },
-  { product_id: 402, category_id: 4, category_name: "VGA", product_name: "NVIDIA GeForce RTX 4070 12GB GDDR6X", price: 15490000, stock_quantity: 10, image_url: "https://images.unsplash.com/photo-1591488320449-011701bb6704?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 403, category_id: 4, category_name: "VGA", product_name: "NVIDIA GeForce RTX 4070 Ti Super 16GB", price: 22990000, stock_quantity: 8, image_url: "/assets/products/rtx4060.png" },
-  { product_id: 404, category_id: 4, category_name: "VGA", product_name: "NVIDIA GeForce RTX 4080 Super 16GB", price: 28990000, stock_quantity: 5, image_url: "https://images.unsplash.com/photo-1591488320449-011701bb6704?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 405, category_id: 4, category_name: "VGA", product_name: "AMD Radeon RX 7600 8GB GDDR6", price: 6890000, stock_quantity: 18, image_url: "/assets/products/rtx4060.png" },
-  { product_id: 406, category_id: 4, category_name: "VGA", product_name: "NVIDIA GeForce RTX 3060 12GB GDDR6", price: 6490000, stock_quantity: 22, image_url: "https://images.unsplash.com/photo-1591488320449-011701bb6704?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 401, category_id: 4, category_name: "VGA", product_name: "NVIDIA GeForce RTX 4060 8GB GDDR6", price: 7890000, warranty_months: 36, stock_quantity: 15, image_url: "/assets/products/rtx4060.png" },
+  { product_id: 402, category_id: 4, category_name: "VGA", product_name: "NVIDIA GeForce RTX 4070 12GB GDDR6X", price: 15490000, warranty_months: 36, stock_quantity: 10, image_url: "https://images.unsplash.com/photo-1591488320449-011701bb6704?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 403, category_id: 4, category_name: "VGA", product_name: "NVIDIA GeForce RTX 4070 Ti Super 16GB", price: 22990000, warranty_months: 36, stock_quantity: 8, image_url: "/assets/products/rtx4060.png" },
+  { product_id: 404, category_id: 4, category_name: "VGA", product_name: "NVIDIA GeForce RTX 4080 Super 16GB", price: 28990000, warranty_months: 36, stock_quantity: 5, image_url: "https://images.unsplash.com/photo-1591488320449-011701bb6704?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 405, category_id: 4, category_name: "VGA", product_name: "AMD Radeon RX 7600 8GB GDDR6", price: 6890000, warranty_months: 36, stock_quantity: 18, image_url: "/assets/products/rtx4060.png" },
+  { product_id: 406, category_id: 4, category_name: "VGA", product_name: "NVIDIA GeForce RTX 3060 12GB GDDR6", price: 6490000, warranty_months: 36, stock_quantity: 22, image_url: "https://images.unsplash.com/photo-1591488320449-011701bb6704?w=600&auto=format&fit=crop&q=80" },
 
-  // STORAGE (category_id: 5)
-  { product_id: 501, category_id: 5, category_name: "SSD", product_name: "Samsung 980 PRO 1TB PCIe 4.0 NVMe M.2 SSD", price: 2390000, stock_quantity: 25, image_url: "/assets/products/ssd-samsung-980-pro-2tb.svg" },
-  { product_id: 502, category_id: 5, category_name: "SSD", product_name: "Kingston NV2 1TB PCIe 4.0 NVMe M.2 SSD", price: 1390000, stock_quantity: 35, image_url: "https://images.unsplash.com/photo-1544652478-6653e09f18a2?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 503, category_id: 5, category_name: "SSD", product_name: "Crucial P3 Plus 2TB PCIe 4.0 NVMe M.2 SSD", price: 2990000, stock_quantity: 18, image_url: "/assets/products/ssd-samsung-980-pro-2tb.svg" },
-  { product_id: 504, category_id: 5, category_name: "SSD", product_name: "WD Black SN850X 1TB NVMe SSD", price: 2690000, stock_quantity: 14, image_url: "https://images.unsplash.com/photo-1544652478-6653e09f18a2?w=600&auto=format&fit=crop&q=80" },
+  // STORAGE (category_id: 5 - Premium SSD Samsung PRO / SN850X: 60 months)
+  { product_id: 501, category_id: 5, category_name: "SSD", product_name: "Samsung 980 PRO 1TB PCIe 4.0 NVMe M.2 SSD", price: 2390000, warranty_months: 60, stock_quantity: 25, image_url: "/assets/products/ssd-samsung-980-pro-2tb.svg" },
+  { product_id: 502, category_id: 5, category_name: "SSD", product_name: "Kingston NV2 1TB PCIe 4.0 NVMe M.2 SSD", price: 1390000, warranty_months: 36, stock_quantity: 35, image_url: "https://images.unsplash.com/photo-1544652478-6653e09f18a2?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 503, category_id: 5, category_name: "SSD", product_name: "Crucial P3 Plus 2TB PCIe 4.0 NVMe M.2 SSD", price: 2990000, warranty_months: 36, stock_quantity: 18, image_url: "/assets/products/ssd-samsung-980-pro-2tb.svg" },
+  { product_id: 504, category_id: 5, category_name: "SSD", product_name: "WD Black SN850X 1TB NVMe SSD", price: 2690000, warranty_months: 60, stock_quantity: 14, image_url: "https://images.unsplash.com/photo-1544652478-6653e09f18a2?w=600&auto=format&fit=crop&q=80" },
 
-  // PSU (category_id: 6)
-  { product_id: 601, category_id: 6, category_name: "PSU", product_name: "Corsair RM750e 750W 80 Plus Gold Modular", price: 2790000, stock_quantity: 16, image_url: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 602, category_id: 6, category_name: "PSU", product_name: "MSI MAG A650BN 650W 80 Plus Bronze", price: 1390000, stock_quantity: 28, image_url: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 603, category_id: 6, category_name: "PSU", product_name: "Corsair RM850x 850W 80 Plus Gold Modular", price: 3490000, stock_quantity: 12, image_url: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 604, category_id: 6, category_name: "PSU", product_name: "Cooler Master MWE 550W 80 Plus Bronze", price: 1150000, stock_quantity: 20, image_url: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600&auto=format&fit=crop&q=80" },
+  // PSU (category_id: 6 - Premium Corsair RM / Seasonic: 120 months)
+  { product_id: 601, category_id: 6, category_name: "PSU", product_name: "Corsair RM750e 750W 80 Plus Gold Modular", price: 2790000, warranty_months: 120, stock_quantity: 16, image_url: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 602, category_id: 6, category_name: "PSU", product_name: "MSI MAG A650BN 650W 80 Plus Bronze", price: 1390000, warranty_months: 36, stock_quantity: 28, image_url: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 603, category_id: 6, category_name: "PSU", product_name: "Corsair RM850x 850W 80 Plus Gold Modular", price: 3490000, warranty_months: 120, stock_quantity: 12, image_url: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 604, category_id: 6, category_name: "PSU", product_name: "Cooler Master MWE 550W 80 Plus Bronze", price: 1150000, warranty_months: 36, stock_quantity: 20, image_url: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600&auto=format&fit=crop&q=80" },
 
-  // CASE (category_id: 7)
-  { product_id: 701, category_id: 7, category_name: "Case", product_name: "NZXT H5 Flow Compact ATX Mid-Tower", price: 2290000, stock_quantity: 12, image_url: "https://images.unsplash.com/photo-1587202372634-32705e3bf49c?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 702, category_id: 7, category_name: "Case", product_name: "DeepCool CC560 WH Mid-Tower White", price: 1190000, stock_quantity: 20, image_url: "https://images.unsplash.com/photo-1587202372634-32705e3bf49c?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 703, category_id: 7, category_name: "Case", product_name: "Montech AIR 100 ARGB Micro-ATX Black", price: 1290000, stock_quantity: 18, image_url: "https://images.unsplash.com/photo-1587202372634-32705e3bf49c?w=600&auto=format&fit=crop&q=80" },
-  { product_id: 704, category_id: 7, category_name: "Case", product_name: "Lian Li O11 Dynamic EVO Glass", price: 3890000, stock_quantity: 7, image_url: "https://images.unsplash.com/photo-1587202372634-32705e3bf49c?w=600&auto=format&fit=crop&q=80" },
+  // CASE (category_id: 7 - 12 months)
+  { product_id: 701, category_id: 7, category_name: "Case", product_name: "NZXT H5 Flow Compact ATX Mid-Tower", price: 2290000, warranty_months: 12, stock_quantity: 12, image_url: "https://images.unsplash.com/photo-1587202372634-32705e3bf49c?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 702, category_id: 7, category_name: "Case", product_name: "DeepCool CC560 WH Mid-Tower White", price: 1190000, warranty_months: 12, stock_quantity: 20, image_url: "https://images.unsplash.com/photo-1587202372634-32705e3bf49c?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 703, category_id: 7, category_name: "Case", product_name: "Montech AIR 100 ARGB Micro-ATX Black", price: 1290000, warranty_months: 12, stock_quantity: 18, image_url: "https://images.unsplash.com/photo-1587202372634-32705e3bf49c?w=600&auto=format&fit=crop&q=80" },
+  { product_id: 704, category_id: 7, category_name: "Case", product_name: "Lian Li O11 Dynamic EVO Glass", price: 3890000, warranty_months: 12, stock_quantity: 7, image_url: "https://images.unsplash.com/photo-1587202372634-32705e3bf49c?w=600&auto=format&fit=crop&q=80" },
 
-  // COOLING (category_id: 8)
-  { product_id: 801, category_id: 8, category_name: "Cooling", product_name: "Thermalright Peerless Assassin 120 SE Air Cooler", price: 950000, stock_quantity: 25, image_url: "/assets/products/cooling-real/peerless-120.png" },
-  { product_id: 802, category_id: 8, category_name: "Cooling", product_name: "DeepCool AK400 CPU Air Cooler", price: 650000, stock_quantity: 30, image_url: "/assets/products/cooling-real/single-tower.png" },
-  { product_id: 803, category_id: 8, category_name: "Cooling", product_name: "DeepCool LS720 360mm AIO Liquid Cooler", price: 2890000, stock_quantity: 11, image_url: "/assets/products/cooling-real/aio-360.png" },
-  { product_id: 804, category_id: 8, category_name: "Cooling", product_name: "Corsair H100i RGB ELITE 240mm Liquid Cooler", price: 2990000, stock_quantity: 9, image_url: "/assets/products/cooling-real/aio-240.png" }
+  // COOLING (category_id: 8 - 24 months)
+  { product_id: 801, category_id: 8, category_name: "Cooling", product_name: "Thermalright Peerless Assassin 120 SE Air Cooler", price: 950000, warranty_months: 24, stock_quantity: 25, image_url: "/assets/products/cooling-real/peerless-120.png" },
+  { product_id: 802, category_id: 8, category_name: "Cooling", product_name: "DeepCool AK400 CPU Air Cooler", price: 650000, warranty_months: 24, stock_quantity: 30, image_url: "/assets/products/cooling-real/single-tower.png" },
+  { product_id: 803, category_id: 8, category_name: "Cooling", product_name: "DeepCool LS720 360mm AIO Liquid Cooler", price: 2890000, warranty_months: 24, stock_quantity: 11, image_url: "/assets/products/cooling-real/aio-360.png" },
+  { product_id: 804, category_id: 8, category_name: "Cooling", product_name: "Corsair H100i RGB ELITE 240mm Liquid Cooler", price: 2990000, warranty_months: 24, stock_quantity: 9, image_url: "/assets/products/cooling-real/aio-240.png" }
 ];
 
 async function getProducts(params = {}) {
@@ -429,7 +481,7 @@ async function getProducts(params = {}) {
     const offset = (filters.page - 1) * filters.limit;
     const safeLimit = Math.max(1, Math.min(Number(filters.limit) || 20, 200));
     const safeOffset = Math.max(0, Number(offset) || 0);
-    const { whereSql, params: whereParams } = createListConditions(filters, config);
+    const { whereSql, params: whereParams } = await createListConditions(filters, config);
     const brandJoin = config.brands && config.products.brandId
       ? `LEFT JOIN ${config.brands.table} b ON b.${config.brands.id} = p.${config.products.brandId}`
       : "";
@@ -446,6 +498,7 @@ async function getProducts(params = {}) {
             p.${config.products.id} AS product_id,
             p.${config.products.name} AS product_name,
             ${config.products.slug ? `p.${config.products.slug}` : `CAST(p.${config.products.id} AS CHAR)`} AS slug,
+            ${config.products.warrantyMonths ? `p.${config.products.warrantyMonths}` : "24"} AS warranty_months,
             c.${config.categories.name} AS category_name,
             ${brandSelect}
             ${priceExpr} AS price,
@@ -518,7 +571,45 @@ async function getProducts(params = {}) {
 
   if (filters.keyword) {
     const kw = String(filters.keyword).toLowerCase();
-    mockList = mockList.filter((item) => item.product_name.toLowerCase().includes(kw));
+    mockList = mockList.filter(
+      (item) =>
+        item.product_name.toLowerCase().includes(kw) ||
+        (item.category_name && item.category_name.toLowerCase().includes(kw)) ||
+        (item.brand_name && item.brand_name.toLowerCase().includes(kw))
+    );
+  }
+
+  // Sort mockList
+  if (filters.sort === "price_asc") {
+    mockList.sort((a, b) => a.price - b.price);
+  } else if (filters.sort === "price_desc") {
+    mockList.sort((a, b) => b.price - a.price);
+  } else if (filters.sort === "name_asc") {
+    mockList.sort((a, b) => a.product_name.localeCompare(b.product_name));
+  } else if (filters.sort === "newest") {
+    mockList.sort((a, b) => b.product_id - a.product_id);
+  } else {
+    // Featured / diversified round-robin across categories
+    const categoriesMap = new Map();
+    for (const item of mockList) {
+      const cat = item.category_name || "General";
+      if (!categoriesMap.has(cat)) categoriesMap.set(cat, []);
+      categoriesMap.get(cat).push(item);
+    }
+    const interleaved = [];
+    let hasMore = true;
+    let round = 0;
+    while (hasMore) {
+      hasMore = false;
+      for (const catItems of categoriesMap.values()) {
+        if (round < catItems.length) {
+          interleaved.push(catItems[round]);
+          hasMore = true;
+        }
+      }
+      round++;
+    }
+    mockList = interleaved;
   }
 
   const page = filters.page || 1;
@@ -546,53 +637,166 @@ async function getProducts(params = {}) {
   };
 }
 
-async function getFilterOptions() {
+async function getFilterOptions(params = {}) {
   const config = await getProductSchema();
+  const rawCatId = params.category_id || params.categoryId;
+  const categoryId = rawCatId && Number(rawCatId) > 0 ? Number(rawCatId) : null;
 
-  const [categories, brands, attributeRows] = await Promise.all([
-    query(`SELECT ${config.categories.id} AS id, ${config.categories.name} AS name FROM ${config.categories.table} ORDER BY ${config.categories.name} ASC`),
-    config.brands
-      ? query(`SELECT ${config.brands.id} AS id, ${config.brands.name} AS name FROM ${config.brands.table} ORDER BY ${config.brands.name} ASC`)
-      : Promise.resolve([]),
-    config.attributes && config.attributeValues
-      ? query(
-          `
-            SELECT
-              a.${config.attributes.id} AS attribute_id,
-              a.${config.attributes.name} AS attribute_name,
-              av.${config.attributeValues.id} AS attribute_value_id,
-              av.${config.attributeValues.value} AS attribute_value
-            FROM ${config.attributes.table} a
-            LEFT JOIN ${config.attributeValues.table} av ON av.${config.attributeValues.attributeId} = a.${config.attributes.id}
-            ORDER BY a.${config.attributes.name} ASC, av.${config.attributeValues.value} ASC
-          `
-        )
-      : Promise.resolve([])
+  // 1. Categories with product counts
+  const categoriesQuery = `
+    SELECT 
+      c.${config.categories.id} AS id, 
+      c.${config.categories.name} AS name,
+      COUNT(DISTINCT p.${config.products.id}) AS product_count
+    FROM ${config.categories.table} c
+    LEFT JOIN ${config.products.table} p ON p.${config.products.categoryId} = c.${config.categories.id}
+    GROUP BY c.${config.categories.id}, c.${config.categories.name}
+    ORDER BY c.${config.categories.name} ASC
+  `;
+
+  // 2. Brands for this category (or global)
+  let brandsQuery = "";
+  let brandsParams = [];
+  if (config.brands) {
+    if (categoryId) {
+      brandsQuery = `
+        SELECT 
+          b.${config.brands.id} AS id, 
+          b.${config.brands.name} AS name,
+          COUNT(DISTINCT p.${config.products.id}) AS product_count
+        FROM ${config.brands.table} b
+        INNER JOIN ${config.products.table} p ON p.${config.products.brandId} = b.${config.brands.id}
+        WHERE p.${config.products.categoryId} = ?
+        GROUP BY b.${config.brands.id}, b.${config.brands.name}
+        HAVING product_count > 0
+        ORDER BY b.${config.brands.name} ASC
+      `;
+      brandsParams = [categoryId];
+    } else {
+      brandsQuery = `
+        SELECT 
+          b.${config.brands.id} AS id, 
+          b.${config.brands.name} AS name,
+          COUNT(DISTINCT p.${config.products.id}) AS product_count
+        FROM ${config.brands.table} b
+        INNER JOIN ${config.products.table} p ON p.${config.products.brandId} = b.${config.brands.id}
+        GROUP BY b.${config.brands.id}, b.${config.brands.name}
+        HAVING product_count > 0
+        ORDER BY b.${config.brands.name} ASC
+      `;
+    }
+  }
+
+  // 3. Faceted Attributes & Values with product_count
+  let attributeRows = [];
+  if (config.attributes && config.attributeValues && config.skus && config.skuAttributes) {
+    const whereCategory = categoryId ? `WHERE p.${config.products.categoryId} = ?` : "";
+    const catParams = categoryId ? [categoryId] : [];
+
+    attributeRows = await query(
+      `
+        SELECT
+          a.${config.attributes.id} AS attribute_id,
+          a.${config.attributes.name} AS attribute_name,
+          av.${config.attributeValues.id} AS attribute_value_id,
+          av.${config.attributeValues.value} AS attribute_value,
+          COUNT(DISTINCT p.${config.products.id}) AS product_count
+        FROM ${config.products.table} p
+        INNER JOIN ${config.skus.table} s ON s.${config.skus.productId} = p.${config.products.id}
+        INNER JOIN ${config.skuAttributes.table} sa ON sa.${config.skuAttributes.skuId} = s.${config.skus.id}
+        INNER JOIN ${config.attributeValues.table} av ON av.${config.attributeValues.id} = sa.${config.skuAttributes.attributeValueId}
+        INNER JOIN ${config.attributes.table} a ON a.${config.attributes.id} = av.${config.attributeValues.attributeId}
+        ${whereCategory}
+        GROUP BY a.${config.attributes.id}, a.${config.attributes.name}, av.${config.attributeValues.id}, av.${config.attributeValues.value}
+        HAVING product_count > 0
+        ORDER BY a.${config.attributes.name} ASC, product_count DESC, av.${config.attributeValues.value} ASC
+      `,
+      catParams
+    );
+  }
+
+  const [categories, brands] = await Promise.all([
+    query(categoriesQuery),
+    brandsQuery ? query(brandsQuery, brandsParams) : Promise.resolve([])
   ]);
+
+  // Clean canonical label helper
+  function getCanonicalFacetName(rawName) {
+    const n = String(rawName || "").trim().toLowerCase();
+    if (n === "vram") return "Dung lượng VRAM";
+    if (n === "gpu_length") return "Chiều dài VGA";
+    if (n === "socket" || n === "socket hỗ trợ" || n === "socket_support") return "Socket hỗ trợ";
+    if (n === "form_factor" || n === "kích thước form factor") return "Kích thước Form Factor";
+    if (n === "ram_type" || n === "chuẩn ram") return "Chuẩn RAM";
+    if (n === "speed" || n === "tốc độ bus") return "Tốc độ Bus";
+    if ((n === "capacity" && categoryId === 3) || n === "dung lượng ram") return "Dung lượng RAM";
+    if ((n === "capacity" && categoryId === 5) || n === "dung lượng ổ cứng") return "Dung lượng ổ cứng";
+    if (n === "storage_type" || n === "loại ổ cứng") return "Loại ổ cứng";
+    if (n === "wattage" || n === "psu_wattage" || n === "công suất nguồn") return "Công suất nguồn";
+    if (n === "efficiency" || n === "chứng nhận hiệu suất") return "Chứng nhận hiệu suất";
+    if (n === "chipset") return "Chipset";
+    if (n === "kiểu dây nguồn") return "Kiểu dây nguồn";
+    if (n === "tản nhiệt") return "Tản nhiệt";
+    if (n === "loại tản nhiệt" || n === "cooling_type") return "Loại tản nhiệt";
+    if (n === "tdp" || n === "tdp tiêu thụ") return "TDP Tiêu thụ";
+    if (n === "tdp giải nhiệt tối đa" || n === "cooling_capacity") return "TDP Giải nhiệt tối đa";
+    if (n === "kích thước radiator" || n === "radiator_size" || n === "kích thước tản / radiator") return "Kích thước Radiator";
+    if (n === "số nhân / số luồng") return "Số nhân / Số luồng";
+    if (n === "chuẩn cắm" || n === "interface") return "Chuẩn kết nối";
+    if (n === "tốc độ đọc tối đa") return "Tốc độ đọc tối đa";
+    if (n === "kiến trúc") return "Kiến trúc";
+    if (n === "không gian vga tối đa" || n === "case_gpu_clearance") return "Không gian VGA tối đa";
+    if (n === "hỗ trợ mainboard") return "Hỗ trợ Mainboard";
+    if (n === "hỗ trợ tản nước" || n === "case_radiator_support") return "Hỗ trợ Tản nước";
+    if (n === "đèn led") return "Đèn LED";
+    return String(rawName || "").trim();
+  }
+
+  const IGNORED_ATTR_NAMES = new Set(["tình trạng", "bảo hành", "warranty", "thương hiệu"]);
 
   const attributesMap = new Map();
 
   for (const row of attributeRows) {
-    if (!attributesMap.has(row.attribute_id)) {
-      attributesMap.set(row.attribute_id, {
+    const rawName = String(row.attribute_name || "").trim();
+    if (IGNORED_ATTR_NAMES.has(rawName.toLowerCase())) continue;
+
+    const canonicalName = getCanonicalFacetName(rawName);
+
+    if (!attributesMap.has(canonicalName)) {
+      attributesMap.set(canonicalName, {
         id: row.attribute_id,
-        name: row.attribute_name,
+        name: canonicalName,
+        rawName: rawName,
         values: []
       });
     }
 
     if (row.attribute_value_id) {
-      attributesMap.get(row.attribute_id).values.push({
-        id: row.attribute_value_id,
-        value: row.attribute_value
-      });
+      const existingVals = attributesMap.get(canonicalName).values;
+      const alreadyHas = existingVals.some((v) => v.id === row.attribute_value_id || v.value === row.attribute_value);
+      if (!alreadyHas) {
+        existingVals.push({
+          id: row.attribute_value_id,
+          value: row.attribute_value,
+          productCount: Number(row.product_count || 0)
+        });
+      }
     }
   }
+
+  // If a category is chosen, filter out noise attributes (e.g. attributes that apply to only 1 product if total products in cat > 5)
+  const resultAttributes = Array.from(attributesMap.values()).filter((attr) => {
+    if (attr.values.length === 0) return false;
+    const totalCount = attr.values.reduce((sum, v) => sum + v.productCount, 0);
+    // If total category has products, exclude accidental cross-category noise with only 1 item
+    if (categoryId && totalCount <= 1) return false;
+    return true;
+  });
 
   return {
     categories,
     brands,
-    attributes: Array.from(attributesMap.values())
+    attributes: resultAttributes
   };
 }
 
@@ -621,6 +825,7 @@ async function getProductDetail(idOrSlug) {
         p.${config.products.name} AS product_name,
         ${config.products.slug ? `p.${config.products.slug}` : `CAST(p.${config.products.id} AS CHAR)`} AS slug,
         ${config.products.description ? `p.${config.products.description}` : "NULL"} AS description,
+        ${config.products.warrantyMonths ? `p.${config.products.warrantyMonths}` : "24"} AS warranty_months,
         ${brandIdSelect} AS brand_id,
         ${brandNameSelect} AS brand_name,
         c.${config.categories.id} AS category_id,
@@ -652,6 +857,7 @@ async function getProductDetail(idOrSlug) {
           s.${config.skus.price} AS price,
           ${config.skus.imageUrl ? `s.${config.skus.imageUrl}` : "NULL"} AS image_url,
           ${config.skus.stock ? `s.${config.skus.stock}` : "0"} AS stock_quantity,
+          ${config.skus.warrantyMonths ? `s.${config.skus.warrantyMonths}` : "NULL"} AS warranty_months,
           ${config.skus.status ? `s.${config.skus.status}` : "'ACTIVE'"} AS status,
           ${canReadSpecs ? `a.${config.attributes.id}` : "NULL"} AS attribute_id,
           ${canReadSpecs ? `a.${config.attributes.name}` : "NULL"} AS attribute_name,
@@ -710,6 +916,7 @@ async function getProductDetail(idOrSlug) {
     slug: product.slug,
     image_url: normalizeProductImageUrl(primaryImage, product.category_name, product.product_name),
     description: product.description,
+    warranty_months: Number(product.warranty_months || 24),
     brand: {
       id: product.brand_id,
       name: product.brand_name

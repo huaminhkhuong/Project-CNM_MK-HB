@@ -1,4 +1,5 @@
 const { getDbPool, query } = require("../../config/database");
+const { prisma } = require("../../config/prisma");
 const { createError, toNonNegativeNumber, toPositiveInteger } = require("../../utils/service-helpers");
 
 function normalizeKey(value) {
@@ -12,6 +13,7 @@ async function findProductById(productId) {
         p.id,
         p.name,
         p.slug,
+        p.warranty_months AS warrantyMonths,
         p.category_id AS categoryId,
         c.name AS categoryName,
         p.brand_id AS brandId,
@@ -38,12 +40,14 @@ async function findSkuById(skuId) {
         s.price,
         s.stock,
         s.image_url AS imageUrl,
+        s.warranty_months AS warrantyMonths,
         s.status,
         s.is_active AS isActive,
         s.created_at AS createdAt,
         s.updated_at AS updatedAt,
         p.name AS productName,
         p.slug AS productSlug,
+        p.warranty_months AS productWarrantyMonths,
         p.category_id AS categoryId,
         c.name AS categoryName,
         p.brand_id AS brandId,
@@ -111,6 +115,9 @@ async function getSkuAttributeMappings(skuId) {
 }
 
 function formatSku(row, attributes) {
+  const skuWarrantyMonths = row.warrantyMonths !== null && row.warrantyMonths !== undefined ? Number(row.warrantyMonths) : null;
+  const productWarrantyMonths = row.productWarrantyMonths !== null && row.productWarrantyMonths !== undefined ? Number(row.productWarrantyMonths) : 24;
+
   return {
     id: row.id,
     productId: row.productId,
@@ -118,6 +125,8 @@ function formatSku(row, attributes) {
     price: Number(row.price || 0),
     stock: Number(row.stock || 0),
     imageUrl: row.imageUrl,
+    warrantyMonths: skuWarrantyMonths,
+    effectiveWarrantyMonths: skuWarrantyMonths ?? productWarrantyMonths,
     status: row.status || (row.isActive === null ? null : row.isActive ? "ACTIVE" : "INACTIVE") || "ACTIVE",
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -128,7 +137,8 @@ function formatSku(row, attributes) {
       categoryId: row.categoryId,
       categoryName: row.categoryName,
       brandId: row.brandId,
-      brandName: row.brandName
+      brandName: row.brandName,
+      warrantyMonths: productWarrantyMonths
     },
     attributes
   };
@@ -172,12 +182,14 @@ async function getSkus(params = {}) {
           s.price,
           s.stock,
           s.image_url AS imageUrl,
+          s.warranty_months AS warrantyMonths,
           s.status,
           s.is_active AS isActive,
           s.created_at AS createdAt,
           s.updated_at AS updatedAt,
           p.name AS productName,
           p.slug AS productSlug,
+          p.warranty_months AS productWarrantyMonths,
           p.category_id AS categoryId,
           c.name AS categoryName,
           p.brand_id AS brandId,
@@ -258,15 +270,20 @@ async function validateAttributeValueIds(attributeValueIds = []) {
   return rows;
 }
 
-async function assignAttributesToSkuInternal(connection, skuId, attributeValueIds = []) {
+async function assignAttributesToSkuInternal(tx, skuId, attributeValueIds = []) {
   await validateAttributeValueIds(attributeValueIds);
-  await connection.execute(`DELETE FROM sku_attributes WHERE sku_id = ?`, [skuId]);
+  await tx.skuAttribute.deleteMany({
+    where: { sku_id: skuId }
+  });
 
-  for (const attributeValueId of Array.from(new Set(attributeValueIds || []))) {
-    await connection.execute(
-      `INSERT INTO sku_attributes (sku_id, attribute_value_id) VALUES (?, ?)`,
-      [skuId, Number(attributeValueId)]
-    );
+  const uniqueIds = Array.from(new Set(attributeValueIds || [])).map(Number);
+  if (uniqueIds.length > 0) {
+    await tx.skuAttribute.createMany({
+      data: uniqueIds.map((id) => ({
+        sku_id: skuId,
+        attribute_value_id: id
+      }))
+    });
   }
 }
 
@@ -277,6 +294,8 @@ async function createSku(payload) {
   const stock = payload.stock !== undefined ? toNonNegativeNumber(payload.stock, "stock") : 0;
   const imageUrl = payload.imageUrl !== undefined ? String(payload.imageUrl || "").trim() : null;
   const status = String(payload.status || "ACTIVE").trim().toUpperCase();
+  const rawMonths = payload.warrantyMonths ?? payload.warranty_months;
+  const warrantyMonths = rawMonths !== undefined && rawMonths !== null && rawMonths !== "" ? toPositiveInteger(rawMonths, "warrantyMonths") : null;
 
   await ensureUniqueSkuCode(skuCode);
 
@@ -285,36 +304,25 @@ async function createSku(payload) {
     throw createError("Product not found", 404);
   }
 
-  const connection = await getDbPool().getConnection();
+  const created = await prisma.$transaction(async (tx) => {
+    const sku = await tx.productSku.create({
+      data: {
+        product_id: productId,
+        sku: skuCode,
+        price,
+        stock,
+        image_url: imageUrl,
+        warranty_months: warrantyMonths,
+        status,
+        is_active: status === "ACTIVE"
+      }
+    });
 
-  try {
-    await connection.beginTransaction();
-    const [result] = await connection.execute(
-      `
-        INSERT INTO product_skus (
-          product_id,
-          sku,
-          price,
-          stock,
-          image_url,
-          status,
-          is_active,
-          created_at,
-          updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-      `,
-      [productId, skuCode, price, stock, imageUrl, status, status === "ACTIVE" ? 1 : 0]
-    );
-    await assignAttributesToSkuInternal(connection, result.insertId, payload.attributeValueIds || []);
-    await connection.commit();
-    return getSkuDetail(result.insertId);
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+    await assignAttributesToSkuInternal(tx, sku.id, payload.attributeValueIds || []);
+    return sku;
+  });
+
+  return getSkuDetail(created.id);
 }
 
 async function updateSku(skuId, payload) {
@@ -325,8 +333,7 @@ async function updateSku(skuId, payload) {
     throw createError("SKU not found", 404);
   }
 
-  const updates = [];
-  const params = [];
+  const data = {};
 
   if (Object.prototype.hasOwnProperty.call(payload, "productId")) {
     const productId = toPositiveInteger(payload.productId, "productId");
@@ -335,57 +342,50 @@ async function updateSku(skuId, payload) {
     if (!product) {
       throw createError("Product not found", 404);
     }
-
-    updates.push(`product_id = ?`);
-    params.push(productId);
+    data.product_id = productId;
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, "sku")) {
     const skuCode = String(payload.sku || "").trim();
     await ensureUniqueSkuCode(skuCode, parsedSkuId);
-    updates.push(`sku = ?`);
-    params.push(skuCode);
+    data.sku = skuCode;
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, "price")) {
-    updates.push(`price = ?`);
-    params.push(toNonNegativeNumber(payload.price, "price"));
+    data.price = toNonNegativeNumber(payload.price, "price");
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, "stock")) {
-    updates.push(`stock = ?`);
-    params.push(toNonNegativeNumber(payload.stock, "stock"));
+    data.stock = toNonNegativeNumber(payload.stock, "stock");
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, "imageUrl")) {
-    updates.push(`image_url = ?`);
-    params.push(String(payload.imageUrl || "").trim() || null);
+    data.image_url = String(payload.imageUrl || "").trim() || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "warrantyMonths") || Object.prototype.hasOwnProperty.call(payload, "warranty_months")) {
+    const rawMonths = payload.warrantyMonths ?? payload.warranty_months;
+    const warrantyMonths = (rawMonths === null || rawMonths === "" || rawMonths === undefined) ? null : toPositiveInteger(rawMonths, "warrantyMonths");
+    data.warranty_months = warrantyMonths;
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, "status")) {
     const status = String(payload.status || "ACTIVE").trim().toUpperCase();
-    updates.push(`status = ?`, `is_active = ?`);
-    params.push(status, status === "ACTIVE" ? 1 : 0);
+    data.status = status;
+    data.is_active = status === "ACTIVE";
   }
 
-  if (updates.length > 0) {
-    params.push(parsedSkuId);
-    await query(`UPDATE product_skus SET ${updates.join(", ")}, updated_at = NOW() WHERE id = ?`, params);
+  if (Object.keys(data).length > 0) {
+    await prisma.productSku.update({
+      where: { id: parsedSkuId },
+      data
+    });
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, "attributeValueIds")) {
-    const connection = await getDbPool().getConnection();
-
-    try {
-      await connection.beginTransaction();
-      await assignAttributesToSkuInternal(connection, parsedSkuId, payload.attributeValueIds || []);
-      await connection.commit();
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
+    await prisma.$transaction(async (tx) => {
+      await assignAttributesToSkuInternal(tx, parsedSkuId, payload.attributeValueIds || []);
+    });
   }
 
   return getSkuDetail(parsedSkuId);
@@ -399,20 +399,11 @@ async function deleteSku(skuId) {
     throw createError("SKU not found", 404);
   }
 
-  const connection = await getDbPool().getConnection();
-
-  try {
-    await connection.beginTransaction();
-    await connection.execute(`DELETE FROM sku_attributes WHERE sku_id = ?`, [parsedSkuId]);
-    await connection.execute(`DELETE FROM product_skus WHERE id = ?`, [parsedSkuId]);
-    await connection.commit();
-    return { id: parsedSkuId, deleted: true };
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  await prisma.$transaction([
+    prisma.skuAttribute.deleteMany({ where: { sku_id: parsedSkuId } }),
+    prisma.productSku.delete({ where: { id: parsedSkuId } })
+  ]);
+  return { id: parsedSkuId, deleted: true };
 }
 
 async function assignAttributesToSku(skuId, attributeValueIds) {
@@ -423,19 +414,11 @@ async function assignAttributesToSku(skuId, attributeValueIds) {
     throw createError("SKU not found", 404);
   }
 
-  const connection = await getDbPool().getConnection();
+  await prisma.$transaction(async (tx) => {
+    await assignAttributesToSkuInternal(tx, parsedSkuId, attributeValueIds || []);
+  });
 
-  try {
-    await connection.beginTransaction();
-    await assignAttributesToSkuInternal(connection, parsedSkuId, attributeValueIds || []);
-    await connection.commit();
-    return getSkuDetail(parsedSkuId);
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  return getSkuDetail(parsedSkuId);
 }
 
 module.exports = {

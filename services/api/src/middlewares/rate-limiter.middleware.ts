@@ -71,7 +71,7 @@ export function createRateLimiter(options: RateLimitOptions) {
 // 1. Auth Rate Limiter: Max 10 attempts per 15 minutes per IP (protects login/register/forgot-password)
 export const authRateLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: process.env.NODE_ENV === "production" ? 10 : 200,
   message: "⛔ Quá nhiều lần thử đăng nhập/đăng ký. Vui lòng thử lại sau 15 phút."
 });
 

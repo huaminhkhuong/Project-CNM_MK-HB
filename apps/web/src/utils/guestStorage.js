@@ -161,3 +161,170 @@ export function clearGuestAiChatMessages() {
   window.localStorage.removeItem(GUEST_AI_CHAT_KEY);
   return [DEFAULT_AI_WELCOME];
 }
+
+const GUEST_CART_KEY = "cnm_guest_cart";
+
+const DEFAULT_GUEST_CART = {
+  id: "guest",
+  items: [],
+  subtotal: 0,
+  itemCount: 0,
+  totalAmount: 0,
+  totalItems: 0
+};
+
+function normalizeCartTotals(rawCart) {
+  const items = Array.isArray(rawCart?.items) ? rawCart.items : [];
+  let subtotal = 0;
+  let itemCount = 0;
+
+  const normalizedItems = items.map((item) => {
+    const qty = Math.max(1, Number(item.quantity || 1));
+    const price = Number(item.unitPrice || item.variant?.price || item.product?.price || 0);
+    const lineTotal = price * qty;
+    subtotal += lineTotal;
+    itemCount += qty;
+
+    return {
+      ...item,
+      quantity: qty,
+      unitPrice: price,
+      lineTotal
+    };
+  });
+
+  return {
+    id: "guest",
+    items: normalizedItems,
+    subtotal,
+    itemCount,
+    totalAmount: subtotal,
+    totalItems: itemCount
+  };
+}
+
+export function getGuestCart() {
+  const stored = safeParse(window.localStorage.getItem(GUEST_CART_KEY), null);
+  if (!stored) return { ...DEFAULT_GUEST_CART };
+  return normalizeCartTotals(stored);
+}
+
+export function setGuestCart(cart) {
+  const normalized = normalizeCartTotals(cart);
+  window.localStorage.setItem(GUEST_CART_KEY, JSON.stringify(normalized));
+  try {
+    window.dispatchEvent(new CustomEvent("cnm_guest_cart_updated", { detail: normalized }));
+  } catch {
+    // window event dispatch fallback
+  }
+  return normalized;
+}
+
+export function addGuestCartItem(itemPayload = {}) {
+  const cart = getGuestCart();
+  const quantity = Math.max(1, Number(itemPayload.quantity || 1));
+  const productVariantId = Number(
+    itemPayload.productVariantId ||
+    itemPayload.variantId ||
+    itemPayload.variant?.id ||
+    itemPayload.variant?.variant_id ||
+    itemPayload.productId ||
+    itemPayload.product?.id ||
+    0
+  );
+  const productId = Number(itemPayload.productId || itemPayload.product?.id || 0);
+  const unitPrice = Number(
+    itemPayload.unitPrice ||
+    itemPayload.variant?.price ||
+    itemPayload.product?.price ||
+    itemPayload.price ||
+    0
+  );
+
+  const existingIndex = cart.items.findIndex((item) => {
+    if (productVariantId && (Number(item.productVariantId) === productVariantId || Number(item.variant?.id) === productVariantId)) {
+      return true;
+    }
+    if (productId && Number(item.productId) === productId) {
+      return true;
+    }
+    return false;
+  });
+
+  const availableStock = Number(itemPayload.variant?.stock || itemPayload.stock || 99);
+
+  if (existingIndex >= 0) {
+    const existing = cart.items[existingIndex];
+    const newQty = Math.min(existing.quantity + quantity, availableStock > 0 ? availableStock : 99);
+    cart.items[existingIndex] = {
+      ...existing,
+      quantity: newQty,
+      lineTotal: existing.unitPrice * newQty
+    };
+  } else {
+    const newItem = {
+      id: `guest_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      productVariantId: productVariantId || productId || Date.now(),
+      productId: productId || productVariantId || 0,
+      quantity: Math.min(quantity, availableStock > 0 ? availableStock : 99),
+      unitPrice,
+      lineTotal: unitPrice * quantity,
+      product: {
+        id: productId || productVariantId,
+        name: itemPayload.product?.name || itemPayload.name || itemPayload.productName || "Sản phẩm linh kiện",
+        slug: itemPayload.product?.slug || itemPayload.slug || "",
+        category: itemPayload.product?.category || itemPayload.category || null,
+        imageUrl: itemPayload.product?.imageUrl || itemPayload.product?.image_url || itemPayload.imageUrl || null
+      },
+      variant: {
+        id: productVariantId || productId,
+        sku: itemPayload.variant?.sku || itemPayload.sku || `SKU-${productVariantId || productId}`,
+        price: unitPrice,
+        stock: availableStock,
+        imageUrl: itemPayload.variant?.imageUrl || itemPayload.variant?.image_url || itemPayload.imageUrl || null
+      }
+    };
+    cart.items.push(newItem);
+  }
+
+  return setGuestCart(cart);
+}
+
+export function updateGuestCartItemQuantity(itemId, nextQuantity) {
+  const cart = getGuestCart();
+  const qty = Number(nextQuantity || 0);
+
+  if (qty <= 0) {
+    return removeGuestCartItem(itemId);
+  }
+
+  const index = cart.items.findIndex(
+    (item) => String(item.id) === String(itemId) || String(item.productVariantId) === String(itemId)
+  );
+
+  if (index >= 0) {
+    cart.items[index].quantity = qty;
+    cart.items[index].lineTotal = cart.items[index].unitPrice * qty;
+  }
+
+  return setGuestCart(cart);
+}
+
+export function removeGuestCartItem(itemId) {
+  const cart = getGuestCart();
+  cart.items = cart.items.filter(
+    (item) => String(item.id) !== String(itemId) && String(item.productVariantId) !== String(itemId)
+  );
+  return setGuestCart(cart);
+}
+
+export function clearGuestCart() {
+  window.localStorage.removeItem(GUEST_CART_KEY);
+  const empty = { ...DEFAULT_GUEST_CART };
+  try {
+    window.dispatchEvent(new CustomEvent("cnm_guest_cart_updated", { detail: empty }));
+  } catch {
+    // window event dispatch fallback
+  }
+  return empty;
+}

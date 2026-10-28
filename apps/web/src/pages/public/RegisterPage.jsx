@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 
@@ -22,14 +22,32 @@ function validatePhone(phone) {
 }
 
 function getPasswordStrength(password) {
+  const p = String(password || "");
+  const criteria = {
+    length: p.length >= 8,
+    uppercase: /[A-Z]/.test(p),
+    number: /[0-9]/.test(p),
+    special: /[^A-Za-z0-9]/.test(p)
+  };
+
   let score = 0;
-  if (password.length >= 8) score += 1;
-  if (/[A-Z]/.test(password)) score += 1;
-  if (/[0-9]/.test(password)) score += 1;
-  if (/[^A-Za-z0-9]/.test(password)) score += 1;
-  const labels = ["Yếu", "Trung bình", "Khá", "Mạnh", "Rất mạnh"];
-  const tones = ["#ef4444", "#f97316", "#f59e0b", "#22c55e", "#047857"];
-  return { score, label: labels[score], tone: tones[score], percent: Math.max(12, score * 25) };
+  if (criteria.length) score += 1;
+  if (criteria.uppercase) score += 1;
+  if (criteria.number) score += 1;
+  if (criteria.special) score += 1;
+
+  const labels = ["Rất yếu", "Yếu", "Trung bình", "Khá", "Mạnh"];
+  const tones = ["#94a3b8", "#ef4444", "#f97316", "#f59e0b", "#10b981"];
+  const bgs = [
+    "rgba(148, 163, 184, 0.15)",
+    "rgba(239, 68, 68, 0.15)",
+    "rgba(249, 115, 22, 0.15)",
+    "rgba(245, 158, 11, 0.15)",
+    "rgba(16, 185, 129, 0.15)"
+  ];
+
+  const percent = p.length === 0 ? 0 : Math.max(15, score * 25);
+  return { score, criteria, label: labels[score], tone: tones[score], bg: bgs[score], percent };
 }
 
 function Spinner() {
@@ -58,6 +76,7 @@ export function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showMockGoogle, setShowMockGoogle] = useState(false);
+  const [isPasswordFocused, setIsPasswordFocused] = useState(false);
 
   const strength = useMemo(() => getPasswordStrength(formValues.password), [formValues.password]);
 
@@ -281,21 +300,203 @@ export function RegisterPage() {
 
             <div className="register-grid-2">
               <div className="register-field">
-                <label>Mật khẩu</label>
+                <label htmlFor="register-password">Mật khẩu</label>
                 <div className="register-input-wrap">
-                  <input className="register-input" name="password" type={showPassword ? "text" : "password"} value={formValues.password} onChange={handleChange} onBlur={() => setTouched((p) => ({ ...p, password: true }))} placeholder="Tối thiểu 8 ký tự" />
-                  <button className="register-toggle" type="button" onClick={() => setShowPassword((p) => !p)}><EyeIcon hidden={!showPassword} /></button>
+                  <input
+                    id="register-password"
+                    data-testid="password-input"
+                    className="register-input"
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    value={formValues.password}
+                    onChange={handleChange}
+                    onFocus={() => setIsPasswordFocused(true)}
+                    onBlur={() => {
+                      setIsPasswordFocused(false);
+                      setTouched((p) => ({ ...p, password: true }));
+                    }}
+                    placeholder="Tối thiểu 8 ký tự"
+                    autoComplete="new-password"
+                  />
+                  <button className="register-toggle" type="button" onClick={() => setShowPassword((p) => !p)}>
+                    <EyeIcon hidden={!showPassword} />
+                  </button>
                 </div>
-                <div style={{ height: 7, borderRadius: 999, background: "#e2e8f0", overflow: "hidden" }}><div style={{ width: `${strength.percent}%`, height: "100%", background: strength.tone }} /></div>
-                <div className={fieldError("password") ? "register-error" : "register-hint"}>{fieldError("password") || `Độ mạnh: ${strength.label}`}</div>
+
+                {/* Realtime Strength Bar & Status [UX-004] */}
+                {formValues.password.length > 0 && (
+                  <div style={{ marginTop: 4 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#64748b" }}>Độ mạnh mật khẩu:</span>
+                      <span
+                        data-testid="password-strength-label"
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 800,
+                          color: strength.tone,
+                          backgroundColor: strength.bg,
+                          padding: "2px 8px",
+                          borderRadius: 9999,
+                          border: `1px solid ${strength.tone}35`
+                        }}
+                      >
+                        {strength.label}
+                      </span>
+                    </div>
+                    <div
+                      data-testid="password-strength-bar"
+                      style={{ height: 6, borderRadius: 999, background: "#e2e8f0", overflow: "hidden" }}
+                    >
+                      <div
+                        style={{
+                          width: `${strength.percent}%`,
+                          height: "100%",
+                          background: strength.tone,
+                          transition: "width 0.3s ease, background 0.3s ease"
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Realtime Checklist: Visible when password field has input or is focused [UX-004] */}
+                {(formValues.password.length > 0 || isPasswordFocused) && (
+                  <div
+                    data-testid="password-criteria-list"
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: "6px 12px",
+                      padding: "10px 12px",
+                      borderRadius: 12,
+                      background: "#f1f5f9",
+                      border: "1px solid #e2e8f0",
+                      marginTop: 4
+                    }}
+                  >
+                    <div
+                      data-testid="criterion-length"
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        fontSize: 11.5,
+                        fontWeight: 650,
+                        color: strength.criteria.length ? "#059669" : "#64748b",
+                        transition: "color 0.2s ease"
+                      }}
+                    >
+                      <span style={{ fontSize: 13, color: strength.criteria.length ? "#10b981" : "#94a3b8" }}>
+                        {strength.criteria.length ? "✓" : "○"}
+                      </span>
+                      Từ 8 ký tự trở lên
+                    </div>
+
+                    <div
+                      data-testid="criterion-uppercase"
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        fontSize: 11.5,
+                        fontWeight: 650,
+                        color: strength.criteria.uppercase ? "#059669" : "#64748b",
+                        transition: "color 0.2s ease"
+                      }}
+                    >
+                      <span style={{ fontSize: 13, color: strength.criteria.uppercase ? "#10b981" : "#94a3b8" }}>
+                        {strength.criteria.uppercase ? "✓" : "○"}
+                      </span>
+                      Chữ hoa (A-Z)
+                    </div>
+
+                    <div
+                      data-testid="criterion-number"
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        fontSize: 11.5,
+                        fontWeight: 650,
+                        color: strength.criteria.number ? "#059669" : "#64748b",
+                        transition: "color 0.2s ease"
+                      }}
+                    >
+                      <span style={{ fontSize: 13, color: strength.criteria.number ? "#10b981" : "#94a3b8" }}>
+                        {strength.criteria.number ? "✓" : "○"}
+                      </span>
+                      Chữ số (0-9)
+                    </div>
+
+                    <div
+                      data-testid="criterion-special"
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        fontSize: 11.5,
+                        fontWeight: 650,
+                        color: strength.criteria.special ? "#059669" : "#64748b",
+                        transition: "color 0.2s ease"
+                      }}
+                    >
+                      <span style={{ fontSize: 13, color: strength.criteria.special ? "#10b981" : "#94a3b8" }}>
+                        {strength.criteria.special ? "✓" : "○"}
+                      </span>
+                      Ký tự đặc biệt (!@#$)
+                    </div>
+                  </div>
+                )}
+
+                {fieldError("password") && !isPasswordFocused && (
+                  <div className="register-error">{fieldError("password")}</div>
+                )}
               </div>
+
               <div className="register-field">
-                <label>Xác nhận mật khẩu</label>
+                <label htmlFor="register-confirm-password">Xác nhận mật khẩu</label>
                 <div className="register-input-wrap">
-                  <input className="register-input" name="confirmPassword" type={showConfirmPassword ? "text" : "password"} value={formValues.confirmPassword} onChange={handleChange} onBlur={() => setTouched((p) => ({ ...p, confirmPassword: true }))} placeholder="Nhập lại mật khẩu" />
-                  <button className="register-toggle" type="button" onClick={() => setShowConfirmPassword((p) => !p)}><EyeIcon hidden={!showConfirmPassword} /></button>
+                  <input
+                    id="register-confirm-password"
+                    data-testid="confirm-password-input"
+                    className="register-input"
+                    name="confirmPassword"
+                    type={showConfirmPassword ? "text" : "password"}
+                    value={formValues.confirmPassword}
+                    onChange={handleChange}
+                    onBlur={() => setTouched((p) => ({ ...p, confirmPassword: true }))}
+                    placeholder="Nhập lại mật khẩu"
+                    autoComplete="new-password"
+                  />
+                  <button className="register-toggle" type="button" onClick={() => setShowConfirmPassword((p) => !p)}>
+                    <EyeIcon hidden={!showConfirmPassword} />
+                  </button>
                 </div>
-                <div className="register-error">{fieldError("confirmPassword")}</div>
+
+                {/* Realtime Confirm Password Feedback [UX-004] */}
+                {formValues.confirmPassword.length > 0 && (
+                  <div
+                    data-testid="confirm-password-feedback"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      fontSize: 12,
+                      fontWeight: 750,
+                      marginTop: 4,
+                      color: formValues.confirmPassword === formValues.password ? "#059669" : "#dc2626"
+                    }}
+                  >
+                    <span>{formValues.confirmPassword === formValues.password ? "✓" : "✕"}</span>
+                    {formValues.confirmPassword === formValues.password
+                      ? "Mật khẩu xác nhận trùng khớp"
+                      : "Mật khẩu xác nhận chưa khớp"}
+                  </div>
+                )}
+
+                {fieldError("confirmPassword") && !formValues.confirmPassword && (
+                  <div className="register-error">{fieldError("confirmPassword")}</div>
+                )}
               </div>
             </div>
 
@@ -305,7 +506,13 @@ export function RegisterPage() {
               <span>Hỗ trợ 24/7</span>
             </div>
 
-            <button className="register-submit" type="submit" disabled={!canSubmit}>
+            <button
+              id="btn-register-submit"
+              data-testid="register-submit-btn"
+              className="register-submit"
+              type="submit"
+              disabled={!canSubmit}
+            >
               {isSubmitting ? <><Spinner /> Đang tạo tài khoản...</> : "Tạo tài khoản PC Mall"}
             </button>
             <p style={{ margin: 0, textAlign: "center", color: "#64748b" }}>Đã có tài khoản? <Link to="/login" style={{ color: "var(--market-primary)", fontWeight: 900 }}>Đăng nhập</Link></p>

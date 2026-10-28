@@ -11,6 +11,8 @@ import { usersRouter } from "../modules/users/users.route";
 import { aiAdvisorRouter } from "../modules/ai-advisor/ai-advisor.route";
 import { warrantiesRouter } from "../modules/warranties/warranties.route";
 import { chatRouter } from "../modules/chat/chat.route";
+import { couponsRouter } from "../modules/coupons/coupons.route";
+import { notificationsRouter } from "../modules/notifications/notifications.route";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const aiRouter = require("../modules/ai/ai.route");
@@ -62,5 +64,7 @@ apiRouter.use("/ai-advisor", aiRateLimiter, aiAdvisorRouter);
 apiRouter.use("/ai", aiRateLimiter, aiRouter);
 apiRouter.use("/warranties", warrantiesRouter);
 apiRouter.use("/chat", aiRateLimiter, chatRouter);
+apiRouter.use("/coupons", couponsRouter);
+apiRouter.use("/notifications", notificationsRouter);
 
 

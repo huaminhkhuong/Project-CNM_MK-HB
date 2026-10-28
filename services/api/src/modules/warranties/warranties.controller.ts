@@ -3,6 +3,7 @@ import { Request, Response } from "express";
 import { prisma } from "../../config/prisma";
 import { AppError } from "../../errors/app-error";
 import { asyncHandler } from "../../utils/async-handler";
+import { sendWarrantyNotification } from "../notifications/notifications.service";
 
 type UploadedWarrantyFile = {
   filename: string;
@@ -43,11 +44,34 @@ function addWarrantyPeriod(date = new Date(), months = 12) {
 function getWarrantyMonthsFromItem(item: any): number {
   if (!item) return 24;
 
-  const explicitMonths = Number(item?.warranty_months || item?.warrantyMonths || item?.ProductSku?.Product?.warranty_months);
+  // 1. SKU Master data (override at SKU level)
+  const skuMonths = Number(
+    item?.ProductSku?.warranty_months ||
+    item?.sku_warranty_months ||
+    item?.skuWarrantyMonths
+  );
+  if (Number.isFinite(skuMonths) && skuMonths > 0) {
+    return skuMonths;
+  }
+
+  // 2. Product Master data (base product warranty)
+  const productMonths = Number(
+    item?.ProductSku?.Product?.warranty_months ||
+    item?.Product?.warranty_months ||
+    item?.product_warranty_months ||
+    item?.productWarrantyMonths
+  );
+  if (Number.isFinite(productMonths) && productMonths > 0) {
+    return productMonths;
+  }
+
+  // 3. Explicit warrantyMonths on item snapshot
+  const explicitMonths = Number(item?.warranty_months || item?.warrantyMonths);
   if (Number.isFinite(explicitMonths) && explicitMonths > 0) {
     return explicitMonths;
   }
 
+  // 4. Fallback for legacy records without master data: keyword heuristics
   const catName = String(
     item?.ProductSku?.Product?.Category?.name ||
     item?.Category?.name ||
@@ -67,6 +91,12 @@ function getWarrantyMonthsFromItem(item: any): number {
 
   const combined = `${catName} ${prodName}`;
 
+  if (/psu|nguồn|power supply/i.test(combined) && (/seasonic|rm750|rm850|rm1000|corsair rm/i.test(combined))) {
+    return 120;
+  }
+  if (/ssd|nvme/i.test(combined) && (/980 pro|990 pro|sn850/i.test(combined))) {
+    return 60;
+  }
   if (/cpu|vi xử lý|processor|mainboard|bo mạch|motherboard|ram|bộ nhớ|gpu|vga|card đồ họa|graphics/i.test(combined)) {
     return 36;
   }
@@ -150,96 +180,6 @@ async function execute(sql: string, ...params: any[]) {
   return prisma.$executeRawUnsafe(formattedSql, ...params);
 }
 
-async function getTableColumns(tableName: string) {
-  const rows = await queryRows<any>(
-    `SELECT COLUMN_NAME AS column_name FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
-    tableName
-  );
-  return rows.map((row: any) => String(row?.column_name || row?.COLUMN_NAME || "").toLowerCase());
-}
-
-async function ensureColumn(tableName: string, columnName: string, definition: string) {
-  const columns = await getTableColumns(tableName).catch(() => [] as string[]);
-  if (columns.includes(columnName.toLowerCase())) return;
-  try {
-    await execute(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`);
-  } catch (e: any) {
-    if (e?.code === "ER_DUP_FIELDNAME" || String(e?.message || "").includes("Duplicate column name")) {
-      return;
-    }
-    throw e;
-  }
-}
-
-async function ensureWarrantyTables() {
-  await execute(`
-    CREATE TABLE IF NOT EXISTS warranty_requests (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      warranty_id INT NULL,
-      user_id INT NULL,
-      lookup_value VARCHAR(255) NULL,
-      customer_name VARCHAR(255) NULL,
-      customer_phone VARCHAR(50) NULL,
-      customer_email VARCHAR(255) NULL,
-      product_name VARCHAR(255) NULL,
-      serial_number VARCHAR(255) NULL,
-      order_id INT NULL,
-      severity VARCHAR(50) NOT NULL DEFAULT 'MEDIUM',
-      issue_description TEXT NOT NULL,
-      extra_note TEXT NULL,
-      status VARCHAR(50) NOT NULL DEFAULT 'RECEIVED',
-      last_staff_note TEXT NULL,
-      last_email_mock TEXT NULL,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await ensureColumn("warranty_requests", "customer_email", "customer_email VARCHAR(255) NULL");
-  await ensureColumn("warranty_requests", "product_name", "product_name VARCHAR(255) NULL");
-  await ensureColumn("warranty_requests", "serial_number", "serial_number VARCHAR(255) NULL");
-  await ensureColumn("warranty_requests", "order_id", "order_id INT NULL");
-  await ensureColumn("warranty_requests", "severity", "severity VARCHAR(50) NOT NULL DEFAULT 'MEDIUM'");
-  await ensureColumn("warranty_requests", "extra_note", "extra_note TEXT NULL");
-  await ensureColumn("warranty_requests", "last_staff_note", "last_staff_note TEXT NULL");
-  await ensureColumn("warranty_requests", "last_email_mock", "last_email_mock TEXT NULL");
-
-  await execute(`
-    CREATE TABLE IF NOT EXISTS warranty_request_events (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      request_id INT NOT NULL,
-      status VARCHAR(50) NOT NULL,
-      note TEXT NULL,
-      actor_role VARCHAR(50) NULL,
-      actor_name VARCHAR(255) NULL,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await execute(`
-    CREATE TABLE IF NOT EXISTS warranty_request_attachments (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      request_id INT NOT NULL,
-      source VARCHAR(50) NOT NULL DEFAULT 'CUSTOMER',
-      file_url VARCHAR(255) NOT NULL,
-      mime_type VARCHAR(120) NULL,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await execute(`
-    CREATE TABLE IF NOT EXISTS warranty_notifications (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      user_id INT NOT NULL,
-      request_id INT NULL,
-      title VARCHAR(255) NOT NULL,
-      message TEXT NOT NULL,
-      is_read SMALLINT NOT NULL DEFAULT 0,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-}
-
 function buildFallbackTimeline(status = "RECEIVED") {
   const normalized = normalizeRequestStatus(status);
   const activeIndex = Math.max(WARRANTY_LIFECYCLE_STEPS.indexOf(normalized as any), 0);
@@ -282,7 +222,6 @@ function buildTimelineFromEvents(status: string, events: any[]) {
 
 async function createWarrantyNotification(userId: number | null, requestId: number | null, title: string, message: string) {
   if (!userId) return;
-  await ensureWarrantyTables();
   await execute(
     `
       INSERT INTO warranty_notifications (user_id, request_id, title, message, is_read)
@@ -293,10 +232,17 @@ async function createWarrantyNotification(userId: number | null, requestId: numb
     title,
     message
   );
+
+  // 🔔 Đẩy vào hệ thống thông báo thống nhất In-App & Real-Time Socket
+  sendWarrantyNotification({
+    userId,
+    requestId,
+    title,
+    message
+  }).catch((err) => console.warn("[Notification] Warranty notification sync failed:", err.message));
 }
 
 async function addRequestEvent(requestId: number, status: string, note: string | null, actorRole: string | null, actorName: string | null) {
-  await ensureWarrantyTables();
   await execute(
     `
       INSERT INTO warranty_request_events (request_id, status, note, actor_role, actor_name)
@@ -312,7 +258,6 @@ async function addRequestEvent(requestId: number, status: string, note: string |
 
 async function attachFilesToRequest(requestId: number, files: UploadedWarrantyFile[], source: "CUSTOMER" | "STAFF") {
   if (!Array.isArray(files) || files.length === 0) return [];
-  await ensureWarrantyTables();
 
   const attachments = files.map((file) => ({
     fileUrl: `/uploads/warranty-requests/${file.filename}`,
@@ -341,10 +286,27 @@ function getCategoryNameFromWarranty(warranty: any) {
   return warranty?.OrderItem?.ProductSku?.Product?.Category?.name || null;
 }
 
+function calculateMonthsBetween(start?: Date | string | null, end?: Date | string | null): number {
+  if (!start || !end) return 24;
+  const d1 = new Date(start);
+  const d2 = new Date(end);
+  const diffMonths = Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24 * 30.4375));
+  return diffMonths > 0 ? diffMonths : 24;
+}
+
 function formatWarranty(warranty: any, latestRequest?: any) {
   const expiresAt = warranty.expires_at ? new Date(warranty.expires_at) : null;
   const remainingDays = expiresAt ? Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / 86400000)) : null;
   const status = expiresAt && expiresAt.getTime() < Date.now() ? "EXPIRED" : warranty.status;
+
+  const masterMonths = Number(
+    warranty.OrderItem?.ProductSku?.warranty_months ||
+    warranty.OrderItem?.ProductSku?.Product?.warranty_months
+  );
+
+  const resolvedMonths = (warranty.activated_at && warranty.expires_at)
+    ? calculateMonthsBetween(warranty.activated_at, warranty.expires_at)
+    : (masterMonths > 0 ? masterMonths : 24);
 
   return {
     id: warranty.id,
@@ -353,9 +315,9 @@ function formatWarranty(warranty: any, latestRequest?: any) {
     orderItemId: warranty.order_item_id,
     skuId: warranty.sku_id,
     warrantyCode: warranty.warranty_code,
-    serialNumber: warranty.OrderItem?.sku_snapshot || null,
+    serialNumber: warranty.serial_number || warranty.OrderItem?.sku_snapshot || null,
     status,
-    warrantyMonths: 12,
+    warrantyMonths: resolvedMonths,
     startDate: warranty.activated_at,
     endDate: warranty.expires_at,
     activatedAt: warranty.activated_at,
@@ -380,6 +342,8 @@ function formatWarranty(warranty: any, latestRequest?: any) {
 function buildLookupWhere(value: string) {
   const clauses: any[] = [
     { warranty_code: value },
+    { serial_number: value },
+    { serial_number: { contains: value } },
     { warranty_code: { contains: value } },
     { OrderItem: { sku_snapshot: { contains: value } } },
     { User: { phone: { contains: value } } }
@@ -393,8 +357,6 @@ function buildLookupWhere(value: string) {
 }
 
 async function getWarrantyRequestsBase(whereSql: string, params: any[]) {
-  await ensureWarrantyTables();
-
   const rows = await queryRows<any>(
     `
       SELECT
@@ -587,7 +549,6 @@ async function getWarrantyRequestsBase(whereSql: string, params: any[]) {
 
 async function getLatestRequestMapByWarrantyIds(warrantyIds: number[]) {
   if (warrantyIds.length === 0) return new Map<number, any>();
-  await ensureWarrantyTables();
 
   const placeholders = warrantyIds.map(() => "?").join(", ");
   const rows = await queryRows<any>(
@@ -613,7 +574,7 @@ export const getEligibleWarrantyItems = asyncHandler(async (req: Request, res: R
   const eligibleItems = await prisma.orderItem.findMany({
     where: {
       Order: { user_id: userId, status: "DELIVERED" },
-      WarrantyItem: null
+      WarrantyItem: { none: {} }
     }
   });
 
@@ -687,8 +648,14 @@ export const activateWarranty = asyncHandler(async (req: Request, res: Response)
 
   const existing = await prisma.warrantyItem.findFirst({ where: { order_item_id: id } });
   if (existing) {
-    throw new AppError("Sáº£n pháº©m nÃ y Ä‘Ã£ Ä‘Æ°á»£c kÃ­ch hoáº¡t báº£o hÃ nh", 400);
+    throw new AppError("Sản phẩm này đã được kích hoạt bảo hành", 400);
   }
+
+  const assignedSerial = await prisma.orderItemSerial.findFirst({
+    where: { order_item_id: id }
+  });
+  const serialNum = assignedSerial?.serial_number || null;
+  const warrantyCode = serialNum ? `BH-${serialNum}` : generateWarrantyCode(id);
 
   const now = new Date();
   const warranty = await prisma.warrantyItem.create({
@@ -697,8 +664,9 @@ export const activateWarranty = asyncHandler(async (req: Request, res: Response)
       order_item_id: id,
       order_id: orderItem.order_id,
       sku_id: orderItem.product_variant_id,
-      warranty_code: generateWarrantyCode(id),
-      note: note || null,
+      serial_number: serialNum,
+      warranty_code: warrantyCode,
+      note: note || (serialNum ? `Kích hoạt theo S/N ${serialNum}` : null),
       status: "ACTIVE",
       activated_at: now,
       expires_at: addWarrantyPeriod(now, getWarrantyMonthsFromItem(orderItem))
@@ -720,6 +688,13 @@ export const activateWarranty = asyncHandler(async (req: Request, res: Response)
       Order: true
     }
   });
+
+  if (assignedSerial) {
+    await prisma.orderItemSerial.update({
+      where: { id: assignedSerial.id },
+      data: { warranty_id: warranty.id, status: "IN_WARRANTY" }
+    });
+  }
 
   res.status(201).json({ success: true, data: formatWarranty(warranty) });
 });
@@ -783,8 +758,6 @@ export const lookupWarranty = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const submitWarrantyRequest = asyncHandler(async (req: Request, res: Response) => {
-  await ensureWarrantyTables();
-
   const files = (((req as Request & { files?: UploadedWarrantyFile[] }).files) || []) as UploadedWarrantyFile[];
   const lookupValue = String(req.body?.lookupValue || req.body?.warrantyCode || req.body?.serial || req.body?.orderId || "").trim();
   const issueDescription = String(req.body?.issueDescription || req.body?.description || "").trim();
@@ -924,7 +897,6 @@ export const getMyWarrantyRequests = asyncHandler(async (req: Request, res: Resp
 
 export const getMyWarrantyNotifications = asyncHandler(async (req: Request, res: Response) => {
   const userId = getUserIdFromRequest(req);
-  await ensureWarrantyTables();
   const rows = await queryRows<any>(
     `
       SELECT id, request_id AS requestId, title, message, is_read AS isRead, created_at AS createdAt
@@ -939,7 +911,6 @@ export const getMyWarrantyNotifications = asyncHandler(async (req: Request, res:
 });
 
 export const getAdminWarrantyRequests = asyncHandler(async (req: Request, res: Response) => {
-  await ensureWarrantyTables();
   const status = String(req.query.status || "").trim().toUpperCase();
   const keyword = String(req.query.q || req.query.keyword || "").trim();
 
@@ -961,7 +932,6 @@ export const getAdminWarrantyRequests = asyncHandler(async (req: Request, res: R
 });
 
 export const updateAdminWarrantyRequest = asyncHandler(async (req: Request, res: Response) => {
-  await ensureWarrantyTables();
   const requestId = Number(req.params.requestId);
   if (!requestId) throw new AppError("Thiáº¿u requestId", 400);
 

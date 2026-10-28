@@ -16,6 +16,7 @@ export const PAYMENT_STATUS_META = {
   PAID: { label: "Đã thanh toán", tone: "#047857" },
   REJECTED: { label: "Thanh toán bị từ chối", tone: "#b91c1c" },
   FAILED: { label: "Thanh toán thất bại", tone: "#b91c1c" },
+  EXPIRED: { label: "Hết hạn thanh toán (Đã hoàn kho)", tone: "#dc2626" },
   CANCELED: { label: "Đã hủy thanh toán", tone: "#64748b" },
   PAYMENT_CANCELLED: { label: "Đã hủy thanh toán", tone: "#64748b" }
 };

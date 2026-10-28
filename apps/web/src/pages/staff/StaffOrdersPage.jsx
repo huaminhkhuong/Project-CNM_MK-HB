@@ -8,7 +8,10 @@ import {
   getStaffOrderDetail,
   getStaffOrders,
   updateStaffConsultationNote,
-  updateStaffOrderStatus
+  updateStaffOrderStatus,
+  getStaffOrderSerials,
+  assignStaffOrderSerials,
+  autoGenerateStaffOrderSerials
 } from "../../services/staff.service";
 
 const STORAGE_KEY = "pcmall_staff_selected_order";
@@ -419,6 +422,175 @@ function StaffOrderItemsTable({ selectedOrder }) {
   );
 }
 
+function StaffSerialNumbersManager({
+  orderSerialsInfo,
+  serialsLoading,
+  serialsSaving,
+  serialsError,
+  serialInputs,
+  setSerialInputs,
+  handleSaveSerials,
+  handleAutoGenerateSerials,
+  selectedOrder
+}) {
+  const isCanceled = selectedOrder?.status === "CANCELED";
+  const isDeliveredOrCompleted = selectedOrder?.status === "DELIVERED" || selectedOrder?.status === "COMPLETED";
+
+  const handleInputChange = (orderItemId, slotIndex, value) => {
+    setSerialInputs((prev) => {
+      const currentList = [...(prev[orderItemId] || [])];
+      currentList[slotIndex] = value;
+      return {
+        ...prev,
+        [orderItemId]: currentList
+      };
+    });
+  };
+
+  const isComplete = Boolean(orderSerialsInfo?.isFullyAssigned);
+  const totalRequired = orderSerialsInfo?.totalRequiredSerials || 0;
+  const totalAssigned = orderSerialsInfo?.totalAssignedSerials || 0;
+
+  return (
+    <section className="staff-card staff-serials-manager" style={{ border: isComplete ? "1px solid #bbf7d0" : "1px solid #fde68a" }}>
+      <div className="staff-orders-section__head" style={{ flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <h3 style={{ margin: 0 }}>Quản trị Serial Number / IMEI xuất kho</h3>
+            <span
+              className={`staff-badge ${isComplete ? "staff-badge--success" : "staff-badge--warning"}`}
+              style={{ fontSize: 13, padding: "3px 12px" }}
+            >
+              {isComplete ? `✅ Đã gán đủ ${totalAssigned}/${totalRequired} S/N` : `⚠️ Chưa đủ (${totalAssigned}/${totalRequired} S/N)`}
+            </span>
+          </div>
+          <p style={{ margin: "4px 0 0", color: "#64748b" }}>
+            Gán Serial Number thực tế in trên vỏ hộp & thân linh kiện để đồng bộ bảo hành điện tử chính hãng 1:1 khi xuất kho.
+          </p>
+        </div>
+
+        {!isCanceled && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="staff-btn staff-btn--secondary"
+              onClick={handleAutoGenerateSerials}
+              disabled={serialsSaving || serialsLoading}
+              title="Tự động sinh mã Serial Number thực tế mẫu cho demo kho"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 }}
+            >
+              🎲 Tự động điền S/N mẫu
+            </button>
+            <button
+              type="button"
+              className="staff-btn staff-btn--primary"
+              onClick={handleSaveSerials}
+              disabled={serialsSaving || serialsLoading}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 }}
+            >
+              {serialsSaving ? "Đang lưu..." : "💾 Lưu Serial Number"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {serialsError ? (
+        <div className="staff-orders-alert staff-orders-alert--error" style={{ fontSize: 14 }}>
+          {serialsError}
+        </div>
+      ) : null}
+
+      {!isComplete && !isCanceled && selectedOrder?.status === "PROCESSING" ? (
+        <div style={{ padding: "10px 14px", borderRadius: 12, background: "#fffbeb", border: "1px solid #fef08a", color: "#854d0e", fontSize: 13, fontWeight: 700 }}>
+          ⚠️ Bắt buộc: Nhân viên kho cần gán đủ Serial Number cho tất cả linh kiện trước khi bấm "Chuyển sang giao hàng (SHIPPED)".
+        </div>
+      ) : null}
+
+      {serialsLoading ? (
+        <div style={{ padding: 20, textAlign: "center", color: "#64748b" }}>Đang tải danh sách Serial Number...</div>
+      ) : (orderSerialsInfo?.items || []).length === 0 ? (
+        <div className="staff-orders-empty">Đơn hàng không có linh kiện cần gán Serial Number.</div>
+      ) : (
+        <div style={{ display: "grid", gap: 16 }}>
+          {(orderSerialsInfo?.items || []).map((item) => {
+            const assigned = item.assignedSerials || [];
+            const required = item.requiredQuantity || 1;
+            const currentInputs = serialInputs[item.orderItemId] || [];
+
+            return (
+              <div
+                key={item.orderItemId}
+                style={{
+                  padding: 16,
+                  borderRadius: 16,
+                  background: "#f8fafc",
+                  border: item.isComplete ? "1px solid #cbd5e1" : "1px solid #fde047"
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+                  <div>
+                    <strong style={{ fontSize: 15, color: "#0f172a" }}>{item.productName}</strong>
+                    <div style={{ fontSize: 13, color: "#64748b", marginTop: 2 }}>
+                      SKU: <code style={{ background: "#e2e8f0", padding: "1px 6px", borderRadius: 4 }}>{item.sku}</code> • Số lượng: <strong>{required} cái</strong>
+                    </div>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 800,
+                      padding: "4px 10px",
+                      borderRadius: 8,
+                      background: item.isComplete ? "#dcfce7" : "#fef9c3",
+                      color: item.isComplete ? "#166534" : "#854d0e"
+                    }}
+                  >
+                    {item.isComplete ? `Đã đủ ${assigned.length}/${required}` : `Chưa đủ (${assigned.length}/${required})`}
+                  </span>
+                </div>
+
+                <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
+                  {Array.from({ length: required }).map((_, slotIdx) => {
+                    const assignedRecord = assigned[slotIdx];
+                    const val = currentInputs[slotIdx] !== undefined ? currentInputs[slotIdx] : (assignedRecord?.serialNumber || "");
+                    const isAssigned = Boolean(assignedRecord?.serialNumber);
+
+                    return (
+                      <div key={slotIdx} style={{ display: "grid", gap: 4 }}>
+                        <label style={{ fontSize: 12, fontWeight: 700, color: "#475569", display: "flex", justifyContent: "space-between" }}>
+                          <span>🏷️ Serial / IMEI #{slotIdx + 1}</span>
+                          {assignedRecord?.warrantyId ? (
+                            <span style={{ color: "#059669", fontSize: 11 }}>Đã kích hoạt BH</span>
+                          ) : isAssigned ? (
+                            <span style={{ color: "#2563eb", fontSize: 11 }}>Đã gán</span>
+                          ) : null}
+                        </label>
+                        <input
+                          type="text"
+                          className="staff-orders-field"
+                          placeholder={`Nhập/Quét S/N #${slotIdx + 1}`}
+                          value={val}
+                          disabled={isCanceled || isDeliveredOrCompleted}
+                          onChange={(e) => handleInputChange(item.orderItemId, slotIdx, e.target.value)}
+                          style={{
+                            fontFamily: "monospace",
+                            fontWeight: 700,
+                            background: val ? "#ffffff" : "#f1f5f9",
+                            borderColor: val ? "#3b82f6" : "#cbd5e1"
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function StaffPaymentPanel({ selectedOrder }) {
   return (
     <section className="staff-card">
@@ -539,6 +711,11 @@ export function StaffOrdersPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [trackingError, setTrackingError] = useState("");
+  const [orderSerialsInfo, setOrderSerialsInfo] = useState(null);
+  const [serialInputs, setSerialInputs] = useState({});
+  const [serialsLoading, setSerialsLoading] = useState(false);
+  const [serialsSaving, setSerialsSaving] = useState(false);
+  const [serialsError, setSerialsError] = useState("");
 
   useEffect(() => {
     loadOrders();
@@ -548,6 +725,8 @@ export function StaffOrdersPage() {
   useEffect(() => {
     if (!selectedOrderId) {
       setSelectedOrder(null);
+      setOrderSerialsInfo(null);
+      setSerialInputs({});
       window.localStorage.removeItem(STORAGE_KEY);
       return;
     }
@@ -666,6 +845,81 @@ export function StaffOrdersPage() {
     }
   }
 
+  async function loadOrderSerials(orderId) {
+    if (!orderId) {
+      setOrderSerialsInfo(null);
+      setSerialInputs({});
+      return;
+    }
+    try {
+      setSerialsLoading(true);
+      setSerialsError("");
+      const response = await getStaffOrderSerials(orderId);
+      const info = getEnvelopeData(response, null);
+      setOrderSerialsInfo(info);
+
+      const initial = {};
+      (info?.items || []).forEach((item) => {
+        const assigned = (item.assignedSerials || []).map((s) => s.serialNumber);
+        const slots = [];
+        for (let i = 0; i < item.requiredQuantity; i++) {
+          slots.push(assigned[i] || "");
+        }
+        initial[item.orderItemId] = slots;
+      });
+      setSerialInputs(initial);
+    } catch (err) {
+      setSerialsError(getErrorMessage(err, "Không thể tải thông tin Serial Number."));
+    } finally {
+      setSerialsLoading(false);
+    }
+  }
+
+  async function handleSaveSerials() {
+    if (!selectedOrder?.id) return;
+    try {
+      setSerialsSaving(true);
+      setSerialsError("");
+      const assignments = Object.entries(serialInputs).map(([itemId, serials]) => ({
+        orderItemId: Number(itemId),
+        serials: (serials || []).map((s) => String(s || "").trim()).filter(Boolean)
+      }));
+
+      const response = await assignStaffOrderSerials(selectedOrder.id, assignments);
+      const info = getEnvelopeData(response, null);
+      setOrderSerialsInfo(info);
+      setSuccessMessage("Đã lưu Serial Number thành công!");
+      await loadOrderDetail(selectedOrder.id);
+    } catch (err) {
+      setSerialsError(getErrorMessage(err, "Không thể lưu Serial Number."));
+    } finally {
+      setSerialsSaving(false);
+    }
+  }
+
+  async function handleAutoGenerateSerials() {
+    if (!selectedOrder?.id) return;
+    try {
+      setSerialsSaving(true);
+      setSerialsError("");
+      const response = await autoGenerateStaffOrderSerials(selectedOrder.id);
+      const info = getEnvelopeData(response, null);
+      setOrderSerialsInfo(info);
+
+      const initial = {};
+      (info?.items || []).forEach((item) => {
+        initial[item.orderItemId] = (item.assignedSerials || []).map((s) => s.serialNumber);
+      });
+      setSerialInputs(initial);
+      setSuccessMessage("Đã tự động tạo và gán Serial Number mẫu thành công!");
+      await loadOrderDetail(selectedOrder.id);
+    } catch (err) {
+      setSerialsError(getErrorMessage(err, "Không thể tự động tạo Serial Number."));
+    } finally {
+      setSerialsSaving(false);
+    }
+  }
+
   async function loadOrderDetail(orderId) {
     try {
       setDetailLoading(true);
@@ -676,6 +930,7 @@ export function StaffOrdersPage() {
       setTrackingCode(order?.shipment?.trackingCode || "");
       setConsultationNote(order?.note || "");
       setTrackingError("");
+      loadOrderSerials(orderId);
     } catch (error) {
       setErrorMessage(getErrorMessage(error, "Không thể tải chi tiết đơn hàng."));
     } finally {
@@ -690,6 +945,9 @@ export function StaffOrdersPage() {
     setTrackingCode(order?.shipment?.trackingCode || "");
     setConsultationNote(order?.note || "");
     setTrackingError("");
+    if (order?.id) {
+      loadOrderSerials(order.id);
+    }
   }
 
   async function refreshCurrentOrder() {
@@ -718,6 +976,14 @@ export function StaffOrdersPage() {
 
   async function handleShipOrder() {
     if (!selectedOrder) return;
+
+    // Strict validation: Require serial numbers for all hardware items before shipping
+    if (orderSerialsInfo && !orderSerialsInfo.isFullyAssigned) {
+      setErrorMessage(
+        `Không thể xuất kho: Đơn hàng chưa được gán đủ Serial Number cho các linh kiện (${orderSerialsInfo.totalAssignedSerials || 0}/${orderSerialsInfo.totalRequiredSerials || 0} S/N). Vui lòng gán S/N trước khi chuyển sang Đang giao.`
+      );
+      return;
+    }
 
     const normalizedTracking = trackingCode.trim();
     if (!normalizedTracking) {
@@ -1120,6 +1386,17 @@ export function StaffOrdersPage() {
                 <StaffOrderTimeline orderTimeline={orderTimeline} />
                 <StaffCustomerInfo selectedOrder={selectedOrder} customer={customer} selectedStatusMeta={selectedStatusMeta} />
                 <StaffOrderItemsTable selectedOrder={selectedOrder} />
+                <StaffSerialNumbersManager
+                  orderSerialsInfo={orderSerialsInfo}
+                  serialsLoading={serialsLoading}
+                  serialsSaving={serialsSaving}
+                  serialsError={serialsError}
+                  serialInputs={serialInputs}
+                  setSerialInputs={setSerialInputs}
+                  handleSaveSerials={handleSaveSerials}
+                  handleAutoGenerateSerials={handleAutoGenerateSerials}
+                  selectedOrder={selectedOrder}
+                />
                 <StaffPaymentPanel selectedOrder={selectedOrder} />
                 <StaffShipmentPanel
                   selectedOrder={selectedOrder}

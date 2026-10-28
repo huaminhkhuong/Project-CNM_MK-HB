@@ -1,38 +1,39 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: cnm_postgres_prod
+  mysql:
+    image: mysql:8.0
+    container_name: cnm_mysql_prod
     restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-cnm_mk_hb}
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-password}
+      MYSQL_DATABASE: ${DB_NAME:-cnm_mk_hb}
+      MYSQL_USER: ${DB_USER:-cnm_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-password}
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:3306:3306"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mysql_prod_data:/var/lib/mysql
     networks:
       - cnm_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-cnm_mk_hb}"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD:-password}"]
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 10s
+      start_period: 15s
 
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: cnm_pgadmin_prod
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    container_name: cnm_phpmyadmin_prod
     restart: unless-stopped
     environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@admin.com}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
-      PGADMIN_CONFIG_SERVER_MODE: 'False'
-      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_ARBITRARY: 0
     ports:
-      - "5050:80"
+      - "127.0.0.1:8080:80"
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
     networks:
       - cnm_network
@@ -44,16 +45,16 @@ services:
     container_name: cnm_api_prod
     restart: unless-stopped
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-cnm_mk_hb}?schema=public
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: ${POSTGRES_DB:-cnm_mk_hb}
-      DB_USER: ${POSTGRES_USER:-postgres}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DATABASE_URL: mysql://${DB_USER:-root}:${DB_PASSWORD:-password}@mysql:3306/${DB_NAME:-cnm_mk_hb}
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-cnm_mk_hb}
+      DB_USER: ${DB_USER:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
       PORT: 4000
       FRONTEND_URL: ${FRONTEND_URL:-https://yourdomain.com}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
@@ -93,7 +94,7 @@ services:
     networks:
       - cnm_network
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:5173',(res)=>process.exit(res.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:5173/"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -122,7 +123,7 @@ services:
       retries: 3
 
 volumes:
-  postgres_data:
+  mysql_prod_data:
 
 networks:
   cnm_network:

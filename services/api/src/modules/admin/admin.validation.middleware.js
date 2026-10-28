@@ -19,7 +19,7 @@ function isNonNegativeNumber(value) {
 }
 
 function validateCreateProduct(req, res, next) {
-  const { name, categoryId, brandId } = req.body || {};
+  const { name, categoryId, brandId, warrantyMonths } = req.body || {};
   const errors = [];
 
   if (!isNonEmpty(name)) {
@@ -34,6 +34,10 @@ function validateCreateProduct(req, res, next) {
     errors.push({ field: "brandId", message: "brandId must be a positive integer" });
   }
 
+  if (warrantyMonths !== undefined && warrantyMonths !== null && warrantyMonths !== "" && !isPositiveInteger(warrantyMonths)) {
+    errors.push({ field: "warrantyMonths", message: "warrantyMonths must be a positive integer" });
+  }
+
   if (errors.length > 0) {
     return sendValidationError(res, errors);
   }
@@ -42,8 +46,8 @@ function validateCreateProduct(req, res, next) {
 }
 
 function validateUpdateProduct(req, res, next) {
-  const { name, categoryId, brandId, slug } = req.body || {};
-  const allowedKeys = ["name", "categoryId", "brandId", "slug", "description"];
+  const { name, categoryId, brandId, slug, warrantyMonths } = req.body || {};
+  const allowedKeys = ["name", "categoryId", "brandId", "slug", "description", "warrantyMonths", "warranty_months"];
   const hasAnyField = allowedKeys.some((key) => Object.prototype.hasOwnProperty.call(req.body || {}, key));
   const errors = [];
 
@@ -65,6 +69,11 @@ function validateUpdateProduct(req, res, next) {
 
   if (Object.prototype.hasOwnProperty.call(req.body || {}, "slug") && !isNonEmpty(slug)) {
     errors.push({ field: "slug", message: "Slug cannot be empty" });
+  }
+
+  const rawMonths = req.body?.warrantyMonths ?? req.body?.warranty_months;
+  if (rawMonths !== undefined && rawMonths !== null && rawMonths !== "" && !isPositiveInteger(rawMonths)) {
+    errors.push({ field: "warrantyMonths", message: "warrantyMonths must be a positive integer" });
   }
 
   if (errors.length > 0) {
@@ -206,6 +215,7 @@ function validateAttributeValue(req, res, next) {
 
 function validateSku(req, res, next) {
   const { productId, sku, price, stock, attributeValueIds } = req.body || {};
+  const rawMonths = req.body?.warrantyMonths ?? req.body?.warranty_months;
   const errors = [];
 
   if (!isPositiveInteger(productId)) errors.push({ field: "productId", message: "productId must be a positive integer" });
@@ -213,6 +223,9 @@ function validateSku(req, res, next) {
   if (!isNonNegativeNumber(price)) errors.push({ field: "price", message: "price must be a non-negative number" });
   if (stock !== undefined && !isNonNegativeNumber(stock)) errors.push({ field: "stock", message: "stock must be a non-negative number" });
   if (attributeValueIds !== undefined && !Array.isArray(attributeValueIds)) errors.push({ field: "attributeValueIds", message: "attributeValueIds must be an array" });
+  if (rawMonths !== undefined && rawMonths !== null && rawMonths !== "" && !isPositiveInteger(rawMonths)) {
+    errors.push({ field: "warrantyMonths", message: "warrantyMonths must be a positive integer" });
+  }
 
   if (errors.length > 0) {
     return sendValidationError(res, errors);
@@ -222,7 +235,7 @@ function validateSku(req, res, next) {
 }
 
 function validateUpdateSku(req, res, next) {
-  const allowedKeys = ["productId", "sku", "price", "stock", "imageUrl", "status", "attributeValueIds"];
+  const allowedKeys = ["productId", "sku", "price", "stock", "imageUrl", "status", "attributeValueIds", "warrantyMonths", "warranty_months"];
   const body = req.body || {};
   const hasAnyField = allowedKeys.some((key) => Object.prototype.hasOwnProperty.call(body, key));
   const errors = [];
@@ -233,6 +246,10 @@ function validateUpdateSku(req, res, next) {
   if (Object.prototype.hasOwnProperty.call(body, "price") && !isNonNegativeNumber(body.price)) errors.push({ field: "price", message: "price must be a non-negative number" });
   if (Object.prototype.hasOwnProperty.call(body, "stock") && !isNonNegativeNumber(body.stock)) errors.push({ field: "stock", message: "stock must be a non-negative number" });
   if (Object.prototype.hasOwnProperty.call(body, "attributeValueIds") && !Array.isArray(body.attributeValueIds)) errors.push({ field: "attributeValueIds", message: "attributeValueIds must be an array" });
+  const rawMonths = body.warrantyMonths ?? body.warranty_months;
+  if (rawMonths !== undefined && rawMonths !== null && rawMonths !== "" && !isPositiveInteger(rawMonths)) {
+    errors.push({ field: "warrantyMonths", message: "warrantyMonths must be a positive integer" });
+  }
 
   if (errors.length > 0) {
     return sendValidationError(res, errors);

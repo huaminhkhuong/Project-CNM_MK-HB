@@ -45,7 +45,7 @@ docker-compose down
 | Biến Môi Trường | Mô Tả | Ví Dụ |
 |------------------|-------|-------|
 | `PORT` | Cổng dịch vụ API | `4000` |
-| `DATABASE_URL` | Chuỗi kết nối MySQL Database | `mysql://root:password@localhost:3306/cnm_ecommerce` |
+| `DATABASE_URL` | Chuỗi kết nối MySQL Database | `mysql://root:password@127.0.0.1:3308/cnm_mk_hb` |
 | `JWT_SECRET` | Khóa bí mật mã hóa Token đăng nhập | `your-secret-jwt-key` |
 | `GEMINI_API_KEY` | Key AI Google Gemini cho AI Advisor | `AIzaSy...` |
 | `SENTRY_DSN` | URL Sentry Error Tracking (Tùy chọn) | `https://xxxx@sentry.io/12345` |

@@ -43,6 +43,8 @@ function mapDbOrderToUi(dbOrder) {
     shipmentStatus: shipment?.status || null,
     totalAmount: dbOrder.total_amount || dbOrder.totalAmount,
     shippingFee: dbOrder.shipping_fee || dbOrder.shippingFee || 0,
+    discountAmount: dbOrder.discount_amount || dbOrder.discountAmount || 0,
+    couponCode: dbOrder.coupon_code || dbOrder.couponCode || null,
     finalAmount: dbOrder.final_amount || dbOrder.finalAmount || dbOrder.total_amount || dbOrder.totalAmount || 0,
     items: (dbOrder.OrderItem || dbOrder.items || []).map((item) => ({
       id: item.id,
@@ -467,6 +469,35 @@ export function OrderDetailPage() {
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 16 }}>{item.productName}</div>
                     <div style={{ fontSize: 14, color: "var(--muted)", marginTop: 4 }}>SKU: {item.sku || "Không rõ"}</div>
+                    {item.serialNumbers && item.serialNumbers.length > 0 ? (
+                      <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.04em" }}>S/N xuất kho:</span>
+                        {item.serialNumbers.map((sn, sIdx) => (
+                          <Link
+                            key={sIdx}
+                            to={`/warranties?lookup=${encodeURIComponent(sn)}`}
+                            title="Bấm để tra cứu bảo hành theo Serial Number này"
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 4,
+                              padding: "2px 8px",
+                              borderRadius: 6,
+                              background: "#f1f5f9",
+                              border: "1px solid #cbd5e1",
+                              fontFamily: "monospace",
+                              fontSize: 12,
+                              fontWeight: 700,
+                              color: "#1e40af",
+                              textDecoration: "none",
+                              transition: "all 0.15s ease"
+                            }}
+                          >
+                            🏷️ {sn}
+                          </Link>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                   <div style={{ textAlign: "right" }}>
                     <div style={{ fontWeight: 800, fontSize: 18 }}>{formatCurrency(item.lineTotal)} VND</div>
@@ -512,6 +543,14 @@ export function OrderDetailPage() {
                 <span>Tạm tính</span>
                 <span>{formatCurrency(order.totalAmount)} VND</span>
               </div>
+              {Number(order.discountAmount) > 0 ? (
+                <div style={{ display: "flex", justifyContent: "space-between", color: "#10b981", fontWeight: 700 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span>🎟️</span> Giảm giá Voucher {order.couponCode ? `(${order.couponCode})` : ""}
+                  </span>
+                  <span>-{formatCurrency(order.discountAmount)} VND</span>
+                </div>
+              ) : null}
               <div style={{ display: "flex", justifyContent: "space-between", color: "var(--muted)" }}>
                 <span>Phí dịch vụ và vận chuyển</span>
                 <span>{formatCurrency(order.shippingFee)} VND</span>
