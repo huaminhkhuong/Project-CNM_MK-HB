@@ -166,9 +166,17 @@ function buildIssue(rule, sourceItem, targetItem, sourceAttribute, targetAttribu
   };
 }
 
-async function checkBuildCompatibility(userId, buildId) {
+async function checkBuildCompatibility(userId, buildId, userRole = null) {
   const parsedBuildId = toPositiveInteger(buildId, "buildId");
-  const build = await findBuild(userId, parsedBuildId);
+  const normalizedRole = String(userRole || "").toUpperCase();
+  let build = null;
+
+  if (["TECH_STAFF", "TECHNICIAN", "ADMIN"].includes(normalizedRole)) {
+    const rows = await query("SELECT id, user_id AS userId, name FROM pc_builds WHERE id = ? LIMIT 1", [parsedBuildId]);
+    build = rows[0] || null;
+  } else {
+    build = await findBuild(userId, parsedBuildId);
+  }
 
   if (!build) {
     throw createError("PC build not found", 404);

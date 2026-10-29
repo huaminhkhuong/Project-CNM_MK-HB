@@ -1,4 +1,4 @@
-﻿const { prisma } = require("../../config/prisma");
+const { prisma } = require("../../config/prisma");
 const { createError, toPositiveInteger } = require("../../utils/service-helpers");
 
 function normalizeKey(value) {
@@ -38,7 +38,7 @@ async function findAttributeValueById(attributeValueId) {
 async function ensureUniqueAttributeName(name, excludeId = null) {
   const existing = await prisma.attribute.findFirst({
     where: {
-      name: { equals: name.trim(), mode: "insensitive" },
+      name: name.trim(),
       ...(excludeId ? { NOT: { id: Number(excludeId) } } : {})
     }
   });
@@ -49,7 +49,7 @@ async function ensureUniqueAttributeValue(attributeId, value, excludeId = null) 
   const existing = await prisma.attributeValue.findFirst({
     where: {
       attribute_id: Number(attributeId),
-      value: { equals: value.trim(), mode: "insensitive" },
+      value: value.trim(),
       ...(excludeId ? { NOT: { id: Number(excludeId) } } : {})
     }
   });

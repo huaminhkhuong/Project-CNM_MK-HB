@@ -84,14 +84,18 @@ function validateUpdateProduct(req, res, next) {
 }
 
 function validateChangeProductStatus(req, res, next) {
+  let status = req.body?.status;
+  if (!status && typeof req.body?.isActive === "boolean") {
+    status = req.body.isActive ? "ACTIVE" : "INACTIVE";
+  }
+  const normalizedStatus = String(status || "").trim().toUpperCase();
   const allowedStatuses = ["ACTIVE", "INACTIVE"];
-  const status = String(req.body?.status || "").trim().toUpperCase();
 
-  if (!allowedStatuses.includes(status)) {
+  if (!allowedStatuses.includes(normalizedStatus)) {
     return sendValidationError(res, [{ field: "status", message: "status must be ACTIVE or INACTIVE" }]);
   }
 
-  req.body.status = status;
+  req.body.status = normalizedStatus;
   next();
 }
 

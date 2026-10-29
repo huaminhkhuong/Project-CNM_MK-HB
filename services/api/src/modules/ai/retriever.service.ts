@@ -96,7 +96,7 @@ export class RetrieverService {
 
     const results = VectorStoreService.query("products", queryVec, {
       topK: topK * 2, // Lấy dư để lọc chi tiết
-      minScore: 0.0,
+      minScore: -1.0,
       filterFn: (meta: any) => {
         // 1. Lọc theo Danh mục (nếu có)
         if (targetCategory && meta.category) {
@@ -187,7 +187,7 @@ export class RetrieverService {
   ): Promise<RetrievedKnowledge[]> {
     this.ensureLoaded();
 
-    const { topK = 3, category, minScore = 0.1 } = options;
+    const { topK = 3, category, minScore = 0.0 } = options;
     const queryVec = await EmbeddingService.generateEmbedding(queryText);
 
     const results = VectorStoreService.query("knowledge", queryVec, {

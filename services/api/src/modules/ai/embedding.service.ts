@@ -22,6 +22,11 @@ export class EmbeddingService {
       return new Array(this.VECTOR_DIMENSION).fill(0);
     }
 
+    // 0. Khi chạy trong môi trường test, ưu tiên Deterministic Vector để đồng bộ với index cục bộ
+    if (process.env.NODE_ENV === "test" && process.env.TEST_LIVE_EMBEDDINGS !== "true") {
+      return this.generateDeterministicVector(cleanText);
+    }
+
     const geminiKey = process.env.GEMINI_API_KEY || (env as any).geminiApiKey;
     const openAiKey = process.env.OPENAI_API_KEY || (env as any).openaiApiKey;
 
@@ -65,7 +70,8 @@ export class EmbeddingService {
           model: `models/${model}`,
           content: {
             parts: [{ text }]
-          }
+          },
+          outputDimensionality: this.VECTOR_DIMENSION
         };
 
         const response = await fetch(url, {
@@ -121,7 +127,12 @@ export class EmbeddingService {
    */
   public static generateDeterministicVector(text: string, dim = this.VECTOR_DIMENSION): number[] {
     const vector = new Array(dim).fill(0);
-    const normalized = text.toLowerCase().replace(/[^a-z0-9\s]/gi, " ");
+    const normalized = (text || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[đĐ]/g, "d")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/gi, " ");
     const words = normalized.split(/\s+/).filter(Boolean);
 
     if (words.length === 0) return vector;
