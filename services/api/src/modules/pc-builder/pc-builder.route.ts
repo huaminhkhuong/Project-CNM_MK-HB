@@ -7,8 +7,14 @@ const router = Router();
 
 const publicAiLimiter = createRateLimiter({
   windowMs: 60 * 1000,
-  max: 10,
-  message: "⚠️ Bạn đã gửi quá nhiều yêu cầu AI trong thời gian ngắn (Tối đa 10 lượt/phút). Vui lòng chờ 1 phút trước khi thử lại."
+  max: 20,
+  message: "⚠️ Bạn đã gửi quá nhiều yêu cầu tư vấn AI trong thời gian ngắn. Vui lòng chờ 1 phút trước khi thử lại."
+});
+
+const publicBuilderLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 120,
+  message: "⚠️ Thao tác kiểm tra tương thích quá nhanh. Vui lòng thử lại sau ít giây."
 });
 
 /**
@@ -16,10 +22,10 @@ const publicAiLimiter = createRateLimiter({
  * Organized by accessibility (Public vs Protected).
  */
 
-// -- Public Routes (Rate Limited: 10 requests / minute) --
-router.post("/suggest-build", publicAiLimiter, pcBuilderController.suggestBuild);
-router.post("/suggest", publicAiLimiter, pcBuilderController.suggestBuild);
-router.post("/check-compatibility", publicAiLimiter, pcBuilderController.checkRawCompatibility);
+// -- Public Routes --
+router.post("/suggest-build", publicBuilderLimiter, pcBuilderController.suggestBuild);
+router.post("/suggest", publicBuilderLimiter, pcBuilderController.suggestBuild);
+router.post("/check-compatibility", publicBuilderLimiter, pcBuilderController.checkRawCompatibility);
 router.get("/shared/:shareToken", pcBuilderController.getSharedBuild);
 router.post("/ai-advice", publicAiLimiter, pcBuilderController.getAiAdvice);
 

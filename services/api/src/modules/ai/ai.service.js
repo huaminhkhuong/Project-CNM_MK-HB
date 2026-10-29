@@ -74,7 +74,7 @@ function detectRequestedCategory(message) {
 function classifyAiQuestion(message) {
   const text = normalizeVietnamese(message);
   const compact = text.replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
-  if (/^(hi|hello|hey|alo|chao|chao ban|xin chao|xin chao ban)$/.test(compact) || /^(ban la ai|ban la ai vay|ai day|day la ai)$/.test(compact)) return "greeting";
+  if (/^(hi|hello|hey|alo|chao|chao ban|xin chao|xin chao ban|chao shop|xin chao shop|shop oi|hello shop)$/.test(compact) || /^(ban la ai|ban la ai vay|ai day|day la ai)$/.test(compact)) return "greeting";
   if (/(bao hanh|thanh toan|giao hang|doi tra|vnpay|cod|qr|van chuyen)/.test(text)) return "policy";
   if (/(la gi|khac gi nhau|khac nhau the nao|hoat dong nhu the nao|ddr4 va ddr5|cpu la gi|ssd nvme la gi|ram la gi)/.test(text)) return "general_knowledge";
   if (/(so sanh|chon giua|vs|versus)/.test(text)) return "comparison";
@@ -663,6 +663,22 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
   }
 
   if (intent === "unknown" && !requested.categoryKey) {
+    try {
+      const { aiOrchestratorService } = require("./ai-orchestrator.service");
+      const orchestratorRes = await aiOrchestratorService.consultChat({
+        question: message,
+        userId: userId ? Number(userId) : null
+      });
+
+      if (orchestratorRes && orchestratorRes.text && orchestratorRes.provider !== "fallback") {
+        response.reply = orchestratorRes.text;
+        response.model = orchestratorRes.model;
+        response.usage = orchestratorRes.tokenEstimate;
+        response.actions = ["Đưa vào PC Builder", "Tư vấn cấu hình"];
+        return response;
+      }
+    } catch (_orchErr) {}
+
     response.actions = [];
     response.reply = "Mình chưa xác định rõ nhu cầu của bạn nên chưa tìm sản phẩm trong hệ thống. Bạn có thể hỏi theo dạng: build PC theo ngân sách, tư vấn linh kiện (CPU, RAM, GPU), so sánh sản phẩm, hoặc hỏi bảo hành/giao hàng.";
     return response;

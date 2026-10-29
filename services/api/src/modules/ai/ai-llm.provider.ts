@@ -112,51 +112,64 @@ export class AiLlmProvider {
     jsonMode: boolean;
     timeoutMs: number;
   }): Promise<LlmResponse | null> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), args.timeoutMs);
-    const model = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+    const primaryModel = process.env.GEMINI_MODEL || "gemini-flash-lite-latest";
+    const candidateModels = Array.from(new Set([primaryModel, "gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-flash-latest"]));
 
-    try {
-      const fullText = args.systemPrompt
-        ? `${args.systemPrompt}\n\n${args.userPrompt}`
-        : args.userPrompt;
+    for (const model of candidateModels) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), args.timeoutMs);
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${args.apiKey}`;
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: fullText }] }],
+      try {
+        const bodyPayload: any = {
+          contents: [{ role: "user", parts: [{ text: args.userPrompt }] }],
           generationConfig: {
             temperature: args.temperature,
             maxOutputTokens: args.maxTokens,
             ...(args.jsonMode ? { responseMimeType: "application/json" } : {})
           }
-        })
-      });
+        };
 
-      if (!response.ok) {
-        const errText = await response.text().catch(() => "");
-        throw new Error(`Gemini status ${response.status}: ${errText}`);
+        if (args.systemPrompt && args.systemPrompt.trim()) {
+          bodyPayload.system_instruction = {
+            parts: [{ text: args.systemPrompt.trim() }]
+          };
+        }
+
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${args.apiKey}`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify(bodyPayload)
+        });
+
+        if (!response.ok) {
+          const errText = await response.text().catch(() => "");
+          console.warn(`[AiLlmProvider] Gemini model ${model} failed (${response.status}): ${errText}`);
+          continue; // try next candidate model
+        }
+
+        const data: any = await response.json();
+        const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+
+        if (!rawText) continue;
+
+        const parsedJson = args.jsonMode ? this.safeParseJson(rawText) : undefined;
+        return {
+          text: rawText,
+          parsedJson,
+          provider: "gemini",
+          model,
+          success: true
+        };
+      } catch (err: any) {
+        console.warn(`[AiLlmProvider] Gemini model ${model} threw error:`, err?.message || err);
+      } finally {
+        clearTimeout(timer);
       }
-
-      const data: any = await response.json();
-      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
-
-      if (!rawText) return null;
-
-      const parsedJson = args.jsonMode ? this.safeParseJson(rawText) : undefined;
-      return {
-        text: rawText,
-        parsedJson,
-        provider: "gemini",
-        model,
-        success: true
-      };
-    } finally {
-      clearTimeout(timer);
     }
+
+    return null;
   }
 
   /**

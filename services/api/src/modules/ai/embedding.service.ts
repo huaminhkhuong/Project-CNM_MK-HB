@@ -57,28 +57,33 @@ export class EmbeddingService {
    * Gọi Google Gemini REST API để lấy embedding
    */
   private static async embedWithGemini(text: string, apiKey: string): Promise<number[]> {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${apiKey}`;
-    const payload = {
-      model: "models/text-embedding-004",
-      content: {
-        parts: [{ text }]
-      }
-    };
+    const candidateModels = ["gemini-embedding-001", "text-embedding-004"];
+    for (const model of candidateModels) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:embedContent?key=${apiKey}`;
+        const payload = {
+          model: `models/${model}`,
+          content: {
+            parts: [{ text }]
+          }
+        };
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Gemini HTTP ${response.status}: ${errText}`);
+        if (!response.ok) continue;
+
+        const data: any = await response.json();
+        const values: number[] = data?.embedding?.values || [];
+        if (values.length > 0) {
+          return this.normalizeVector(values);
+        }
+      } catch (_e) {}
     }
-
-    const data = await response.json();
-    const values: number[] = data?.embedding?.values || [];
-    return this.normalizeVector(values);
+    return this.generateDeterministicVector(text);
   }
 
   /**
