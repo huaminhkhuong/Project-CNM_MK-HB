@@ -24,7 +24,9 @@ const prisma = new PrismaClient();
 // CẤU HÌNH
 // ============================================================
 
-const DATA_DIR = path.join("C:\\Users\\ASUS\\Downloads\\data\\data\\json");
+const LOCAL_RAW_JSON = path.join(__dirname, "../data/raw/json");
+const FALLBACK_DOWNLOADS_JSON = path.join("C:\\Users\\ASUS\\Downloads\\data\\data\\json");
+const DATA_DIR = fs.existsSync(LOCAL_RAW_JSON) ? LOCAL_RAW_JSON : FALLBACK_DOWNLOADS_JSON;
 
 // Map file JSON → Category chuẩn (id + tên chuẩn đồng bộ với hệ thống)
 const FILE_CATEGORY_MAP = {

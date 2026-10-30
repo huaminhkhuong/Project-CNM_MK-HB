@@ -22,8 +22,13 @@ const path = require("path");
 
 const prisma = new PrismaClient();
 
-const DATA_JSON_DIR = path.join("C:\\Users\\ASUS\\Downloads\\data\\data\\json");
-const DATA_CSV_DIR = path.join("C:\\Users\\ASUS\\Downloads\\data\\data\\csv");
+const LOCAL_JSON_DIR = path.join(__dirname, "../data/raw/json");
+const LOCAL_CSV_DIR = path.join(__dirname, "../data/raw/csv");
+const FALLBACK_JSON_DIR = path.join("C:\\Users\\ASUS\\Downloads\\data\\data\\json");
+const FALLBACK_CSV_DIR = path.join("C:\\Users\\ASUS\\Downloads\\data\\data\\csv");
+
+const DATA_JSON_DIR = fs.existsSync(LOCAL_JSON_DIR) ? LOCAL_JSON_DIR : FALLBACK_JSON_DIR;
+const DATA_CSV_DIR = fs.existsSync(LOCAL_CSV_DIR) ? LOCAL_CSV_DIR : FALLBACK_CSV_DIR;
 const VECTORS_FILE = path.join(__dirname, "../data/vectors/products.json");
 
 const MAX_DECIMAL_PRICE = 99999000; // DECIMAL(10, 2) max limit
