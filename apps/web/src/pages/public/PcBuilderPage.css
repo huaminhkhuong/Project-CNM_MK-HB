@@ -193,7 +193,6 @@
   background: #eff6ff;
   border-color: #3b82f6;
   color: #1d4ed8;
-  transform: translateY(-1px);
 }
 
 .preset-chip.is-active {
@@ -270,14 +269,13 @@
   font-weight: 800;
   cursor: pointer;
   box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
-  transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
   white-space: nowrap;
   letter-spacing: 0.01em;
 }
 
 .btn-ai-build:hover {
-  transform: translateY(-2px) scale(1.03);
-  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.5);
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.45);
 }
 
 .btn-ai-build:disabled {
@@ -309,7 +307,6 @@
   background: #f8fafc;
   color: #1d4ed8;
   border-color: #93c5fd;
-  transform: translateY(-1px);
 }
 
 /* ── ALERT BANNER ───────────────────────────────────────────── */
@@ -412,7 +409,7 @@
   padding: 10px 12px;
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
   user-select: none;
   border: 1px solid transparent;
   position: relative;
@@ -421,15 +418,13 @@
 
 .step-item:hover {
   background: var(--c-primary-light);
-  transform: translateX(4px);
   border-color: var(--c-primary-border);
 }
 
 .step-item.is-active {
   background: var(--c-primary-light);
   border-color: var(--c-primary-border);
-  transform: translateX(5px);
-  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.15);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.12);
 }
 
 .step-item.is-active::before {
@@ -460,18 +455,17 @@
   flex-shrink: 0;
   background: #e2e8f0;
   color: var(--c-neutral-text);
-  transition: all 0.22s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .step-item:hover .step-indicator {
-  transform: scale(1.08);
+  /* Giữ tĩnh, không scale */
 }
 
 .step-item.is-active .step-indicator {
   background: linear-gradient(135deg, #1d4ed8, #3b82f6);
   color: #ffffff;
-  transform: scale(1.14);
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.45), var(--builder-glow-blue);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
 }
 
 .step-item.is-done .step-indicator {
@@ -855,8 +849,7 @@
 
 .product-card:hover {
   border-color: rgba(59, 130, 246, 0.5);
-  transform: translateY(-6px) scale(1.01);
-  box-shadow: var(--v2-shadow-card-hover);
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
 }
 
 .product-card:hover::before { width: 100%; }
@@ -891,10 +884,12 @@
   height: auto;
   object-fit: contain;
   object-position: center;
-  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.2s ease;
+  transition: opacity 0.2s ease;
 }
 
-.product-card:hover .product-card__img { transform: scale(1.08); }
+.product-card:hover .product-card__img {
+  /* Giữ tĩnh, không phóng to */
+}
 .product-card__img.is-loading { opacity: 0; }
 .product-card__img.is-loaded  { opacity: 1; }
 
@@ -902,7 +897,7 @@
   position: absolute;
   bottom: 8px;
   left: 50%;
-  transform: translateX(-50%) translateY(10px);
+  transform: translateX(-50%);
   background: rgba(15, 23, 42, 0.85);
   color: #ffffff;
   padding: 4px 10px;
@@ -910,7 +905,7 @@
   font-size: 10px;
   font-weight: 700;
   opacity: 0;
-  transition: all 0.2s ease;
+  transition: opacity 0.15s ease;
   pointer-events: none;
   z-index: 5;
   white-space: nowrap;
@@ -918,7 +913,6 @@
 
 .product-card:hover .product-card__quick-hint {
   opacity: 1;
-  transform: translateX(-50%) translateY(0);
 }
 
 /* Skeleton & Placeholder (P9-07) */
@@ -1142,7 +1136,7 @@
   box-shadow: 0 2px 6px rgba(37, 99, 235, 0.2);
 }
 
-.btn-select:hover { background: var(--c-primary-dark); transform: translateY(-1px); }
+.btn-select:hover { background: var(--c-primary-dark); }
 .btn-select.is-selected { background: var(--c-success); color: #ffffff; font-weight: 800; }
 
 /* ── PRODUCT DETAIL QUICK VIEW MODAL & REQUIREMENT WIZARD MODAL ─ */
@@ -1342,7 +1336,7 @@
   transition: all 0.15s;
 }
 
-.btn-req-primary:hover, .btn-modal-primary:hover { background: #1d4ed8; transform: translateY(-1px); }
+.btn-req-primary:hover, .btn-modal-primary:hover { background: #1d4ed8; }
 
 /* BUILD READINESS BADGE */
 .readiness-badge {
@@ -1596,7 +1590,6 @@
   background: var(--c-primary-light);
   border-color: var(--c-primary-border);
   color: var(--c-primary-dark);
-  transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(37,99,235,0.15);
 }
 .preset-chip.is-active {
@@ -1605,7 +1598,6 @@
   color: #ffffff;
   font-weight: 700;
   box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
-  transform: translateY(-1px);
 }
 .preset-chip__budget {
   font-size: 9px;
@@ -1678,8 +1670,7 @@
   letter-spacing: 0.01em;
 }
 .btn-choose-v2:hover {
-  transform: translateY(-2px) scale(1.02);
-  box-shadow: 0 8px 22px rgba(37,99,235,0.45);
+  box-shadow: 0 4px 14px rgba(37,99,235,0.4);
 }
 .btn-choose-v2.is-selected {
   background: linear-gradient(135deg, #047857, #059669);
@@ -1905,8 +1896,7 @@
   text-decoration: none;
 }
 .v2-btn-order:hover {
-  transform: translateY(-3px) scale(1.02);
-  box-shadow: 0 12px 32px rgba(37,99,235,0.55), var(--builder-glow-blue);
+  box-shadow: 0 8px 24px rgba(37,99,235,0.45);
 }
 .v2-btn-pdf {
   display: flex;
@@ -1922,12 +1912,11 @@
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: all 0.18s ease;
 }
 .v2-btn-pdf:hover {
   background: rgba(245,166,35,0.2);
-  box-shadow: 0 6px 16px rgba(245,166,35,0.25);
-  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(245,166,35,0.2);
 }
 
 /* ── Dark Mode Overrides for Builder ── */
@@ -2341,7 +2330,6 @@
   background: #eff6ff;
   border-color: #bfdbfe;
   color: #1d4ed8;
-  transform: translateY(-1px);
 }
 
 .filter-chip.is-active {
@@ -2350,7 +2338,6 @@
   color: #ffffff;
   font-weight: 700;
   box-shadow: 0 3px 10px rgba(37, 99, 235, 0.3);
-  transform: translateY(-1px);
 }
 
 .filter-chip--score.is-active {
@@ -2398,7 +2385,6 @@
 .filter-bar__clear-btn:hover {
   background: #ffe4e6;
   border-color: #fda4af;
-  transform: translateY(-1px);
 }
 
 .filter-bar__hint {
@@ -2624,7 +2610,6 @@
 }
 
 .compat-toast-btn-primary:hover {
-  transform: translateY(-1px);
   background: linear-gradient(135deg, #3b82f6, #2563eb);
 }
 
@@ -2741,8 +2726,7 @@
 }
 
 .btn-onboarding-primary:hover {
-  transform: translateY(-2px) scale(1.02);
-  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.55);
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.45);
 }
 
 .btn-onboarding-secondary {
@@ -2762,7 +2746,6 @@
 
 .btn-onboarding-secondary:hover {
   background: rgba(255, 255, 255, 0.22);
-  transform: translateY(-1px);
 }
 
 /* ── TOPBAR WIZARD PRIMARY BUTTON ────────────────────────────── */
@@ -2785,8 +2768,7 @@
 }
 
 .btn-topbar-wizard:hover {
-  transform: translateY(-1px) scale(1.03);
-  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.45);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
   background: linear-gradient(135deg, #2563eb, #3b82f6);
 }
 
@@ -2897,7 +2879,6 @@
 }
 
 .candidate-tab-card:hover {
-  transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
@@ -3103,8 +3084,7 @@
 }
 
 .btn-candidate-apply-main:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.45);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
 }
 
 .btn-candidate-apply-main:disabled {
@@ -3367,7 +3347,6 @@
   background: #fee2e2;
   border-color: #fca5a5;
   color: #dc2626;
-  transform: rotate(90deg);
 }
 
 .product-modal-body {
@@ -3412,11 +3391,10 @@
   max-height: 240px;
   object-fit: contain;
   filter: drop-shadow(0 10px 15px rgba(0, 0, 0, 0.1));
-  transition: transform 0.25s ease;
 }
 
 .product-modal-img:hover {
-  transform: scale(1.04);
+  /* Giữ tĩnh */
 }
 
 .product-modal-no-img {
@@ -3647,8 +3625,7 @@
 
 .btn-modal-primary:hover {
   background: linear-gradient(135deg, #1e40af, #1d4ed8);
-  transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.45);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
 }
 
 .btn-modal-primary.is-selected {

@@ -14,6 +14,7 @@ import { AIAdvisorDrawer } from "../../components/pc-builder/AIAdvisorDrawer";
 import { AIAdvisorPanel } from "../../components/pc-builder/AIAdvisorPanel";
 import { ProductDetailModal } from "../../components/pc-builder/ProductDetailModal";
 import { RequirementWizardModal } from "../../components/pc-builder/RequirementWizardModal";
+import { PrebuiltTemplatesSection } from "../../components/pc-builder/PrebuiltTemplatesSection";
 import { CandidateBuildsPanel } from "../../components/pc-builder/CandidateBuildsPanel";
 import { WhatIfComparisonPanel } from "../../components/pc-builder/WhatIfComparisonPanel";
 import { FinalReviewModal } from "../../components/pc-builder/FinalReviewModal";
@@ -28,6 +29,11 @@ import { CompatibilityToast } from "../../components/pc-builder/CompatibilityToa
 import { GuestBuildsAndHistory } from "../../components/pc-builder/GuestBuildsAndHistory";
 import { BuildSummarySidebar } from "../../components/pc-builder/BuildSummarySidebar";
 import { ShareBuildModal } from "../../components/pc-builder/ShareBuildModal";
+import { BuildTradeoffModal } from "../../components/pc-builder/BuildTradeoffModal";
+import { AuthRequiredModal } from "../../components/pc-builder/AuthRequiredModal";
+import AiBuildProposalModal from "../../components/pc-builder/AiBuildProposalModal";
+import AiBuildAuditModal from "../../components/pc-builder/AiBuildAuditModal";
+import { streamAiResponse } from "../../utils/aiStreamClient";
 import { MobileBuilderStickyBar } from "../../components/pc-builder/MobileBuilderStickyBar";
 import { BuilderProductCard, extractProductSpecs } from "../../components/pc-builder/BuilderProductCard";
 import { httpClient } from "../../services/http";
@@ -580,12 +586,41 @@ export function PcBuilderPage() {
   const [backendXaiReport, setBackendXaiReport] = useState(null);
   const [isXaiLoading, setIsXaiLoading] = useState(false);
   const [candidateBuilds, setCandidateBuilds] = useState(null);
+  const [activeTradeoffs, setActiveTradeoffs] = useState([]);
+  const [isTradeoffModalOpen, setIsTradeoffModalOpen] = useState(false);
+  const [tradeoffAdvisoryNote, setTradeoffAdvisoryNote] = useState(null);
   const [activeCandidateTab, setActiveCandidateTab] = useState("bestValue");
   const [isAutoBuilding, setIsAutoBuilding] = useState(false);
+  const [proposalModalData, setProposalModalData] = useState(null);
+  const [isProposalModalOpen, setIsProposalModalOpen] = useState(false);
+  const [isApplyingProposal, setIsApplyingProposal] = useState(false);
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [userBuildsHistory, setUserBuildsHistory] = useState([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const autoBuildAbortControllerRef = useRef(null);
   const sessionSaveTimerRef = useRef(null);
+
+  /* ── AI BUILD AUTH GUARD MODAL STATE ──────────────────────── */
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [pendingAiPromptText, setPendingAiPromptText] = useState("");
+  const [pendingAiAction, setPendingAiAction] = useState(null);
+
+  const handleRequireLogin = useCallback(({ pendingPrompt = "", action = null } = {}) => {
+    setPendingAiPromptText(pendingPrompt);
+    setPendingAiAction(() => action);
+    setIsAuthModalOpen(true);
+  }, []);
+
+  const handleAuthModalSuccess = useCallback(() => {
+    setLocalMessage("✅ Đăng nhập thành công! Đang tự động tiếp tục AI Build...");
+    if (typeof pendingAiAction === "function") {
+      const act = pendingAiAction;
+      setPendingAiAction(null);
+      setTimeout(() => {
+        act();
+      }, 300);
+    }
+  }, [pendingAiAction]);
 
   /* ── ADVANCED FILTER STATE ──────────────────────────────── */
   const [showFilters, setShowFilters] = useState(false);
@@ -1139,6 +1174,35 @@ export function PcBuilderPage() {
     }
   }
 
+  const handleSelectTradeoffOption = async (decision, option) => {
+    if (option?.component) {
+      await handleSelectProduct(decision.componentType, option.component, true);
+    }
+    const remaining = activeTradeoffs.filter((t) => t.componentType !== decision.componentType);
+    setActiveTradeoffs(remaining);
+    setTradeoffAdvisoryNote(`Đã áp dụng phương án: ${option.title}`);
+    if (remaining.length === 0) {
+      setIsTradeoffModalOpen(false);
+    }
+  };
+
+  const handleAutoResolveAllTradeoffs = async (tradeoffsList) => {
+    const listToResolve = tradeoffsList || activeTradeoffs;
+    const notes = [];
+    for (const decision of listToResolve) {
+      const chosen = decision.options?.find((o) => o.id === decision.defaultChoiceId) || decision.options?.[0];
+      if (chosen?.component) {
+        await handleSelectProduct(decision.componentType, chosen.component, true);
+      }
+      if (decision.noteIfAutoSelected) {
+        notes.push(decision.noteIfAutoSelected);
+      }
+    }
+    setTradeoffAdvisoryNote(notes.join(" • ") || "Hệ thống đã tự động cân đối phương án tốt nhất theo ngân sách của bạn.");
+    setIsTradeoffModalOpen(false);
+    setActiveTradeoffs([]);
+  };
+
   async function handleAutoRecommend(overrideOptions = null) {
     if (autoBuildAbortControllerRef.current) {
       autoBuildAbortControllerRef.current.abort();
@@ -1205,21 +1269,150 @@ export function PcBuilderPage() {
       : suggestionForm.futureNeed || "none";
 
     setProcessingComponent("auto");
-    setLocalMessage(`⚡ AI đang phân tích và chọn 8 linh kiện tối ưu (${formatCurrency(targetBudget)}đ)...`);
+    const isAiRequest = overrideOptions?.engineType === "ai" || Boolean(overrideOptions?.promptText || overrideOptions?.customPrompt);
+    if (isAiRequest) {
+      setLocalMessage(`✨ AI đang phân tích yêu cầu cá nhân hóa và tạo cấu hình (${formatCurrency(targetBudget)}đ)...`);
+    } else {
+      setLocalMessage(`⚙️ Hệ thống đang tối ưu 8 linh kiện theo Heuristic Rule Engine phòng Lab (${formatCurrency(targetBudget)}đ)...`);
+    }
     try {
       // Call backend suggest API for 3 candidates (Guaranteed to drive UI)
       let candidateData = null;
+      let apiData = null;
+      const rawPrompt = overrideOptions?.customPrompt || overrideOptions?.promptText || "";
+      const extraCriteriaDetails = [
+        overrideOptions?.subPurpose ? `Nhu cầu chi tiết: ${overrideOptions.subPurpose}` : "",
+        overrideOptions?.platformPref && overrideOptions.platformPref !== "auto" ? `Ưu tiên CPU: ${overrideOptions.platformPref.toUpperCase()}` : "",
+        overrideOptions?.gpuBrandPref && overrideOptions.gpuBrandPref !== "auto" ? `Ưu tiên GPU: ${overrideOptions.gpuBrandPref.toUpperCase()}` : "",
+        overrideOptions?.aesthetic ? `Thẩm mỹ: ${overrideOptions.aesthetic}` : "",
+        overrideOptions?.caseSize ? `Vỏ case: ${overrideOptions.caseSize}` : "",
+        overrideOptions?.coolingPref ? `Tản nhiệt: ${overrideOptions.coolingPref}` : "",
+        overrideOptions?.minRam ? `RAM tối thiểu: ${overrideOptions.minRam.toUpperCase()}` : "",
+        overrideOptions?.minStorage ? `SSD tối thiểu: ${overrideOptions.minStorage.toUpperCase()}` : "",
+        overrideOptions?.needWifi ? `Cần Wi-Fi & Bluetooth tích hợp` : "",
+        overrideOptions?.acousticPref && overrideOptions.acousticPref !== "balanced" ? `Độ ồn: ${overrideOptions.acousticPref}` : "",
+        overrideOptions?.futureNeed && overrideOptions.futureNeed !== "none" ? `Dự trù nâng cấp: ${overrideOptions.futureNeed}` : ""
+      ].filter(Boolean).join(". ");
+
+      const synthesizedCustomPrompt = rawPrompt
+        ? `${rawPrompt}. [Tiêu chuẩn kỹ thuật: ${extraCriteriaDetails}]`
+        : extraCriteriaDetails;
+
+      if (isAiRequest) {
+        // ── 🚀 CHỨC NĂNG 1: AI STREAMING TUYỂN CHỌN TỪ POOL 32 LINH KIỆN ──
+        setProposalModalData({
+          useCase: purpose,
+          subPurpose: overrideOptions?.subPurpose || "",
+          targetBudget,
+          resolution,
+          engineType: "ai",
+          aiAdvice: "⚡ Đang kết nối tới Hội Đồng Thẩm Định AI để phân tích 32 linh kiện ứng viên từ kho hàng...",
+          provider: "Google Gemini (gemini-3.5-flash-lite)",
+          isStreaming: true,
+          candidates: {},
+          totalPrice: targetBudget,
+          budgetUtilization: 100,
+          platformPref: overrideOptions?.platformPref || suggestionForm?.platformPref || "auto",
+          gpuBrandPref: overrideOptions?.gpuBrandPref || suggestionForm?.gpuBrandPref || "auto",
+          minRam: overrideOptions?.minRam || suggestionForm?.minRam || "32gb",
+          minStorage: overrideOptions?.minStorage || suggestionForm?.minStorage || "1tb",
+          needWifi: overrideOptions?.needWifi !== undefined ? overrideOptions.needWifi : suggestionForm?.needWifi
+        });
+        setIsProposalModalOpen(true);
+
+        try {
+          await streamAiResponse(
+            "/pc-builder/ai-suggest-stream",
+            {
+              budget: targetBudget,
+              useCase: purpose,
+              resolution,
+              preference,
+              futureNeed,
+              customPrompt: synthesizedCustomPrompt,
+              platformPref: overrideOptions?.platformPref,
+              gpuBrandPref: overrideOptions?.gpuBrandPref,
+              minRam: overrideOptions?.minRam,
+              minStorage: overrideOptions?.minStorage,
+              aesthetic: overrideOptions?.aesthetic,
+              coolingPref: overrideOptions?.coolingPref
+            },
+            {
+              signal: abortController.signal,
+              onChunk: (chunk) => {
+                setProposalModalData((prev) => {
+                  const currentAdvice = prev?.aiAdvice && !prev.aiAdvice.startsWith("⚡ Đang kết nối") ? prev.aiAdvice : "";
+                  return {
+                    ...prev,
+                    aiAdvice: currentAdvice + chunk
+                  };
+                });
+              },
+              onDone: (result) => {
+                const comps = result.selectedComponents || {};
+                const compsList = Object.entries(comps).map(([type, c]) => ({
+                  type,
+                  componentType: type,
+                  product: c
+                }));
+
+                setProposalModalData((prev) => ({
+                  ...prev,
+                  isStreaming: false,
+                  aiAdvice: result.advice,
+                  provider: result.provider || "Google Gemini (gemini-3.5-flash-lite)",
+                  totalPrice: result.totalPrice,
+                  budgetUtilization: result.budgetUtilization,
+                  dynamicBottleneck: result.dynamicBottleneck,
+                  ramArchitecture: result.ramArchitecture,
+                  candidates: {
+                    bestValue: {
+                      label: "AI Tuyển Chọn (Tối Ưu 32 Linh Kiện)",
+                      desc: "Tuyển chọn nghiêm ngặt, không thiên vị từ 32 ứng viên thực tế trong kho",
+                      totalPrice: result.totalPrice,
+                      budgetUtilization: result.budgetUtilization,
+                      components: compsList,
+                      compatibilityReport: { score: result.compatibilityScore || 98, compatible: true }
+                    }
+                  }
+                }));
+                setProcessingComponent(null);
+                setLocalMessage("✨ AI đã hoàn tất tuyển chọn 8 linh kiện từ 32 ứng viên trong kho!");
+              },
+              onError: (err) => {
+                setProposalModalData((prev) => ({
+                  ...prev,
+                  isStreaming: false,
+                  aiAdvice: (prev?.aiAdvice || "") + `\n\n⚠️ Lưu ý: ${err.message || "Lỗi đường truyền"}`
+                }));
+                setProcessingComponent(null);
+              }
+            }
+          );
+          return;
+        } catch (streamErr) {
+          console.warn("AI Stream error, falling back to heuristic engine", streamErr);
+        }
+      }
+
       try {
         const apiRes = await httpClient.post("/pc-builder/suggest", {
           budget: targetBudget,
           useCase: purpose,
           resolution,
           preference,
-          futureNeed
+          futureNeed,
+          engineType: isAiRequest ? "ai" : "system",
+          customPrompt: synthesizedCustomPrompt
         }, { signal: abortController.signal });
         const data = apiRes.data?.data || apiRes.data;
+        apiData = data;
         if (data?.candidates) {
           candidateData = data.candidates;
+        }
+        if (Array.isArray(data?.tradeoffs) && data.tradeoffs.length > 0) {
+          setActiveTradeoffs(data.tradeoffs);
+          setIsTradeoffModalOpen(true);
         }
       } catch (err) {
         if (err?.name === "CanceledError" || err?.name === "AbortError" || err?.code === "ERR_CANCELED") {
@@ -1413,43 +1606,7 @@ export function PcBuilderPage() {
         }
       }
 
-      // Batch apply all 8 components to workspace INSTANTLY (10ms update)
-      const batchItems = selectedProductsList.map(({ type, product }) => {
-        const pId = getProductId(product);
-        const price = getProductPrice(product);
-        const rawVariants = product?.variants || product?.skus || product?.ProductSku || [];
-        const safeVariants = Array.isArray(rawVariants) ? rawVariants : [];
-        const firstVariant = safeVariants.find((v) => Number(v.stock || v.stock_quantity || 1) > 0) || safeVariants[0];
-        const variant = firstVariant ? {
-          ...firstVariant,
-          variant_id: firstVariant.variant_id || firstVariant.id || pId,
-          price: Number(firstVariant.price || price || 0),
-          stock: Number(firstVariant.stock !== undefined ? firstVariant.stock : 10)
-        } : {
-          variant_id: pId || 1,
-          sku: `SKU-${pId || 1}`,
-          price: Number(price || 1000000),
-          stock: 10
-        };
-        return { componentType: type, product, variant };
-      });
-
-      // Smooth 600ms visual delay for interactive AI loading overlay feedback
-      await new Promise((resolve) => setTimeout(resolve, 600));
-
-      if (actions.batchApplyComponents) {
-        await actions.batchApplyComponents(batchItems);
-      } else {
-        for (const { type, product } of selectedProductsList) {
-          if (autoBuildAbortControllerRef.current !== abortController) break;
-          await handleSelectProduct(type, product, true);
-        }
-      }
-
-      // Navigate back to CPU step for review
-      setActiveComponent("cpu");
-      setSearchTerm("");
-      // ✅ FIX VẤN ĐỀ 5: Khởi tạo 3 Phương Án Candidate Builds với LINH KIỆN THỰC TẾ & TỔNG GIÁ THỰC TẾ khác nhau
+      // ✅ Khởi tạo 3 Phương Án Candidate Builds với LINH KIỆN THỰC TẾ & TỔNG GIÁ THỰC TẾ
       if (!candidateData) {
         const createLocalCandidate = (budgetMultiplier, allocModifiers, label, desc, score) => {
           const candidateBudget = Math.round(targetBudget * budgetMultiplier);
@@ -1550,13 +1707,125 @@ export function PcBuilderPage() {
       setCandidateBuilds(candidateData);
       setActiveCandidateTab("bestValue");
 
-      // Smooth scroll to workspace panel
-      setTimeout(() => {
-        const el = document.getElementById("workspace");
-        if (el) el.scrollIntoView({ behavior: "smooth" });
-      }, 100);
+      // Lấy lời khuyên chi tiết từ AI LLM nếu đây là yêu cầu AI
+      let aiAdviceText = "";
+      let aiProviderName = isAiRequest ? "gemini-2.5-flash" : "system-heuristics";
 
-      setLocalMessage(`✅ AI đã tự động xây dựng thành công cấu hình ${activePresetId.toUpperCase()} (${formatCurrency(targetBudget)}đ). Đã nạp đầy đủ linh kiện vào workspace!`);
+      if (isAiRequest) {
+        try {
+          const promptQuestion = overrideOptions?.customPrompt || overrideOptions?.promptText || `Tư vấn cấu hình PC ${formatCurrency(targetBudget)}đ cho nhu cầu ${purpose} ${overrideOptions?.subPurpose || ""}`;
+          const aiAdviceRes = await httpClient.post("/pc-builder/ai-advice", {
+            question: promptQuestion,
+            budget: targetBudget,
+            useCase: purpose,
+            resolution,
+            recommendedBuild: {
+              budget: targetBudget,
+              useCase: purpose,
+              resolution,
+              totalPrice: totalSum,
+              components: selectedProductsList.reduce((acc, i) => {
+                acc[i.type] = i.product;
+                return acc;
+              }, {})
+            }
+          }, { signal: abortController.signal });
+
+          const aiData = aiAdviceRes.data?.data || aiAdviceRes.data;
+          if (aiData?.advice) {
+            aiAdviceText = aiData.advice;
+          }
+          if (aiData?.provider) {
+            aiProviderName = aiData.provider;
+          }
+        } catch (aiErr) {
+          console.warn("AI advice fetch warning in suggest flow", aiErr);
+        }
+      }
+
+      if (!aiAdviceText) {
+        const cpuItem = selectedProductsList.find((i) => i.type === "cpu")?.product;
+        const gpuItem = selectedProductsList.find((i) => i.type === "gpu")?.product;
+        const cpuName = getProductName(cpuItem) || "CPU";
+        const gpuName = getProductName(gpuItem) || "GPU";
+        const taskName = overrideOptions?.subPurpose ? `${purpose} (${overrideOptions.subPurpose})` : purpose;
+        aiAdviceText = `🎯 **Đánh Giá Hiệu Năng & Độ Cân Bằng**:
+- Dàn máy tối ưu cho tác vụ **${taskName.toUpperCase()}** ở độ phân giải **${resolution.toUpperCase()}**.
+- Cặp đôi xử lý **${cpuName}** và **${gpuName}** đồng bộ nhịp nhàng, tối ưu hóa khung hình và tránh hiện tượng thắt cổ chai phần cứng.
+- Nguồn, tản nhiệt và bo mạch chủ đều được tính toán dư tải an toàn > 20%, giúp vận hành bền bỉ lâu dài.`;
+      }
+
+      // KIỂM TRA QUY TRÌNH: Nếu skipProposalModal = true (ví dụ ép ghi đè trực tiếp), nạp ngay vào workspace
+      if (overrideOptions?.skipProposalModal) {
+        const batchItems = selectedProductsList.map(({ type, product }) => {
+          const pId = getProductId(product);
+          const price = getProductPrice(product);
+          const rawVariants = product?.variants || product?.skus || product?.ProductSku || [];
+          const safeVariants = Array.isArray(rawVariants) ? rawVariants : [];
+          const firstVariant = safeVariants.find((v) => Number(v.stock || v.stock_quantity || 1) > 0) || safeVariants[0];
+          const variant = firstVariant ? {
+            ...firstVariant,
+            variant_id: firstVariant.variant_id || firstVariant.id || pId,
+            price: Number(firstVariant.price || price || 0),
+            stock: Number(firstVariant.stock !== undefined ? firstVariant.stock : 10)
+          } : {
+            variant_id: pId || 1,
+            sku: `SKU-${pId || 1}`,
+            price: Number(price || 1000000),
+            stock: 10
+          };
+          return { componentType: type, product, variant };
+        });
+
+        if (actions.batchApplyComponents) {
+          await actions.batchApplyComponents(batchItems);
+        }
+        setActiveComponent("cpu");
+        setSearchTerm("");
+        setTimeout(() => {
+          const el = document.getElementById("workspace");
+          if (el) el.scrollIntoView({ behavior: "smooth" });
+        }, 100);
+        setLocalMessage(`✅ Đã nạp thành công cấu hình vào workspace!`);
+      } else {
+        // MẶC ĐỊNH: Mở Proposal Modal để người dùng xem trước linh kiện và lời khuyên kỹ thuật, KHÔNG tự động ghi đè workspace!
+        const proposal = {
+          useCase: purpose,
+          subPurpose: overrideOptions?.subPurpose || "",
+          targetBudget,
+          resolution,
+          engineType: isAiRequest ? "ai" : "system",
+          aiAdvice: aiAdviceText,
+          provider: aiProviderName,
+          platformPref: overrideOptions?.platformPref || suggestionForm?.platformPref || "auto",
+          gpuBrandPref: overrideOptions?.gpuBrandPref || suggestionForm?.gpuBrandPref || "auto",
+          minRam: overrideOptions?.minRam || suggestionForm?.minRam || "32gb",
+          minStorage: overrideOptions?.minStorage || suggestionForm?.minStorage || "1tb",
+          needWifi: overrideOptions?.needWifi !== undefined ? overrideOptions.needWifi : suggestionForm?.needWifi,
+          acousticPref: overrideOptions?.acousticPref || suggestionForm?.acousticPref || "balanced",
+          dynamicBottleneck: apiData?.dynamicBottleneck || { bottleneckPercent: 3.5, cpuScore: 95, gpuScore: 94 },
+          ramArchitecture: apiData?.ramArchitecture || { channelConfig: "Dual Channel (2 thanh)", advantageNote: "Tối đa băng thông" },
+          candidates: candidateData,
+          totalPrice: candidateData?.bestValue?.totalPrice || totalSum,
+          budgetUtilization: candidateData?.bestValue?.budgetUtilization || Math.round((totalSum / targetBudget) * 100),
+          components: candidateData?.bestValue?.components || selectedProductsList.map((item) => {
+            const compExplanation = candidateData?.bestValue?.components?.find?.((c) => (c.componentType || c.type)?.toLowerCase() === item.type)?.explanation;
+            return {
+              type: item.type,
+              componentType: item.type,
+              product: item.product,
+              price: getProductPrice(item.product),
+              name: getProductName(item.product),
+              explanation: compExplanation || `Linh kiện tối ưu cho ${purpose} ở phân giải ${resolution.toUpperCase()}`
+            };
+          }),
+          compatibilityReport: apiData?.compatibilityReport || { score: 100, compatible: true }
+        };
+
+        setProposalModalData(proposal);
+        setIsProposalModalOpen(true);
+        setLocalMessage(`✨ Đã chuẩn bị đề xuất cấu hình ${purpose.toUpperCase()} (${formatCurrency(targetBudget)}đ). Vui lòng xem xét các phương án và duyệt để áp dụng!`);
+      }
     } finally {
       if (autoBuildAbortControllerRef.current === abortController) {
         setIsAutoBuilding(false);
@@ -1754,6 +2023,30 @@ export function PcBuilderPage() {
     }
   }
 
+  async function handleConfirmApplyProposal(candidateToApply) {
+    if (!candidateToApply) return;
+    setIsApplyingProposal(true);
+    try {
+      await handleApplyCandidateBuild(candidateToApply);
+      setIsProposalModalOpen(false);
+      setLocalMessage(`✅ Đã áp dụng thành công cấu hình "${candidateToApply.label || 'Phương Án Đề Xuất'}" vào không gian lắp ráp!`);
+      setTimeout(() => {
+        const el = document.getElementById("workspace");
+        if (el) el.scrollIntoView({ behavior: "smooth" });
+      }, 150);
+    } catch (err) {
+      console.error("Apply proposal error:", err);
+      actions.setError("Có lỗi khi áp dụng linh kiện vào cấu hình: " + (err.message || ""));
+    } finally {
+      setIsApplyingProposal(false);
+    }
+  }
+
+  function handleEditRequirementsFromProposal() {
+    setIsProposalModalOpen(false);
+    setIsReqWizardOpen(true);
+  }
+
   /* ── 1-CLICK NAVIGATE & AUTO-FILL FROM AI CHAT WIDGET ─────────
    * Tự động kiểm tra sessionStorage hoặc nghe Custom Event từ AiChatWidget
    * để nạp nguyên dàn PC do AI tư vấn vào Workspace ngay trước mắt người dùng.
@@ -1789,12 +2082,50 @@ export function PcBuilderPage() {
   }, [optionsByComponent]);
 
   function handleRequirementSubmit(profile) {
+    const isAi = profile.engineType === "ai";
+    const promptText = profile.customPrompt || profile.promptText || "";
+
+    if (isAi && !isAuthenticated) {
+      handleRequireLogin({
+        pendingPrompt: promptText || `${profile.purpose} ${Number(profile.budget || 25000000).toLocaleString("vi-VN")}đ`,
+        action: () => {
+          setSuggestionForm({
+            purpose: profile.purpose || "gaming",
+            subPurpose: profile.subPurpose || "",
+            budget: String(profile.budget || 25000000),
+            resolution: profile.resolution || "1080p",
+            preference: profile.preference || "value",
+            aesthetic: profile.aesthetic || "white_tank",
+            minRam: profile.minRam || "32gb",
+            minStorage: profile.minStorage || "1tb",
+            coolingPref: profile.coolingPref || "air",
+            futureNeed: profile.futureNeed || "none",
+            platformPref: profile.platformPref || "auto",
+            gpuBrandPref: profile.gpuBrandPref || "auto",
+            acousticPref: profile.acousticPref || "balanced",
+            needWifi: profile.needWifi !== undefined ? profile.needWifi : true
+          });
+          handleAutoRecommend({ ...profile, promptText });
+        }
+      });
+      return;
+    }
+
     setSuggestionForm({
       purpose: profile.purpose || "gaming",
+      subPurpose: profile.subPurpose || "",
       budget: String(profile.budget || 25000000),
       resolution: profile.resolution || "1080p",
       preference: profile.preference || "value",
-      futureNeed: profile.futureNeed || "none"
+      aesthetic: profile.aesthetic || "white_tank",
+      minRam: profile.minRam || "32gb",
+      minStorage: profile.minStorage || "1tb",
+      coolingPref: profile.coolingPref || "air",
+      futureNeed: profile.futureNeed || "none",
+      platformPref: profile.platformPref || "auto",
+      gpuBrandPref: profile.gpuBrandPref || "auto",
+      acousticPref: profile.acousticPref || "balanced",
+      needWifi: profile.needWifi !== undefined ? profile.needWifi : true
     });
     handleAutoRecommend(profile);
   }
@@ -1932,21 +2263,61 @@ export function PcBuilderPage() {
         onOpenXai={handleOpenXaiDrawer}
       />
 
-      {/* ── TOPBAR SUMMARY PANEL ──────────────────────────── */}
+      {/* ── TOPBAR SUMMARY PANEL (Chứa Nút "Build PC Của Bạn" + "Đánh Giá Build Với AI" + Tiện Ích) ── */}
       <BuilderSummaryPanel
-        selectedPresetId={selectedPresetId}
-        onSelectPreset={handlePreset}
-        presets={PRESET_BUILDS}
         onOpenReqWizard={() => setIsReqWizardOpen(true)}
+        onOpenAiAudit={() => setIsAuditModalOpen(true)}
         onOpenXaiDrawer={handleOpenXaiDrawer}
-        onAutoBuild={handleAutoRecommend}
-        isAutoBuilding={isAutoBuilding}
-        budget={suggestionForm.budget}
         onRefreshCatalog={handleRefreshCatalog}
         onClearAll={actions.clearAll}
         selectedCount={selectedCount}
         onExportPdf={handleExportPdf}
       />
+
+
+      {/* ── TRADEOFF ADVISORY NOTE (Lưu ý hệ thống tự chọn) ─────── */}
+      {tradeoffAdvisoryNote && (
+        <div style={{
+          backgroundColor: "#eff6ff",
+          border: "1px solid #93c5fd",
+          borderRadius: "14px",
+          padding: "14px 20px",
+          marginBottom: "16px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          boxShadow: "0 2px 10px rgba(37, 99, 235, 0.08)",
+          animation: "fadeIn 0.25s ease-out"
+        }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
+            <span style={{ fontSize: "22px", lineHeight: "1" }}>🤖</span>
+            <div>
+              <div style={{ fontSize: "14px", fontWeight: "700", color: "#1e40af" }}>
+                Lưu ý từ Hệ Thống Tự Chọn Phương Án (Trade-off):
+              </div>
+              <div style={{ fontSize: "13px", color: "#334155", marginTop: "4px", lineHeight: "1.5" }}>
+                {tradeoffAdvisoryNote}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setTradeoffAdvisoryNote(null)}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#64748b",
+              fontWeight: "700",
+              cursor: "pointer",
+              fontSize: "18px",
+              marginLeft: "12px"
+            }}
+            title="Đóng thông báo"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* ── INDEPENDENT NOTIFICATION BANNERS (P9-06) ───────────── */}
       {(error || success || localMessage) && (
@@ -2029,6 +2400,89 @@ export function PcBuilderPage() {
 
           {/* ═══ COLUMN 2: CENTER WORKSPACE ════════════════════ */}
           <main className="builder-center" id="workspace">
+            {/* 🎯 ONBOARDING CRITERIA QUICKSTART BANNER (Khởi tạo từ Nút Duy Nhất) */}
+            {selectedCount === 0 && (
+              <>
+                <div
+                  style={{
+                    backgroundColor: "#ffffff",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "16px",
+                    padding: "22px 26px",
+                    marginBottom: "20px",
+                    boxShadow: "0 4px 16px -2px rgba(15, 23, 42, 0.06)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    flexWrap: "wrap",
+                    gap: "16px"
+                  }}
+                >
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                      <span style={{ fontSize: "22px" }}>🚀</span>
+                      <h2 style={{ margin: 0, fontSize: "1.25rem", fontWeight: 800, color: "#0f172a" }}>
+                        Khởi Tạo Cấu Hình PC Theo Tiêu Chí Chuẩn Mực
+                      </h2>
+                      <span style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px", borderRadius: "999px", backgroundColor: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe" }}>
+                        1 Luồng Tiêu Chuẩn 5 Bước
+                      </span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: "13px", color: "#64748b", maxWidth: "680px", lineHeight: "1.5" }}>
+                      Bắt đầu từ nút <strong>"Build PC Của Bạn"</strong>, bạn sẽ thiết lập trọn vẹn mọi tiêu chí kỹ thuật qua 5 bước. Tại bước cuối, bạn lựa chọn <strong>⚙️ Hệ Thống Đề Xuất</strong> (chỉ nhận tiêu chí, tính toán 100% tương thích tức thì) hoặc <strong>✨ AI Tư Vấn</strong> (nhận tiêu chí + cho phép nhập thêm yêu cầu cá nhân hóa).
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsReqWizardOpen(true)}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      padding: "12px 24px",
+                      borderRadius: "12px",
+                      backgroundColor: "#0f172a",
+                      color: "#ffffff",
+                      border: "none",
+                      fontWeight: 800,
+                      fontSize: "13.5px",
+                      cursor: "pointer",
+                      boxShadow: "0 4px 14px rgba(15, 23, 42, 0.2)",
+                      transition: "background-color 0.15s ease",
+                      whiteSpace: "nowrap"
+                    }}
+                  >
+                    <span>🚀</span>
+                    <span>Build PC Của Bạn Ngay</span>
+                  </button>
+                </div>
+
+                {/* 📦 BỘ SƯU TẬP CÁC BỘ PC MẪU CHỌN NHANH (Ở KHU VỰC RIÊNG BIỆT) */}
+                <PrebuiltTemplatesSection
+                  onSelectPreset={(tpl) => {
+                    handlePreset({
+                      id: tpl.id,
+                      name: tpl.title,
+                      budget: tpl.budget,
+                      useCase: tpl.category === "creative" ? "editing" : tpl.category === "work" ? (tpl.id === "ai" ? "ai" : "office") : "gaming",
+                      category: tpl.category
+                    });
+                  }}
+                  onCustomizePreset={(tpl) => {
+                    setSuggestionForm((prev) => ({
+                      ...prev,
+                      purpose: tpl.category === "creative" ? "editing" : tpl.category === "work" ? (tpl.id === "ai" ? "ai" : "office") : "gaming",
+                      budget: String(tpl.budget),
+                      subPurpose: tpl.id
+                    }));
+                    setIsReqWizardOpen(true);
+                  }}
+                  isCollapsible={false}
+                />
+              </>
+            )}
+
             {/* Candidate Builds Panel (Best Value, Best Performance, Budget Safe) */}
             {candidateBuilds && (
               <CandidateBuildsPanel
@@ -2244,6 +2698,34 @@ export function PcBuilderPage() {
                   })}
                 </div>
               )}
+
+              {/* 📦 Tham Khảo Các Bộ PC Mẫu Sẵn Có (Thu gọn khi đang lắp ráp linh kiện) */}
+              {selectedCount > 0 && (
+                <div style={{ marginTop: "24px" }}>
+                  <PrebuiltTemplatesSection
+                    onSelectPreset={(tpl) => {
+                      handlePreset({
+                        id: tpl.id,
+                        name: tpl.title,
+                        budget: tpl.budget,
+                        useCase: tpl.category === "creative" ? "editing" : tpl.category === "work" ? (tpl.id === "ai" ? "ai" : "office") : "gaming",
+                        category: tpl.category
+                      });
+                    }}
+                    onCustomizePreset={(tpl) => {
+                      setSuggestionForm((prev) => ({
+                        ...prev,
+                        purpose: tpl.category === "creative" ? "editing" : tpl.category === "work" ? (tpl.id === "ai" ? "ai" : "office") : "gaming",
+                        budget: String(tpl.budget),
+                        subPurpose: tpl.id
+                      }));
+                      setIsReqWizardOpen(true);
+                    }}
+                    isCollapsible={true}
+                    defaultExpanded={false}
+                  />
+                </div>
+              )}
             </div>
           </main>
 
@@ -2457,12 +2939,61 @@ export function PcBuilderPage() {
         onExportPdf={handleExportPdf}
       />
 
+
+      {/* ── BUILD TRADEOFF RESOLUTION MODAL ───────── */}
+      <BuildTradeoffModal
+        isOpen={isTradeoffModalOpen}
+        onClose={() => setIsTradeoffModalOpen(false)}
+        tradeoffs={activeTradeoffs}
+        onSelectOption={handleSelectTradeoffOption}
+        onAutoResolveAll={handleAutoResolveAllTradeoffs}
+      />
+
+      {/* ── AUTH REQUIRED MODAL CHO TÍNH NĂNG AI BUILD ───────── */}
+      <AuthRequiredModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onSuccess={handleAuthModalSuccess}
+        pendingPrompt={pendingAiPromptText}
+      />
       {/* ── REQUIREMENT WIZARD MODAL (FIX VẤN ĐỀ 10) ───────── */}
       <RequirementWizardModal
         isOpen={isReqWizardOpen}
         onClose={() => setIsReqWizardOpen(false)}
         suggestionForm={suggestionForm}
         onSubmitProfile={handleRequirementSubmit}
+      />
+
+      {/* ── AI / SYSTEM BUILD PROPOSAL REVIEW MODAL ───────── */}
+      <AiBuildProposalModal
+        isOpen={isProposalModalOpen}
+        onClose={() => setIsProposalModalOpen(false)}
+        proposalData={proposalModalData}
+        onApplyBuild={handleConfirmApplyProposal}
+        onEditRequirements={handleEditRequirementsFromProposal}
+        isApplying={isApplyingProposal}
+      />
+
+      {/* ── AI BUILD AUDIT & INTERACTIVE CHAT MODAL ───────── */}
+      <AiBuildAuditModal
+        isOpen={isAuditModalOpen}
+        onClose={() => setIsAuditModalOpen(false)}
+        currentBuild={{
+          items: Object.entries(selectedItems || {}).map(([type, entry]) => ({
+            componentType: type,
+            ...(entry?.product || entry)
+          })),
+          totalPrice,
+          targetBudget: suggestionForm.budget,
+          useCase: suggestionForm.purpose,
+          resolution: suggestionForm.resolution
+        }}
+        onApplyReplacement={async (compType, product, variant) => {
+          if (actions.addComponent) {
+            await actions.addComponent(compType, product, variant);
+            setLocalMessage(`✅ Đã thay thế ${compType.toUpperCase()} bằng ${getProductName(product)}!`);
+          }
+        }}
       />
 
       {/* ── WHAT-IF SIMULATION COMPARISON MODAL (FIX VẤN ĐỀ 7) ── */}

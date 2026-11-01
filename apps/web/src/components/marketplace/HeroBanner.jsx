@@ -220,7 +220,7 @@ export function HeroBanner() {
           zIndex: 1,
         }}
       >
-        Gợi ý từ AI Gemini, kiểm tra tương thích thời gian thực, so sánh giá cả và tự lắp ráp cấu hình hoàn hảo cho game, đồ họa hoặc làm việc chuyên nghiệp.
+        Gợi ý từ AI thông minh, kiểm tra tương thích thời gian thực, so sánh giá cả và tự lắp ráp cấu hình hoàn hảo cho game, đồ họa hoặc làm việc chuyên nghiệp.
       </p>
 
       {/* ── CTA Buttons ── */}

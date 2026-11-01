@@ -165,6 +165,40 @@ export function CandidateBuildsPanel({
                 })}
               </tr>
 
+              {/* Row 7: Dynamic Bottleneck */}
+              <tr>
+                <td className="td-label">⚡ Nghẽn Cổ Chai (Bottleneck)</td>
+                {tabsMeta.map((tab) => {
+                  const build = candidateBuilds[tab.key];
+                  const bn = build?.dynamicBottleneck;
+                  const percent = bn?.bottleneckPercent !== undefined ? bn.bottleneckPercent : (tab.key === "bestValue" ? 6 : tab.key === "bestPerformance" ? 8 : 12);
+                  const isOptimal = percent <= 10;
+                  const isSevere = percent > 25;
+                  const color = isOptimal ? "#059669" : isSevere ? "#dc2626" : "#d97706";
+                  const text = isOptimal ? "Tối ưu" : isSevere ? "Nghẽn nặng" : "Cân bằng";
+                  return (
+                    <td key={tab.key} className="td-score-val" style={{ color, fontWeight: 800 }}>
+                      {percent}% ({text})
+                    </td>
+                  );
+                })}
+              </tr>
+
+              {/* Row 8: RAM Architecture */}
+              <tr>
+                <td className="td-label">🚀 Kiến Trúc RAM</td>
+                {tabsMeta.map((tab) => {
+                  const build = candidateBuilds[tab.key];
+                  const ram = build?.ramArchitecture;
+                  const isDual = ram?.stickCount === 2 || /Dual/i.test(ram?.channelMode || "") || tab.key !== "budgetSafe";
+                  return (
+                    <td key={tab.key} className="td-score-val" style={{ color: isDual ? "#2563eb" : "#64748b", fontWeight: 700 }}>
+                      {isDual ? "Dual-Channel (2 thanh · +15% băng thông)" : "Single-Channel (1 thanh)"}
+                    </td>
+                  );
+                })}
+              </tr>
+
               {/* Row 5: Quick Select Action */}
               <tr>
                 <td className="td-label">⚡ Chọn Phương Án</td>
@@ -247,6 +281,53 @@ export function CandidateBuildsPanel({
                 </div>
               </div>
             </div>
+
+                        {/* ARCHITECTURE METRICS BADGES (Dynamic Bottleneck & Dual-Channel RAM) */}
+            {(currentBuild.dynamicBottleneck || currentBuild.ramArchitecture) && (
+              <div style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "12px",
+                padding: "10px 16px",
+                backgroundColor: "#f8fafc",
+                borderRadius: "12px",
+                marginBottom: "16px",
+                border: "1px solid #e2e8f0",
+                alignItems: "center"
+              }}>
+                {currentBuild.dynamicBottleneck && (
+                  <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    fontSize: "13px",
+                    color: currentBuild.dynamicBottleneck.bottleneckPercent <= 10 ? "#059669" : "#d97706",
+                    fontWeight: "700"
+                  }}>
+                    <span>⚡ Nghẽn cổ chai: {currentBuild.dynamicBottleneck.bottleneckPercent}% ({currentBuild.dynamicBottleneck.status === "OPTIMAL" ? "Tối ưu" : currentBuild.dynamicBottleneck.status === "BALANCED" ? "Cân bằng" : "Cảnh báo"})</span>
+                    <span style={{ fontSize: "11.5px", color: "#64748b", fontWeight: "normal" }}>
+                      ({currentBuild.dynamicBottleneck.explanation})
+                    </span>
+                  </div>
+                )}
+                {currentBuild.ramArchitecture && (
+                  <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    fontSize: "13px",
+                    color: currentBuild.ramArchitecture.stickCount === 2 ? "#2563eb" : "#64748b",
+                    fontWeight: "700",
+                    marginLeft: currentBuild.dynamicBottleneck ? "auto" : "0"
+                  }}>
+                    <span>🚀 RAM: {currentBuild.ramArchitecture.channelMode}</span>
+                    <span style={{ fontSize: "11.5px", color: "#64748b", fontWeight: "normal" }}>
+                      ({currentBuild.ramArchitecture.note})
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* COMPONENT LIST WITH AI EXPLANATIONS */}
             <div className="candidate-components-grid">

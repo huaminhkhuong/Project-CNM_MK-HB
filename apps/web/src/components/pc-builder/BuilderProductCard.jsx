@@ -74,7 +74,7 @@ export function extractProductSpecs(product, type) {
 
     return [
       { label: "Chuẩn RAM", value: `${ramType} ${speed}`.trim() },
-      { label: "Loại bộ nhớ", value: "Desktop DIMM" }
+      { label: "Cấu hình", value: /2x|kit\s*2/i.test(nameLower) ? "Kit 2 thanh (Dual-Channel)" : "Thanh đơn (Single DIMM)" }
     ];
   }
 

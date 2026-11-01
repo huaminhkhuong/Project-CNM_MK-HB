@@ -45,10 +45,12 @@ export function createApp() {
     next();
   });
   
-  // Serve static files from uploads directory.
+  // Serve static files from uploads and data directories.
   uploadsDirs.forEach((uploadsDir) => {
     app.use("/uploads", express.static(uploadsDir));
   });
+  app.use("/data/images", express.static(path.resolve(process.cwd(), "../../data/images")));
+  app.use("/data/images", express.static("T:/Khoa_luan/data/images"));
   
   app.use("/api", apiRouter);
   app.use(notFoundHandler);

@@ -15,11 +15,15 @@ httpServer.listen(env.port, () => {
   console.log(`API running at http://localhost:${env.port}`);
   console.log(`Socket.io ready at ws://localhost:${env.port}`);
   
-  if (env.geminiApiKey || env.openaiApiKey) {
-    console.log(`[AI Advisor] LLM API Engine active (${env.geminiApiKey ? "Google Gemini 1.5 Flash" : "OpenAI GPT-4o-mini"})`);
-  } else {
-    console.log(`[AI Advisor] Notice: GEMINI_API_KEY & OPENAI_API_KEY are empty. AI Advisor will fallback to PC Mall Rule-Based Knowledge Engine.`);
-  }
+  try {
+    const { unifiedLlmService } = require("./modules/ai/unified-llm.service");
+    const llmInfo = unifiedLlmService.getProviderInfo();
+    if (llmInfo.hasApiKey) {
+      console.log(`[AI Advisor] Unified LLM Engine active: ${llmInfo.provider.toUpperCase()} (${llmInfo.model})`);
+    } else {
+      console.log(`[AI Advisor] Operating in 100% local Rule Engine & Database grounded mode (LLM_API_KEY empty).`);
+    }
+  } catch {}
 
   // Ensure DB columns once on startup (non-blocking)
   pcBuilderService.ensurePcBuildColumns().catch((err) => {

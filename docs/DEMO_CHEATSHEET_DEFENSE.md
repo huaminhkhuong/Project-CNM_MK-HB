@@ -143,7 +143,7 @@ npm run dev:web
 * **💡 Cách trả lời chuẩn:**
   > *"Thưa Thầy/Cô, hệ thống tư vấn cấu hình của nhóm được thiết kế theo mô hình **Hệ chuyên gia dựa trên tri thức (Knowledge-Based Expert System)** kết hợp **Thuật toán tối ưu hóa Heuristic** và **Mô hình ngôn ngữ lớn (LLM)**:*
   > 1. *Đối với việc chọn linh kiện:* Nhóm không dùng Machine Learning dạng hộp đen (Black-box) vì phần cứng máy tính đòi hỏi tính **chính xác tuyệt đối về vật lý** (ví dụ CPU AM5 tuyệt đối không được cắm vào Mainboard AM4). Do đó, nhóm xây dựng **Knowledge Engine với 10 tập luật COMP-001 đến COMP-010** kết hợp thuật toán Heuristic phân bổ trọng số ngân sách theo từng Use-case (Gaming, Render, Office).
-  > 2. *Đối với việc đàm thoại tư vấn:* Nhóm tích hợp API **OpenAI GPT-4o-mini / Gemini 1.5 Flash** để hỗ trợ hội thoại tự nhiên, đồng thời có cơ chế Fallback tự động về Rule Engine nội bộ khi không có kết nối Internet hoặc thiếu API Key."
+  > 2. *Đối với việc đàm thoại tư vấn:* Nhóm xây dựng **Unified LLM Adapter** hỗ trợ linh hoạt các mô hình tiên tiến như **Google Gemini, Groq (Llama), DeepSeek, OpenAI, hoặc Local Ollama** kết hợp **AI Guardrail Content Filter** để kiểm duyệt truy vấn và hỗ trợ hội thoại tự nhiên, đồng thời có cơ chế Fallback tự động về Rule Engine nội bộ khi không có kết nối Internet hoặc thiếu API Key."
 
 ---
 

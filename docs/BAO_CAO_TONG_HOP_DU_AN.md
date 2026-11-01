@@ -2,7 +2,7 @@
 
 > **Dự án**: PC Mall – Hệ thống E-commerce Linh kiện Máy tính & Cố vấn Lắp ráp Thông minh  
 > **Thời gian thực hiện**: Tháng 10/2026  
-> **Định vị công nghệ**: Knowledge-Based Expert System kết hợp Heuristic Optimization và LLM API (OpenAI GPT-4o-mini / Google Gemini 1.5 Flash), React 19 + Vite, Express + Prisma + MySQL 8.
+> **Định vị công nghệ**: Knowledge-Based Expert System kết hợp Heuristic Optimization và Unified Multi-Provider LLM Engine (Google Gemini, Groq, DeepSeek, OpenAI, Ollama), React 19 + Vite, Express + Prisma + MySQL 8.
 
 ---
 
@@ -62,7 +62,7 @@ Khi bắt đầu dự án với yêu cầu *"đọc dự án và nhận xét ngh
 
 ### 1.8. Chuẩn Hóa Tài Liệu Học Thuật Phục Vụ Hội Đồng Khóa Luận
 - Cập nhật `README.md` phản ánh chuẩn xác React 19 + Vite.
-- Chuẩn hóa định danh công nghệ: **Hệ chuyên gia dựa trên tri thức (Knowledge-Based Expert System) kết hợp Tối ưu hóa Heuristic và LLM API (OpenAI/Gemini)**.
+- Chuẩn hóa định danh công nghệ: **Hệ chuyên gia dựa trên tri thức (Knowledge-Based Expert System) kết hợp Tối ưu hóa Heuristic và Unified Multi-Provider LLM Engine (Google Gemini, Groq, DeepSeek, OpenAI, Ollama)**.
 - Soạn thảo cẩm nang demo 5 Actor hoàn chỉnh tại `DEMO_CHEATSHEET_DEFENSE.md`.
 
 ---

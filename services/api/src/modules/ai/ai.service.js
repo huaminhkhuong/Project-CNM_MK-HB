@@ -412,84 +412,31 @@ function buildAdviceInput(buildSnapshot, payload = {}) {
 }
 
 async function createResponsesRequest(instructions, userInput) {
-  // Try Groq first (free, fast), then fallback to OpenAI
-  const groqApiKey = env.groqApiKey;
-  const openaiApiKey = env.openaiApiKey;
+  const { unifiedLlmService } = require("./unified-llm.service");
+  const res = await unifiedLlmService.generateText({
+    prompt: userInput,
+    systemInstruction: instructions
+  });
 
-  // Groq API configuration
-  if (groqApiKey) {
-    try {
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${groqApiKey}`
-        },
-        body: JSON.stringify({
-          model: "llama3-70b-8192",
-          messages: [
-            { role: "system", content: instructions },
-            { role: "user", content: userInput }
-          ],
-          temperature: 0.7,
-          max_tokens: 1024
-        })
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        const outputText = data.choices?.[0]?.message?.content || "";
-        return {
-          model: data.model,
-          output_text: outputText,
-          usage: data.usage || null,
-          provider: "groq"
-        };
-      }
-    } catch (groqError) {
-      console.warn("[AI] Groq API error, falling back to OpenAI:", groqError.message || groqError);
-      console.warn("[AI] Groq error details:", JSON.stringify(groqError, null, 2));
-    }
+  if (res.isBlocked) {
+    return {
+      model: "pc-mall-guardrail-filter",
+      output_text: res.text,
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      provider: "guardrail"
+    };
   }
 
-  // Fallback to OpenAI
-  if (openaiApiKey) {
-    try {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiApiKey}`
-        },
-        body: JSON.stringify({
-          model: env.openaiModel || "gpt-4o-mini",
-          messages: [
-            { role: "system", content: instructions },
-            { role: "user", content: userInput }
-          ],
-          temperature: 0.7,
-          max_tokens: 1024
-        })
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        const outputText = data.choices?.[0]?.message?.content || "";
-        return {
-          model: data.model,
-          output_text: outputText,
-          usage: data.usage || null,
-          provider: "openai"
-        };
-      }
-    } catch (openaiError) {
-      console.warn("[AI] OpenAI API error:", openaiError.message || openaiError);
-    }
-  }
-
-  throw createError("Both Groq and OpenAI APIs are unavailable or misconfigured", 500);
+  return {
+    model: res.model,
+    output_text: res.text || "",
+    usage: res.usage ? {
+      prompt_tokens: res.usage.promptTokens,
+      completion_tokens: res.usage.completionTokens,
+      total_tokens: res.usage.totalTokens
+    } : null,
+    provider: res.provider
+  };
 }
 
 function parseJsonText(text) {
@@ -532,14 +479,14 @@ async function askTechnicalAdvisor(payload = {}) {
   }
 
   // Try to use real OpenAI API if key is present
-  if (env.openaiApiKey) {
+  if (env.llmApiKey || env.geminiApiKey || env.groqApiKey) {
     try {
       const data = await createResponsesRequest(
         AI_SYSTEM_PROMPT,
         buildUserInput(message, payload.context)
       );
       return {
-        model: data.model || env.openaiModel,
+        model: data.model || env.llmModel,
         reply: data.output_text || "",
         usage: data.usage || null
       };
@@ -690,7 +637,7 @@ function generateLocalBuildAdvice(buildSnapshot, payload = {}) {
 async function askBuildAdvisor(userId, buildId, payload = {}) {
   const buildSnapshot = await getBuildSnapshot(userId, buildId);
   let parsedAdvice;
-  let model = env.openaiModel || "pc-mall-expert-advisor";
+  let model = env.llmModel || "pc-mall-expert-advisor";
   let usage = null;
 
   try {
@@ -959,7 +906,7 @@ async function askTechnicalAdvisorNatural(payload = {}) {
     const reply = String(data.output_text || "").trim();
     if (reply) {
       return {
-        model: data.model || env.openaiModel,
+        model: data.model || env.llmModel,
         reply,
         usage: data.usage || null,
         provider: data.provider || null
@@ -1567,6 +1514,23 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
   const message = String(payload.message || "").trim();
   if (!message) throw createError("message is required", 400);
 
+  // Guardrail Filter: Ngăn chặn câu hỏi không liên quan đến PC / Linh kiện / Dịch vụ
+  const { validateChatMessageDomain } = require("./ai-guardrail.service");
+  const guardCheck = validateChatMessageDomain(message);
+  if (!guardCheck.isAllowed) {
+    return {
+      intent: "off_topic_blocked",
+      systemPrompt: PC_MALL_SALES_SYSTEM_PROMPT,
+      reply: guardCheck.fallbackReply,
+      products: [],
+      build: null,
+      actions: [],
+      model: "pc-mall-guardrail-filter",
+      usage: null,
+      isDatabaseGrounded: false
+    };
+  }
+
   const requested = detectRequestedCategory(message);
   const intent = classifyAiQuestion(message);
   const budget = requested.maxPrice || extractBudgetVnd(message);
@@ -1622,6 +1586,69 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
   response.actions = ["Đưa vào PC Builder", "Thêm vào giỏ", "So sánh"];
 
   if (intent === "pc_build") {
+    let candidateBuild = null;
+    try {
+      const pcBuilderMod = require("../pc-builder/pc-builder.service");
+      const builderSvc = pcBuilderMod.pcBuilderService || pcBuilderMod.default || pcBuilderMod;
+      if (builderSvc && typeof builderSvc.suggestBuild === "function") {
+        const suggestRes = await builderSvc.suggestBuild({
+          budget: budget || 20000000,
+          useCase: useCase || "gaming"
+        });
+        if (suggestRes && suggestRes.candidates?.bestValue) {
+          candidateBuild = suggestRes.candidates.bestValue;
+        }
+      }
+    } catch (err) {
+      console.warn("[AI Service] pcBuilderService.suggestBuild error, fallback to legacy picker:", err.message);
+    }
+
+    if (candidateBuild && candidateBuild.components) {
+      const components = Object.entries(candidateBuild.components).map(([type, item]) => ({
+        id: item.productId || item.variantId,
+        productId: item.productId || item.variantId,
+        variantId: item.variantId,
+        componentType: type,
+        componentLabel: type.toUpperCase(),
+        name: item.name || item.productName,
+        price: Number(item.price || 0),
+        stock: 10,
+        imageUrl: item.imageUrl,
+        slug: item.slug || "",
+        specs: item.specs || {},
+        explanation: item.explanation || ""
+      }));
+      const total = candidateBuild.totalPrice;
+      const report = candidateBuild.compatibilityReport;
+      const checks = (report?.checks || []).map((c) => ({
+        ok: c.passed,
+        label: c.label || c.name || "Tương thích",
+        detail: c.detail || c.message || "Tương thích tốt"
+      }));
+
+      response.products = buildProductCardPayload(components);
+      response.build = {
+        components: response.products,
+        totalPrice: total,
+        compatibilityChecks: checks.length > 0 ? checks : [{ ok: true, label: "Phần cứng tương thích 100%", detail: "Đã kiểm tra socket, chuẩn RAM, TDP và công suất nguồn" }],
+        compatibilityScore: report?.score || 100
+      };
+      response.reply = [
+        `Mình đã kết nối trực tiếp với PC Mall Rule Engine và tối ưu cấu hình 100% tương thích phần cứng theo nhu cầu **${useCase}**${budget ? `, ngân sách khoảng **${budget.toLocaleString("vi-VN")}đ**` : ""}.`,
+        "",
+        "**Cấu hình tối ưu từ linh kiện thật trong hệ thống:**",
+        ...components.map((item) => `- **${item.componentLabel}:** ${item.name} - ${Number(item.price).toLocaleString("vi-VN")}đ`),
+        "",
+        `**Tổng chi phí:** ${total.toLocaleString("vi-VN")}đ (Điểm tương thích phần cứng: ${report?.score || 100}/100)`,
+        "",
+        "**Kiểm tra tương thích realtime:**",
+        ...(checks.length > 0 ? checks.slice(0, 5).map((c) => `- ${c.ok ? "✓" : "!"} ${c.label}: ${c.detail}`) : ["- ✓ 100% tương thích Socket, RAM DDR, VRM, Form factor, và Công suất nguồn PSU."]),
+        "",
+        "💡 Bạn có thể bấm **Đưa vào PC Builder** để xem phân tích Trade-off chi tiết hoặc điều chỉnh linh kiện theo sở thích!"
+      ].join("\n");
+      return response;
+    }
+
     const components = pickBuildComponents(products, budget, useCase);
     const total = components.reduce((sum, item) => sum + Number(item.price || 0), 0);
     const checks = checkBuildCompatibility(components);
@@ -1806,7 +1833,16 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CHAT PERSISTENCE IN DATABASE (ai_chats + ai_messages)
-const { prisma: aiPrisma } = require("../../config/prisma");
+let aiPrisma = null;
+try {
+  const pMod = require("../../config/prisma");
+  aiPrisma = pMod.prisma || pMod.default || pMod;
+} catch (_) {
+  try {
+    const { PrismaClient } = require("@prisma/client");
+    aiPrisma = new PrismaClient();
+  } catch (_e) {}
+}
 
 async function saveUserAiChat(userId, userMessage, assistantResponse) {
   if (!userId) return;

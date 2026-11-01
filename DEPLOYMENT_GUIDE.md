@@ -47,7 +47,9 @@ docker-compose down
 | `PORT` | Cổng dịch vụ API | `4000` |
 | `DATABASE_URL` | Chuỗi kết nối MySQL Database | `mysql://root:password@localhost:3306/cnm_ecommerce` |
 | `JWT_SECRET` | Khóa bí mật mã hóa Token đăng nhập | `your-secret-jwt-key` |
-| `GEMINI_API_KEY` | Key AI Google Gemini cho AI Advisor | `AIzaSy...` |
+| `LLM_PROVIDER` | Nhà cung cấp AI LLM (`gemini`, `groq`, `deepseek`, `openai`, `ollama`) | `gemini` |
+| `LLM_API_KEY` | Khóa API của nhà cung cấp LLM đã chọn | `AIzaSy... / sk-... / gsk_...` |
+| `LLM_MODEL` | Tên mô hình tương ứng | `gemini-1.5-flash` / `deepseek-chat` |
 | `SENTRY_DSN` | URL Sentry Error Tracking (Tùy chọn) | `https://xxxx@sentry.io/12345` |
 | `VITE_API_BASE_URL` | Đường dẫn API cho Frontend Web | `http://localhost:4000/api` |
 

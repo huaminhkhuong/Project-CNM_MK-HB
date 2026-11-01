@@ -19,7 +19,7 @@
 - **Frontend** – React 19 + Vite, giao diện premium "Clean Tech", tối ưu tải trang bằng Route-based Code Splitting (React.lazy)
 - **Backend API** – Node.js + Express, Prisma ORM singleton pool, module RESTful API & Socket.io
 - **Cơ sở dữ liệu** – MySQL 8, quản lý schema tập trung qua Prisma
-- **Hệ thống tư vấn & kiểm tra tương thích** – Hệ chuyên gia dựa trên tri thức (Knowledge-Based Expert System) kết hợp thuật toán tối ưu Heuristic và mô hình ngôn ngữ lớn (OpenAI GPT / Google Gemini)
+- **Hệ thống tư vấn & kiểm tra tương thích** – Hệ chuyên gia dựa trên tri thức (Knowledge-Based Expert System) kết hợp thuật toán tối ưu Heuristic và mô hình ngôn ngữ lớn đa nhà cung cấp (Google Gemini, Groq, DeepSeek, OpenAI, Ollama)
 
 Hệ thống hỗ trợ **5 nhóm người dùng** (Actor) với vai trò và quyền hạn riêng biệt.
 
@@ -88,8 +88,8 @@ Project-CNM_MK-HB/
 ### 🤖 AI Advisor & Hệ chuyên gia kiểm tra tương thích
 - **Heuristic Engine**: Thuật toán phân bổ ngân sách tối ưu theo use-case (Gaming, Render, Office, Dev) và lọc linh kiện tự động
 - **XAI Explanation Engine**: Bộ giải thích luật phần cứng (COMP-001 -> COMP-010) với 4 cấp độ nghiêm trọng (Blocker, Warning, Advisory, Info)
-- **LLM Integration**: Hỗ trợ kết nối OpenAI GPT-4o-mini hoặc Google Gemini 1.5 Flash để đàm thoại tư vấn chuyên sâu
-- **Demo Mode**: Tự động fallback sang hệ luật Heuristic nội bộ khi không cấu hình API Key
+- **LLM Integration (Unified Multi-Provider)**: Hỗ trợ kết nối linh hoạt Google Gemini, Groq, DeepSeek, OpenAI, hoặc Local Ollama với cơ chế AI Guardrail Content Filter
+- **Demo Mode & Offline Fallback**: Tự động fallback sang hệ luật Heuristic & Offline Mock khi không cấu hình API Key hoặc mất kết nối mạng
 
 ### 🛒 Giỏ hàng & Thanh toán
 - Thêm/xóa/cập nhật số lượng sản phẩm trong giỏ

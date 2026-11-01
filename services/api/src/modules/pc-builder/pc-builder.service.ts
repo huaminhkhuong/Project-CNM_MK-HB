@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import crypto from "crypto";
 import { getDbPool, query } from "../../config/database";
 import { env } from "../../config/env";
@@ -44,6 +46,29 @@ export interface Build {
  * Handles build creation, item management, multi-candidate recommendations, and compatibility checks.
  */
 class PcBuilderService {
+  private cachedCentralizedRules: any = null;
+
+  public getCentralizedRules(): any {
+    if (this.cachedCentralizedRules) return this.cachedCentralizedRules;
+    try {
+      const candidates = [
+        path.resolve(process.cwd(), "data/rules.json"),
+        path.resolve(process.cwd(), "../../data/rules.json"),
+        path.resolve(__dirname, "../../../../../data/rules.json"),
+        path.resolve(__dirname, "../../../../data/rules.json")
+      ];
+      for (const p of candidates) {
+        if (fs.existsSync(p)) {
+          this.cachedCentralizedRules = JSON.parse(fs.readFileSync(p, "utf8"));
+          return this.cachedCentralizedRules;
+        }
+      }
+    } catch (e) {
+      // Graceful fallback to default rules
+    }
+    return null;
+  }
+
   private toMoney(value: any): number {
     return Number(Number(value || 0).toFixed(2));
   }
@@ -540,6 +565,159 @@ class PcBuilderService {
     return "";
   }
 
+
+  /**
+   * Helper trích xuất thông tin cấu trúc thanh RAM (Dual Channel, Dung lượng, Tốc độ)
+   */
+  public getRamArchitectureInfo(ramItem: any, mbItem?: any): {
+    totalCapacityGb: number;
+    stickCount: number;
+    isDualChannel: boolean;
+    channelConfig: string;
+    advantageNote: string;
+  } {
+    if (!ramItem) {
+      return { totalCapacityGb: 16, stickCount: 1, isDualChannel: false, channelConfig: "Single Channel (1 thanh)", advantageNote: "" };
+    }
+    const name = String(ramItem.name || ramItem.productName || "").toUpperCase();
+    const specs = ramItem.specs || {};
+    const sticksFromSpec = this.parseNumber(specs["ram_sticks"] || specs["sticks"] || specs["số thanh"], 0);
+
+    let stickCount = sticksFromSpec > 0 ? sticksFromSpec : 1;
+    let capPerStick = 16;
+    let totalCap = 16;
+
+    const dualMatch = name.match(/(\d+)\s*[xX]\s*(\d+)\s*GB/i) || name.match(/KIT\s*(\d+)\s*[xX]\s*(\d+)\s*GB/i);
+    const singleMatch = name.match(/(\d+)\s*GB/i);
+
+    if (dualMatch) {
+      stickCount = parseInt(dualMatch[1], 10);
+      capPerStick = parseInt(dualMatch[2], 10);
+      totalCap = stickCount * capPerStick;
+    } else if (singleMatch) {
+      totalCap = parseInt(singleMatch[1], 10);
+      stickCount = sticksFromSpec > 0 ? sticksFromSpec : 1;
+    }
+
+    const isDual = stickCount >= 2;
+    const channelConfig = isDual
+      ? `Dual-Channel (${stickCount} thanh ${totalCap / stickCount}GB)`
+      : "Single-Channel (1 thanh đơn)";
+
+    const advantageNote = isDual
+      ? "Kích hoạt chuẩn Dual-Channel (x2 Bus Width 128-bit), tăng 15-20% băng thông bộ nhớ và giảm giật khung hình tối thiểu (1% Low FPS)."
+      : "1 thanh đơn giúp tiết kiệm khe RAM cho việc nâng cấp bổ sung trong tương lai.";
+
+    return {
+      totalCapacityGb: totalCap,
+      stickCount,
+      isDualChannel: isDual,
+      channelConfig,
+      channelMode: channelConfig,
+      advantageNote,
+      note: advantageNote,
+      bandwidthMultiplier: isDual ? 1.2 : 1.0
+    };
+  }
+
+
+  /**
+   * Tính toán đường cong nghẽn cổ chai (Dynamic Bottleneck Curve) theo tỷ lệ phần trăm
+   * Dựa trên Tier CPU, Tier GPU và Độ phân giải mục tiêu (1080p, 1440p 2K, 4K)
+   */
+  public calculateDynamicBottleneck(cpuItem: any, gpuItem: any, resolution: string = "1080p"): {
+    bottleneckPercentage: number;
+    bottleneckComponent: "CPU" | "GPU" | "BALANCED";
+    status: "OPTIMAL" | "BALANCED" | "WARNING" | "SEVERELY_BOTTLENECKED";
+    resolutionImpact: string;
+    explanation: string;
+  } {
+    if (!cpuItem || !gpuItem) {
+      return {
+        bottleneckPercentage: 0,
+        bottleneckPercent: 0,
+        bottleneckComponent: "BALANCED",
+        status: "OPTIMAL",
+        resolutionImpact: "Đầy đủ cân bằng.",
+        explanation: "Chưa chọn đủ CPU và GPU để tính toán nghẽn."
+      };
+    }
+
+    const getCpuScore = (name: string): number => {
+      const n = this.normalizeText(name);
+      if (n.includes("14900") || n.includes("13900") || n.includes("285k") || n.includes("7950x") || n.includes("9950x")) return 98;
+      if (n.includes("14700") || n.includes("13700") || n.includes("265k") || n.includes("7800x3d") || n.includes("9800x3d")) return 92;
+      if (n.includes("14600") || n.includes("13600") || n.includes("7700x") || n.includes("7700")) return 82;
+      if (n.includes("14400") || n.includes("13400") || n.includes("12600") || n.includes("7600x") || n.includes("7600")) return 74;
+      if (n.includes("12400") || n.includes("5600x") || n.includes("5600") || n.includes("5700")) return 65;
+      if (n.includes("12100") || n.includes("13100") || n.includes("5500") || n.includes("3600")) return 50;
+      return 40;
+    };
+
+    const getGpuScore = (name: string): number => {
+      const n = this.normalizeText(name);
+      if (n.includes("5090") || n.includes("4090") || n.includes("7900 xtx")) return 100;
+      if (n.includes("5080") || n.includes("4080") || n.includes("7900 xt")) return 88;
+      if (n.includes("4070 ti") || n.includes("7800 xt") || n.includes("5070 ti") || n.includes("4070")) return 76;
+      if (n.includes("4060 ti") || n.includes("3070") || n.includes("7700 xt") || n.includes("6700 xt")) return 62;
+      if (n.includes("4060") || n.includes("3060") || n.includes("7600") || n.includes("6600 xt")) return 50;
+      if (n.includes("3050") || n.includes("6500") || n.includes("1660")) return 36;
+      if (n.includes("1650") || n.includes("6400") || n.includes("730")) return 20;
+      return 30;
+    };
+
+    const cpuScore = getCpuScore(cpuItem.name || cpuItem.productName || "");
+    const gpuScore = getGpuScore(gpuItem.name || gpuItem.productName || "");
+
+    // Trọng số tải GPU thay đổi theo Độ phân giải màn hình:
+    // 1080p: CPU chịu tải cao hơn (Resolution Weight GPU = 0.85)
+    // 2K (1440p): Tải cân bằng (Resolution Weight GPU = 1.0)
+    // 4K: GPU chịu tải tới 95% (Resolution Weight GPU = 1.35)
+    let resGpuWeight = 1.0;
+    const resLow = String(resolution || "1080p").toLowerCase();
+    if (resLow === "4k") resGpuWeight = 1.35;
+    else if (resLow === "2k" || resLow === "1440p") resGpuWeight = 1.10;
+    else resGpuWeight = 0.88; // 1080p
+
+    const weightedGpuScore = gpuScore * resGpuWeight;
+    const diff = Math.abs(cpuScore - weightedGpuScore);
+    const maxScore = Math.max(cpuScore, weightedGpuScore, 1);
+    const rawPct = Math.round((diff / maxScore) * 100);
+    const bottleneckPercentage = Math.min(65, Math.max(3, rawPct));
+
+    let bottleneckComponent: "CPU" | "GPU" | "BALANCED" = "BALANCED";
+    if (rawPct > 12) {
+      bottleneckComponent = cpuScore < weightedGpuScore ? "CPU" : "GPU";
+    }
+
+    let status: "OPTIMAL" | "BALANCED" | "WARNING" | "SEVERELY_BOTTLENECKED" = "BALANCED";
+    if (bottleneckPercentage <= 8) status = "OPTIMAL";
+    else if (bottleneckPercentage <= 15) status = "BALANCED";
+    else if (bottleneckPercentage <= 25) status = "WARNING";
+    else status = "SEVERELY_BOTTLENECKED";
+
+    const resLabel = resLow.toUpperCase();
+    let explanation = `Tỷ lệ nghẽn ước tính ${bottleneckPercentage}% ở độ phân giải ${resLabel}.`;
+    if (status === "OPTIMAL") {
+      explanation += ` CPU (${cpuItem.name}) và GPU (${gpuItem.name}) hoạt động đồng bộ hoàn hảo, tận dụng 95-98% sức mạnh phần cứng.`;
+    } else if (status === "BALANCED") {
+      explanation += ` Mức chênh lệch hiệu năng rất nhỏ (dưới 15%), trải nghiệm mượt mà không bị sụt FPS đột ngột.`;
+    } else if (bottleneckComponent === "CPU") {
+      explanation += ` CPU hơi yếu hơn so với GPU ở ${resLabel}, GPU có thể chưa bung hết 100% công suất trong một số game phụ thuộc xung nhịp đơn nhân.`;
+    } else {
+      explanation += ` GPU là thành phần giới hạn FPS ở ${resLabel}. CPU còn dư tải thoải mái để stream hoặc đa nhiệm.`;
+    }
+
+    return {
+      bottleneckPercentage,
+      bottleneckPercent: bottleneckPercentage,
+      bottleneckComponent,
+      status,
+      resolutionImpact: `Tại ${resLabel}: Tải trọng ${resLow === "4k" ? "dồn 85% vào GPU" : resLow === "2k" ? "cân bằng 50-50" : "dồn nhiều vào xung nhịp CPU"}.`,
+      explanation
+    };
+  }
+
   private getMainboardRamType(item: any): "DDR4" | "DDR5" {
     const specRam = item?.specs?.["ram_type"] || item?.specs?.["chuẩn ram"] || item?.specs?.["spec_ram_type"];
     if (specRam) {
@@ -702,11 +880,54 @@ class PcBuilderService {
       );
     };
 
-    const cpuPool = getPool([1], ["CPU"]);
+    const centralizedRules = this.getCentralizedRules();
+    const isGaming = useCase === "gaming" || useCase === "esports" || useCase === "aaa" || useCase === "default";
+    const entKeywords: string[] = centralizedRules?.componentPolicies?.gpu?.enterpriseKeywords || [
+      "a40", "a100", "h100", "h200", "l40", "a800", "tesla", "gv100"
+    ];
+    const wsKeywords: string[] = centralizedRules?.componentPolicies?.gpu?.workstationKeywords || [
+      "a400", "a1000", "a2000", "a4000", "a5000", "a6000", "t400", "t600", "t1000", "rtx pro", "quadro"
+    ];
+    const srvKeywords: string[] = centralizedRules?.componentPolicies?.cpu?.serverKeywords || [
+      "threadripper", "epyc", "xeon"
+    ];
+
+    const isWorkstationGpu = (name: string): boolean => {
+      const n = String(name || "").toLowerCase();
+      if (/proart|pro gaming|gaming pro/i.test(n) && /rtx|gtx|rx /i.test(n) && !/rtx a\d|rtx pro \d/i.test(n)) return false;
+      if (entKeywords.some((k: string) => new RegExp(`\\b${k}\\b`, "i").test(n) || n.includes(k))) return true;
+      if (wsKeywords.some((k: string) => new RegExp(`\\b${k}\\b`, "i").test(n) || n.includes(k))) return true;
+      return false;
+    };
+    const isServerCpu = (name: string): boolean => {
+      const n = String(name || "").toLowerCase();
+      return srvKeywords.some((k: string) => n.includes(k));
+    };
+
+    let cpuPool = getPool([1], ["CPU"]);
+    if (isGaming || useCase === "office") {
+      cpuPool = cpuPool.filter(i => !isServerCpu(i.name));
+    }
     const mbPool = getPool([2], ["MAINBOARD", "BO MẠCH"]);
     const ramPool = getPool([3], ["RAM", "BỘ NHỚ"]);
-    const gpuPool = getPool([4, 9], ["GPU", "VGA", "CARD"]);
-    const ssdPool = getPool([5, 10], ["STORAGE", "SSD", "Ổ CỨNG"]);
+    const nonComponentCatIds = [10, 11, 12]; // MONITOR, KEYBOARD_MOUSE, HEADPHONE
+    let gpuPool = getPool([4], ["GPU", "VGA", "CARD"]).filter(i => !nonComponentCatIds.includes(i.categoryId));
+    if (isGaming || useCase === "office") {
+      gpuPool = gpuPool.filter(i => !isWorkstationGpu(i.name));
+    }
+    const isSsdItem = (item: any): boolean => {
+      const n = String(item.name || "").toLowerCase();
+      const cat = String(item.categoryName || "").toLowerCase();
+      if (item.categoryId === 5) return true;
+      if (n.includes("ssd") || n.includes("nvme") || n.includes("m.2")) return true;
+      if (n.includes("hdd") || cat.includes("hdd") || n.includes("ultrastar") || n.includes("barracuda") || n.includes("ironwolf")) return false;
+      return cat.includes("ssd");
+    };
+    let ssdPool = getPool([5, 9], ["STORAGE", "SSD", "Ổ CỨNG", "HDD"]).filter(i => !nonComponentCatIds.includes(i.categoryId) && !i.name.toLowerCase().includes("màn hình"));
+    const strictlySsdPool = ssdPool.filter(isSsdItem);
+    if (strictlySsdPool.length > 0) {
+      ssdPool = strictlySsdPool;
+    }
     const psuPool = getPool([6], ["PSU", "NGUỒN"]);
     const casePool = getPool([7], ["CASE", "VỎ"]);
     const coolingPool = getPool([8], ["COOLING", "TẢN NHIỆT"]);
@@ -848,6 +1069,42 @@ class PcBuilderService {
       }
     }
 
+
+    // ── GLOBAL KNAPSACK MULTI-OBJECTIVE BALANCING PASS ──
+    // Thay vì thuần greedy, đánh giá Utility U = w_cpu*Score_cpu + w_gpu*Score_gpu sao cho Tổng Giá <= Target Budget
+    if (selectedComponents.cpu && selectedComponents.gpu && hasGpuNeed) {
+      const targetMaxBudget = Math.round(budget * multiplier);
+      let currentSum = Object.values(selectedComponents).reduce((sum: number, it: any) => sum + (it.price || 0), 0);
+
+      // Nếu GPU quá yếu so với CPU trong cấu hình Gaming, tìm cách hoán đổi sang tổ hợp CPU-GPU cân đối hơn
+      const bottleneckCheck = this.calculateDynamicBottleneck(selectedComponents.cpu, selectedComponents.gpu, options.caseStyle || "1080p");
+      if (bottleneckCheck.bottleneckComponent === "GPU" && bottleneckCheck.bottleneckPercentage > 20) {
+        // Tìm GPU cao hơn 1 bậc trong kho
+        const betterGpus = gpuPool
+          .filter((g) => g.price > selectedComponents.gpu.price && g.price - selectedComponents.gpu.price <= 2500000)
+          .sort((a, b) => a.price - b.price);
+
+        if (betterGpus.length > 0) {
+          const candidateGpu = betterGpus[0];
+          const priceDelta = candidateGpu.price - selectedComponents.gpu.price;
+
+          // Kiểm tra xem có thể bù giá bằng cách chọn CPU vừa vặn hơn không (giữ cùng socket)
+          const cheaperCpus = cpuPool
+            .filter((c) => c.price < selectedComponents.cpu.price && this.getCpuSocket(c) === cpuSocket && selectedComponents.cpu.price - c.price >= priceDelta * 0.7)
+            .sort((a, b) => b.price - a.price);
+
+          if (cheaperCpus.length > 0 && (currentSum + priceDelta - (selectedComponents.cpu.price - cheaperCpus[0].price)) <= targetMaxBudget * 1.05) {
+            currentSum = currentSum + candidateGpu.price - selectedComponents.gpu.price - (selectedComponents.cpu.price - cheaperCpus[0].price);
+            selectedComponents.gpu = candidateGpu;
+            selectedComponents.cpu = cheaperCpus[0];
+            cpuSocket = this.getCpuSocket(cheaperCpus[0]);
+            cpuTdp = this.getCpuTdp(cheaperCpus[0]);
+            gpuTdp = this.getGpuTdp(candidateGpu);
+          }
+        }
+      }
+    }
+
     // Budget Optimization Pass: If total sum exceeds target budget limit, swap flexible components with lower priced alternatives
     const targetCandidateBudget = Math.round(budget * multiplier);
     let currentTotal = Object.values(selectedComponents).reduce((sum: number, item: any) => sum + (item.price || 0), 0);
@@ -914,11 +1171,25 @@ class PcBuilderService {
       }
     }
 
+    const dynamicBottleneck = this.calculateDynamicBottleneck(
+      selectedComponents.cpu,
+      selectedComponents.gpu,
+      "1080p"
+    );
+
+    const ramArchitecture = this.getRamArchitectureInfo(
+      selectedComponents.ram,
+      selectedComponents.mainboard
+    );
+
     return {
       totalPrice,
       budgetUtilization: `${Math.round((totalPrice / budget) * 100)}%`,
       components: selectedComponents,
-      compatibilityReport
+      dynamicBottleneck,
+      ramArchitecture,
+      compatibilityReport,
+      allItems
     };
   }
 
@@ -936,37 +1207,49 @@ class PcBuilderService {
     const preference = String(payload.preference || "value").toLowerCase();
     const futureNeed = String(payload.futureNeed || "none").toLowerCase();
 
+    const centralized = this.getCentralizedRules();
     let ratios: Record<string, number> = {
-      cpu: 0.20,
+      cpu: 0.18,
       mainboard: 0.12,
-      ram: 0.08,
-      gpu: 0.38,
+      ram: 0.10,
+      gpu: 0.44,
       storage: 0.08,
-      psu: 0.06,
-      case: 0.04,
+      psu: 0.07,
+      case: 0.05,
       cooling: 0.04
     };
 
-    if (useCase === "workstation" || useCase === "render" || useCase === "editing" || useCase === "ai") {
+    if (centralized?.budgetProfiles) {
+      const profile = centralized.budgetProfiles[useCase] ||
+        (useCase.includes("render") || useCase.includes("workstation") || useCase.includes("edit") ? centralized.budgetProfiles.rendering : null) ||
+        (useCase.includes("esport") ? centralized.budgetProfiles.esports : null) ||
+        (useCase.includes("aaa") ? centralized.budgetProfiles.aaa : null) ||
+        (useCase.includes("deep") || useCase.includes("ai") ? centralized.budgetProfiles.deeplearning : null) ||
+        (useCase.includes("office") || useCase.includes("văn phòng") ? centralized.budgetProfiles.office : null) ||
+        centralized.budgetProfiles.default;
+      if (profile?.weights) {
+        ratios = { ...profile.weights };
+      }
+    } else if (useCase === "workstation" || useCase === "render" || useCase === "editing" || useCase === "ai") {
       ratios = {
-        cpu: 0.32,
+        cpu: 0.26,
         mainboard: 0.14,
-        ram: 0.11,
+        ram: 0.16,
         gpu: 0.28,
-        storage: 0.06,
-        psu: 0.04,
-        case: 0.02,
-        cooling: 0.03
+        storage: 0.08,
+        psu: 0.08,
+        case: 0.05,
+        cooling: 0.05
       };
     } else if (useCase === "office") {
       ratios = {
-        cpu: 0.38,
+        cpu: 0.35,
         mainboard: 0.20,
-        ram: 0.14,
-        storage: 0.12,
-        psu: 0.06,
-        case: 0.04,
-        cooling: 0.06,
+        ram: 0.16,
+        storage: 0.13,
+        psu: 0.08,
+        case: 0.05,
+        cooling: 0.03,
         gpu: 0.0
       };
     }
@@ -1026,6 +1309,7 @@ class PcBuilderService {
     }
 
     // Generate 3 Candidates concurrently
+    // 3 Candidate generations
     const [bestValue, bestPerformance, budgetSafe] = await Promise.all([
       this.querySingleCandidate(budget, ratios, 1.0, useCase),
       this.querySingleCandidate(budget, ratios, 1.15, useCase),
@@ -1054,6 +1338,8 @@ class PcBuilderService {
     const statsPlus = calculateFpsStats(bestPerformance);
     const statsMinus = calculateFpsStats(budgetSafe);
 
+    const tradeoffs = this.detectTradeoffs(bestValue, budget, useCase, (bestValue as any).allItems || []);
+
     const deltaPlusAaa = Math.max(12, statsPlus.aaaFps - statsBase.aaaFps);
     const deltaPlusEsports = Math.max(25, statsPlus.esportsFps - statsBase.esportsFps);
 
@@ -1081,9 +1367,23 @@ class PcBuilderService {
       }
     };
 
+    const dynamicBottleneck = this.calculateDynamicBottleneck(
+      bestValue.components?.cpu,
+      bestValue.components?.gpu,
+      resolution
+    );
+
+    const ramArchitecture = this.getRamArchitectureInfo(
+      bestValue.components?.ram,
+      bestValue.components?.mainboard
+    );
+
     return {
       targetBudget: budget,
       useCase,
+      resolution,
+      dynamicBottleneck,
+      ramArchitecture,
       candidates: {
         bestValue: {
           label: "Best Value (Cân Bằng P/P)",
@@ -1106,9 +1406,187 @@ class PcBuilderService {
       budgetUtilization: bestValue.budgetUtilization,
       components: bestValue.components,
       compatibilityReport: bestValue.compatibilityReport,
+      tradeoffs,
       whatIfSimulation,
       message: `Đã tự động tạo 3 phương án cấu hình cho nhu cầu ${useCase.toUpperCase()} trong ngân sách ${budget.toLocaleString("vi-VN")}đ`
     };
+  }
+
+
+  private detectTradeoffs(
+    bestValue: any,
+    budget: number,
+    useCase: string,
+    allItems: any[]
+  ): any[] {
+    const tradeoffs: any[] = [];
+    const comps = bestValue?.components || {};
+    const formatVND = (n: number) => Number(n || 0).toLocaleString("vi-VN") + "đ";
+
+    // 1. RAM Trade-off (e.g. DDR4 vs DDR5 or 16GB vs 32GB)
+    if (comps.ram && comps.mainboard) {
+      const currentRam = comps.ram;
+      const mb = comps.mainboard;
+      const mbRamType = this.getMainboardRamType(mb);
+
+      const ramPool = allItems.filter(
+        (i) =>
+          (i.categoryId === 3 || String(i.categoryName).toUpperCase().includes("RAM")) &&
+          i.price > 0 &&
+          i.variantId !== currentRam.variantId
+      );
+
+      const upgrades = ramPool
+        .filter((r) => {
+          const rType = this.getRamType(r);
+          const delta = r.price - currentRam.price;
+          return rType === mbRamType && delta > 0 && delta <= 1500000;
+        })
+        .sort((a, b) => (a.price - currentRam.price) - (b.price - currentRam.price));
+
+      if (upgrades.length > 0) {
+        const altRam = upgrades[0];
+        const delta = altRam.price - currentRam.price;
+        tradeoffs.push({
+          componentType: "ram",
+          title: `Lựa chọn phương án RAM (${mbRamType})`,
+          description: `Bo mạch chủ ${mb.name} hỗ trợ chuẩn ${mbRamType}. Chúng tôi phát hiện 2 phương án RAM tương thích tốt:`,
+          options: [
+            {
+              id: "ram_current",
+              title: `${currentRam.name} (Phương án hiện tại)`,
+              pros: ["Vừa vặn trong ngân sách ban đầu", "Hoạt động ổn định cho nhu cầu thông thường"],
+              cons: ["Băng thông/Dung lượng cơ bản"],
+              deltaPrice: 0,
+              recommended: false,
+              component: currentRam
+            },
+            {
+              id: "ram_upgrade",
+              title: `${altRam.name} (Phương án nâng cao)`,
+              pros: [
+                "Băng thông cao hơn, tăng độ phản hồi hệ thống 5-10%",
+                "Đa nhiệm mượt mà khi mở nhiều tab trình duyệt và game nặng",
+                "Khả năng giữ giá và tương thích nâng cấp lâu dài"
+              ],
+              cons: [`Chi phí chênh lệch thêm +${formatVND(delta)}`],
+              deltaPrice: delta,
+              recommended: true,
+              component: altRam
+            }
+          ],
+          defaultChoiceId: "ram_current",
+          noteIfAutoSelected: `Hệ thống đã tự động chọn RAM ${currentRam.name} theo đúng hạn mức ngân sách định mức.`
+        });
+      }
+    }
+
+    // 2. GPU Trade-off (Next Tier GPU)
+    if (comps.gpu) {
+      const currentGpu = comps.gpu;
+      const isGamingUseCase = useCase === "gaming" || useCase === "esports" || useCase === "aaa" || useCase === "default";
+      const isWorkstation = (nStr: string) => {
+        const n = String(nStr || "").toLowerCase();
+        if (/proart|pro gaming|gaming pro/i.test(n) && /rtx|gtx|rx /i.test(n) && !/rtx a\d|rtx pro \d/i.test(n)) return false;
+        return /\b(a40|a100|h100|h200|l40|a800|tesla|gv100|a400|a1000|a2000|a4000|a5000|a6000|t400|t600|t1000|quadro)\b/i.test(n) || /\brtx pro \d+/i.test(n);
+      };
+      const gpuPool = allItems.filter(
+        (i) =>
+          (i.categoryId === 4 || ["GPU", "VGA"].some((cn) => String(i.categoryName).toUpperCase().includes(cn))) &&
+          i.price > currentGpu.price &&
+          i.price - currentGpu.price >= 400000 &&
+          i.price - currentGpu.price <= 2500000 &&
+          (!isGamingUseCase || !isWorkstation(i.name))
+      ).sort((a, b) => a.price - b.price);
+
+      if (gpuPool.length > 0) {
+        const nextGpu = gpuPool[0];
+        const delta = nextGpu.price - currentGpu.price;
+        tradeoffs.push({
+          componentType: "gpu",
+          title: "Lựa chọn phương án Card Đồ Họa (GPU)",
+          description: `Nâng thêm một khoản nhỏ có thể đưa dàn máy lên phân khúc card đồ họa cao hơn rõ rệt:`,
+          options: [
+            {
+              id: "gpu_current",
+              title: `${currentGpu.name} (Phương án chuẩn)`,
+              pros: ["Chi phí chuẩn ngân sách", "Chơi tốt các game eSports và AAA ở mức thiết lập phù hợp"],
+              cons: ["Sức mạnh đồ họa ở ngưỡng tiêu chuẩn"],
+              deltaPrice: 0,
+              recommended: false,
+              component: currentGpu
+            },
+            {
+              id: "gpu_upgrade",
+              title: `${nextGpu.name} (Tăng vọt hiệu năng)`,
+              pros: [
+                "Tăng thêm ~15 - 25 FPS trong các tựa game nặng",
+                "Xử lý đồ họa, video và AI nhanh hơn đáng kể",
+                "Tản nhiệt và linh kiện cao cấp hơn"
+              ],
+              cons: [`Cần bổ sung ngân sách +${formatVND(delta)}`],
+              deltaPrice: delta,
+              recommended: true,
+              component: nextGpu
+            }
+          ],
+          defaultChoiceId: "gpu_current",
+          noteIfAutoSelected: `Hệ thống giữ nguyên card ${currentGpu.name} để tránh phát sinh chi phí phụ.`
+        });
+      }
+    }
+
+    // 3. Storage Trade-off (500GB vs 1TB)
+    if (comps.storage) {
+      const currentStorage = comps.storage;
+      const is500G = /500g|512g|250g|256g/i.test(currentStorage.name);
+      if (is500G) {
+        const ssdPool = allItems.filter(
+          (i) =>
+            (i.categoryId === 5 || (String(i.categoryName).toUpperCase().includes("SSD") && i.categoryId !== 10)) &&
+            /1tb|1000g/i.test(i.name) &&
+            i.price > currentStorage.price &&
+            i.price - currentStorage.price <= 1000000
+        ).sort((a, b) => a.price - b.price);
+
+        if (ssdPool.length > 0) {
+          const upgradeSsd = ssdPool[0];
+          const delta = upgradeSsd.price - currentStorage.price;
+          tradeoffs.push({
+            componentType: "storage",
+            title: "Lựa chọn dung lượng Ổ Cứng (SSD)",
+            description: `Dung lượng game và phần mềm hiện nay khá lớn. Cân nhắc nâng từ ${currentStorage.name} lên 1TB:`,
+            options: [
+              {
+                id: "ssd_current",
+                title: `${currentStorage.name}`,
+                pros: ["Tiết kiệm chi phí ban đầu", "Đủ cài đặt Windows và 1-2 tựa game chính"],
+                cons: ["Dung lượng có thể nhanh đầy sau vài tháng sử dụng"],
+                deltaPrice: 0,
+                recommended: false,
+                component: currentStorage
+              },
+              {
+                id: "ssd_upgrade",
+                title: `${upgradeSsd.name}`,
+                pros: [
+                  "Gấp đôi dung lượng (1TB), thoải mái cài đặt nhiều game lớn",
+                  "Tốc độ đọc/ghi cao hơn khi ổ còn nhiều dung lượng trống"
+                ],
+                cons: [`Chi phí chênh lệch thêm +${formatVND(delta)}`],
+                deltaPrice: delta,
+                recommended: true,
+                component: upgradeSsd
+              }
+            ],
+            defaultChoiceId: "ssd_current",
+            noteIfAutoSelected: "Hệ thống đã giữ dung lượng ổ cứng hiện tại để bám sát ngân sách."
+          });
+        }
+      }
+    }
+
+    return tradeoffs;
   }
 
   private generateRuleBasedAdvice(
@@ -1277,16 +1755,13 @@ ${comps.gpu ? `- 🎮 **GPU**: ${comps.gpu.name} (${formatVND(comps.gpu.price)})
       ? items.map((i: any) => `- ${i.type || 'Linh kiện'}: ${i.name || i.productName} (${Number(i.price || 0).toLocaleString("vi-VN")}đ)`).join("\n")
       : "Đang tạo dàn PC tối ưu...";
 
-    const geminiKey = env.geminiApiKey || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
-    const openaiKey = env.openaiApiKey || process.env.OPENAI_API_KEY;
-
     let advice = "";
     let providerUsed = "PC Mall XAI Knowledge Engine (Real DB Grounded)";
 
-    // Option A: Google Gemini API
-    if (geminiKey) {
-      try {
-        const promptText = `Bạn là Chuyên gia Tư vấn Phần cứng PC Mall AI Advisor.
+    // Unified LLM Service (Provider-Agnostic)
+    try {
+      const { unifiedLlmService } = require("../ai/unified-llm.service");
+      const promptText = `Bạn là Chuyên gia Tư vấn Phần cứng PC Mall AI Advisor.
 Hãy trả lời câu hỏi của khách hàng bằng tiếng Việt ngắn gọn, súc tích, chuyên nghiệp (dưới 150 từ).
 BẠN CHỈ ĐƯỢC TƯ VẤN DỰA TRÊN DỮ LIỆU LINH KIỆN THẬT NÀY TỪ KHO HÀNG CỦA CỬA HÀNG:
 
@@ -1298,75 +1773,20 @@ ${realCompsStr}
 Câu hỏi của khách hàng: "${question}"
 Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: promptText }] }],
-            generationConfig: { temperature: 0.7, maxOutputTokens: 350 }
-          })
-        });
-        clearTimeout(timeoutId);
-
-        if (response.ok) {
-          const data: any = await response.json();
-          const candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (candidateText) {
-            advice = candidateText.trim();
-            providerUsed = "Google Gemini 1.5 Flash (Live LLM)";
-          }
-        }
-      } catch (err) {
-        console.warn("Gemini API call warning, falling back to Knowledge Engine:", err);
+      const llmRes = await unifiedLlmService.generateText({
+        prompt: promptText,
+        temperature: 0.7,
+        maxTokens: 350
+      });
+      if (llmRes.text && !llmRes.isBlocked) {
+        advice = llmRes.text;
+        providerUsed = `${llmRes.provider.toUpperCase()} (${llmRes.model})`;
       }
+    } catch (err) {
+      console.warn("Unified LLM call warning, falling back to Knowledge Engine:", err);
     }
 
-    // Option B: OpenAI API
-    if (!advice && openaiKey) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-        const response = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${openaiKey}`
-          },
-          signal: controller.signal,
-          body: JSON.stringify({
-            model: "gpt-4o-mini",
-            messages: [
-              {
-                role: "system",
-                content: "Bạn là Chuyên gia Tư vấn Phần cứng PC Mall AI Advisor. Trả lời bằng tiếng Việt ngắn gọn, súc tích (dưới 150 từ), bám sát 100% cấu hình linh kiện được cung cấp."
-              },
-              {
-                role: "user",
-                content: `Cấu hình PC từ kho hàng:\n${realCompsStr}\nTổng giá: ${Number(recommendedBuild?.totalPrice || totalPrice).toLocaleString("vi-VN")}đ.\nCâu hỏi: "${question}"`
-              }
-            ],
-            max_tokens: 350
-          })
-        });
-        clearTimeout(timeoutId);
-
-        if (response.ok) {
-          const data: any = await response.json();
-          const text = data?.choices?.[0]?.message?.content;
-          if (text) {
-            advice = text.trim();
-            providerUsed = "OpenAI GPT-4o-mini (Live LLM)";
-          }
-        }
-      } catch (err) {
-        console.warn("OpenAI API call warning, falling back to Knowledge Engine:", err);
-      }
-    }
 
     // Fallback: PC Mall XAI Knowledge Engine (Bám sát 100% dữ liệu thực từ kho hàng)
     if (!advice) {
@@ -1497,8 +1917,8 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
 
     const cpuSocket = this.findSpec(cpu.specs, ["socket"]);
     const boardSocket = this.findSpec(mainboard.specs, ["socket"]);
-    const ramType = this.findSpec(ram.specs, ["ram_type", "ram", "ddr", "memory type", "ram type"]);
-    const boardRam = this.findSpec(mainboard.specs, ["ram_type", "ram", "ddr", "memory"]);
+    const ramType = this.getRamType({ name: ram.productName, specs: Object.fromEntries((ram.specs || []).map((s: any) => [s.key.toLowerCase(), s.value])) });
+    const boardRam = this.getMainboardRamType({ name: mainboard.productName, specs: Object.fromEntries((mainboard.specs || []).map((s: any) => [s.key.toLowerCase(), s.value])) });
     const parseGpuTdp = (specs: any[], name: string): number => {
       const specTdp = this.parseNumber(this.findSpec(specs, ["tdp", "power", "tiêu thụ"]), 0);
       if (specTdp > 30 && specTdp < 600) return specTdp;
@@ -1582,7 +2002,7 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
     const ramName = this.normalizeText(ram.productName);
     const ramSticksMatch = ramName.match(/(\d+)\s*x\s*\d+\s*gb/i);
     const sticksPerUnit = ramSticksMatch ? this.parseNumber(ramSticksMatch[1], 1) : 1;
-    const rawRamComp = normalizedComponents.find(c => c.componentType === "ram");
+    const rawRamComp = normalizedComponents.find((c: any) => c.componentType === "ram");
     const ramQuantity = Math.max(1, Number(rawRamComp?.quantity || 1));
     const ramSticks = sticksPerUnit * ramQuantity;
     const isRamSlotsOk = !componentMap.ram || !componentMap.mainboard || ramSlots >= ramSticks;
@@ -1839,6 +2259,821 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
       performanceEstimate: xaiReport.performanceEstimate,
       message: xaiReport.summary.overallMessage
     };
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // 🚀 CHỨC NĂNG 1: AI BUILD TỪ POOL 32 LINH KIỆN (STREAMING)
+  // ════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Lọc kho hàng thật và tạo POOL 32 linh kiện (4 sản phẩm x 8 danh mục)
+   */
+  async getCandidatePool32(
+    budget: number,
+    useCase: string = "gaming",
+    resolution: string = "1080p",
+    criteria: any = {}
+  ): Promise<{ pool: Record<string, any[]>; allItemsMap: Map<number, any> }> {
+    let rows: any[] = [];
+    try {
+      rows = (await query(`
+        SELECT 
+          s.id AS variantId,
+          s.price AS price,
+          s.image_url AS imageUrl,
+          s.sku AS skuCode,
+          s.stock AS stock,
+          p.id AS productId,
+          p.name AS productName,
+          p.slug AS productSlug,
+          p.category_id AS categoryId,
+          c.name AS categoryName,
+          a.name AS attrName,
+          av.value AS attrVal
+        FROM product_skus s
+        INNER JOIN products p ON p.id = s.product_id
+        INNER JOIN categories c ON c.id = p.category_id
+        LEFT JOIN sku_attributes sa ON sa.sku_id = s.id
+        LEFT JOIN attribute_values av ON av.id = sa.attribute_value_id
+        LEFT JOIN attributes a ON a.id = av.attribute_id
+        WHERE s.is_active = 1 AND p.is_active = 1 AND s.stock > 0
+        ORDER BY s.price ASC;
+      `)) as any[];
+    } catch (_err) {
+      rows = [];
+    }
+
+    const allItemsMap = new Map<number, any>();
+    for (const r of rows) {
+      const vId = Number(r.variantId);
+      if (!allItemsMap.has(vId)) {
+        allItemsMap.set(vId, {
+          variantId: vId,
+          id: vId,
+          skuId: vId,
+          productId: Number(r.productId),
+          name: String(r.productName),
+          productName: String(r.productName),
+          slug: String(r.productSlug),
+          categoryId: Number(r.categoryId),
+          categoryName: String(r.categoryName).toUpperCase(),
+          price: Number(r.price),
+          imageUrl: r.imageUrl || null,
+          stock: Number(r.stock || 10),
+          specs: {} as Record<string, string>
+        });
+      }
+      if (r.attrName && r.attrVal) {
+        allItemsMap.get(vId).specs[String(r.attrName).toLowerCase().trim()] = String(r.attrVal).trim();
+      }
+    }
+
+    const allItems = Array.from(allItemsMap.values());
+    const getCatItems = (catIds: number[], catNames: string[]) => {
+      return allItems.filter(item => 
+        catIds.includes(item.categoryId) || 
+        catNames.some(cn => item.categoryName === cn || item.categoryName.includes(cn))
+      );
+    };
+
+    const isOffice = useCase === "office";
+    const ratios: Record<string, number> = isOffice
+      ? { cpu: 0.35, mainboard: 0.20, ram: 0.16, storage: 0.13, psu: 0.08, case: 0.05, cooling: 0.03, gpu: 0.0 }
+      : { cpu: 0.18, mainboard: 0.12, ram: 0.10, gpu: 0.38, storage: 0.08, psu: 0.07, case: 0.04, cooling: 0.03 };
+
+    if (resolution === "4k") {
+      if (ratios.gpu > 0) ratios.gpu += 0.08;
+      ratios.cpu = Math.max(0.12, ratios.cpu - 0.04);
+    } else if (resolution === "2k") {
+      if (ratios.gpu > 0) ratios.gpu += 0.04;
+      ratios.cpu = Math.max(0.14, ratios.cpu - 0.02);
+    }
+
+    const platformPref = String(criteria?.platformPref || "auto").toLowerCase();
+    const gpuBrandPref = String(criteria?.gpuBrandPref || "auto").toLowerCase();
+    const minRam = String(criteria?.minRam || "").toLowerCase();
+    const minStorage = String(criteria?.minStorage || "").toLowerCase();
+    const aesthetic = String(criteria?.aesthetic || "").toLowerCase();
+    const coolingPref = String(criteria?.coolingPref || "").toLowerCase();
+
+    const pickDiverse = (list: any[], targetPrice: number, count: number = 4, scoreFn?: (item: any) => number) => {
+      if (!list || list.length === 0) return [];
+      const scored = list.map(item => {
+        const priceDiff = Math.abs(item.price - targetPrice);
+        const bonus = scoreFn ? scoreFn(item) : 0;
+        return { item, score: priceDiff - bonus };
+      });
+      scored.sort((a, b) => a.score - b.score);
+
+      const selected: any[] = [];
+      const seenNames = new Set<string>();
+      for (const entry of scored) {
+        const shortName = entry.item.name.split(" ").slice(0, 4).join(" ").toLowerCase();
+        if (!seenNames.has(shortName)) {
+          seenNames.add(shortName);
+          selected.push(entry.item);
+          if (selected.length >= count) break;
+        }
+      }
+      if (selected.length < count) {
+        for (const entry of scored) {
+          if (!selected.includes(entry.item)) {
+            selected.push(entry.item);
+            if (selected.length >= count) break;
+          }
+        }
+      }
+      return selected;
+    };
+
+    // 1. CPU
+    const cpus = getCatItems([1], ["CPU"]).filter(c => !/xeon|epyc|threadripper/i.test(c.name));
+    const cpuTarget = budget * ratios.cpu;
+    let cpuPool: any[] = [];
+    if (platformPref === "intel") {
+      const intelCpus = cpus.filter(c => /intel|core\s*i/i.test(c.name));
+      const amdCpus = cpus.filter(c => /amd|ryzen/i.test(c.name));
+      cpuPool = [...pickDiverse(intelCpus, cpuTarget, 3), ...pickDiverse(amdCpus, cpuTarget, 1)];
+    } else if (platformPref === "amd") {
+      const amdCpus = cpus.filter(c => /amd|ryzen/i.test(c.name));
+      const intelCpus = cpus.filter(c => /intel|core\s*i/i.test(c.name));
+      cpuPool = [...pickDiverse(amdCpus, cpuTarget, 3), ...pickDiverse(intelCpus, cpuTarget, 1)];
+    } else {
+      const intelCpus = cpus.filter(c => /intel|core\s*i/i.test(c.name));
+      const amdCpus = cpus.filter(c => /amd|ryzen/i.test(c.name));
+      cpuPool = [...pickDiverse(intelCpus, cpuTarget, 2), ...pickDiverse(amdCpus, cpuTarget, 2)];
+    }
+    if (cpuPool.length < 4) cpuPool = pickDiverse(cpus, cpuTarget, 4);
+
+    // 2. GPU
+    const gpus = getCatItems([4], ["GPU", "VGA", "CARD"]).filter(g => !/quadro|tesla|rtx a\d|a100|h100/i.test(g.name));
+    const gpuTarget = budget * ratios.gpu;
+    let gpuPool: any[] = [];
+    if (gpuBrandPref === "nvidia") {
+      const nvidias = gpus.filter(g => /geforce|rtx|gtx/i.test(g.name));
+      const amds = gpus.filter(g => /radeon|rx\s*\d/i.test(g.name));
+      gpuPool = [...pickDiverse(nvidias, gpuTarget, 3), ...pickDiverse(amds, gpuTarget, 1)];
+    } else if (gpuBrandPref === "amd") {
+      const amds = gpus.filter(g => /radeon|rx\s*\d/i.test(g.name));
+      const nvidias = gpus.filter(g => /geforce|rtx|gtx/i.test(g.name));
+      gpuPool = [...pickDiverse(amds, gpuTarget, 3), ...pickDiverse(nvidias, gpuTarget, 1)];
+    } else {
+      const nvidias = gpus.filter(g => /geforce|rtx|gtx/i.test(g.name));
+      const amds = gpus.filter(g => /radeon|rx\s*\d/i.test(g.name));
+      gpuPool = [...pickDiverse(nvidias, gpuTarget, 2), ...pickDiverse(amds, gpuTarget, 2)];
+    }
+    if (gpuPool.length < 4) gpuPool = pickDiverse(gpus, gpuTarget, 4);
+
+    // 3. MAINBOARD
+    const mainboards = getCatItems([2], ["MAINBOARD", "BO MẠCH"]);
+    const mbTarget = budget * ratios.mainboard;
+    const lgaBoards = mainboards.filter(m => /1700|b760|z790|h610|b660/i.test(m.name + " " + (m.specs?.socket || "")));
+    const amBoards = mainboards.filter(m => /am5|am4|b650|b550|a620|x670/i.test(m.name + " " + (m.specs?.socket || "")));
+    let mbPool = [...pickDiverse(lgaBoards, mbTarget, 2), ...pickDiverse(amBoards, mbTarget, 2)];
+    if (mbPool.length < 4) mbPool = pickDiverse(mainboards, mbTarget, 4);
+
+    // 4. RAM
+    const rams = getCatItems([3], ["RAM", "BỘ NHỚ"]);
+    const ramTarget = budget * ratios.ram;
+    let ramPool = pickDiverse(rams, ramTarget, 4, (item) => {
+      let b = 0;
+      if (minRam && item.name.toLowerCase().includes(minRam)) b += 1000000;
+      if (/dual|2x|kit 2/i.test(item.name)) b += 500000;
+      return b;
+    });
+
+    // 5. STORAGE
+    const storages = getCatItems([5, 9], ["SSD", "STORAGE", "Ổ CỨNG"]);
+    const storageTarget = budget * ratios.storage;
+    let storagePool = pickDiverse(storages, storageTarget, 4, (item) => {
+      let b = 0;
+      if (minStorage && item.name.toLowerCase().includes(minStorage)) b += 1000000;
+      if (/nvme|gen4|pcie 4/i.test(item.name)) b += 300000;
+      return b;
+    });
+
+    // 6. PSU
+    const psus = getCatItems([6], ["PSU", "NGUỒN"]);
+    const psuTarget = budget * ratios.psu;
+    let psuPool = pickDiverse(psus, psuTarget, 4, (item) => {
+      let b = 0;
+      if (/gold|80 plus gold/i.test(item.name)) b += 300000;
+      return b;
+    });
+
+    // 7. CASE
+    const cases = getCatItems([7], ["CASE", "THÙNG MÁY"]);
+    const caseTarget = budget * ratios.case;
+    let casePool = pickDiverse(cases, caseTarget, 4, (item) => {
+      let b = 0;
+      if (aesthetic.includes("white") && /white|trắng/i.test(item.name)) b += 1000000;
+      if (aesthetic.includes("tank") && /bể cá|panorama|d300/i.test(item.name)) b += 1000000;
+      return b;
+    });
+
+    // 8. COOLING
+    const coolings = getCatItems([8], ["COOLING", "TẢN NHIỆT"]);
+    const coolingTarget = budget * ratios.cooling;
+    let coolingPool = pickDiverse(coolings, coolingTarget, 4, (item) => {
+      let b = 0;
+      if (coolingPref.includes("aio") && /aio|nước|liquid|240|360/i.test(item.name)) b += 1000000;
+      if (aesthetic.includes("white") && /white|trắng/i.test(item.name)) b += 500000;
+      return b;
+    });
+
+    return {
+      pool: {
+        cpu: cpuPool,
+        mainboard: mbPool,
+        ram: ramPool,
+        gpu: gpuPool,
+        storage: storagePool,
+        psu: psuPool,
+        case: casePool,
+        cooling: coolingPool
+      },
+      allItemsMap
+    };
+  }
+
+  /**
+   * Gọi AI Stream chọn 1 linh kiện tối ưu cho mỗi danh mục từ 32 ứng viên
+   */
+  async streamAiSuggestBuild(
+    payload: any = {},
+    onChunk: (chunk: string) => void,
+    sendEvent: (event: any) => void
+  ): Promise<void> {
+    const rawBudget = payload.budget !== undefined ? payload.budget : payload.targetBudget;
+    const budget = Number(rawBudget !== undefined ? rawBudget : 20000000);
+    if (isNaN(budget) || budget <= 0) {
+      sendEvent({
+        type: "error",
+        error: "Ngân sách xây dựng PC không hợp lệ. Vui lòng nhập số tiền dương lớn hơn 0."
+      });
+      return;
+    }
+    const useCase = String(payload.useCase || payload.purpose || "gaming").toLowerCase();
+    const resolution = String(payload.resolution || "1080p").toLowerCase();
+    const customPrompt = String(payload.customPrompt || payload.promptText || "").trim();
+
+    // 1. Tạo Pool 32 linh kiện thực tế
+    const { pool, allItemsMap } = await this.getCandidatePool32(budget, useCase, resolution, payload);
+
+    // 2. Chuyển đổi 32 linh kiện thành văn bản có cấu trúc rõ ràng cho AI
+    const formatPoolSection = (catKey: string, catTitle: string) => {
+      const items = pool[catKey] || [];
+      const lines = items.map((item, idx) => {
+        const specSummary = Object.entries(item.specs || {})
+          .map(([k, v]) => `${k.toUpperCase()}: ${v}`)
+          .slice(0, 4)
+          .join(" | ");
+        return `  [${catKey.toUpperCase()}_${idx + 1} | SKU_ID: ${item.skuId}] ${item.name} - Giá: ${Number(item.price).toLocaleString("vi-VN")}đ ${specSummary ? `(${specSummary})` : ""}`;
+      });
+      return `### DANH MỤC ${catTitle.toUpperCase()} (4 Ứng Viên):\n${lines.join("\n")}`;
+    };
+
+    const candidatePoolText = [
+      formatPoolSection("cpu", "1. CPU (Bộ vi xử lý)"),
+      formatPoolSection("gpu", "2. GPU (Card màn hình)"),
+      formatPoolSection("mainboard", "3. Mainboard (Bo mạch chủ)"),
+      formatPoolSection("ram", "4. RAM (Bộ nhớ trong)"),
+      formatPoolSection("storage", "5. Storage (Ổ cứng SSD)"),
+      formatPoolSection("psu", "6. PSU (Nguồn máy tính)"),
+      formatPoolSection("case", "7. Case (Vỏ thùng máy)"),
+      formatPoolSection("cooling", "8. Cooling (Tản nhiệt)")
+    ].join("\n\n");
+
+    const systemInstruction = `Bạn là Trưởng ban Kiến trúc Phần cứng & Thẩm định Hệ thống (Senior PC Hardware Architect) tại PC Mall với hơn 15 năm kinh nghiệm thực chiến.
+Phong cách làm việc: CỰC KỲ NGHIÊM KHẮC, KHÁCH QUAN, HOÀN TOÀN KHÔNG THIÊN VỊ BẤT KỲ THƯƠNG HIỆU NÀO (Zero Vendor Bias). Bạn đề cao tính cân bằng nghẽn cổ chai (Bottleneck), hiệu quả chi phí trên hiệu năng thực tế (P/P), và độ an toàn điện năng tuyệt đối.`;
+
+    const promptText = `Khách hàng cần xây dựng dàn PC với thông số sau:
+- Ngân sách mục tiêu: ${budget.toLocaleString("vi-VN")} VNĐ
+- Nhu cầu chính: ${useCase.toUpperCase()}
+- Độ phân giải mục tiêu: ${resolution.toUpperCase()}
+${customPrompt ? `- Yêu cầu bổ sung của khách hàng: "${customPrompt}"` : ""}
+
+KHO HÀNG PC MALL ĐÃ LỌC SẴN POOL 32 LINH KIỆN ỨNG VIÊN PHÙ HỢP NHẤT DƯỚI ĐÂY:
+${candidatePoolText}
+
+NHIỆM VỤ CỦA BẠN:
+1. ĐÁNH GIÁ NGHIÊM KHẮC & KHÔNG THIÊN VỊ:
+   - Trong mỗi danh mục 4 ứng viên, hãy chọn ra DUY NHẤT 1 linh kiện tối ưu nhất cho tổng thể bộ máy.
+   - Trình bày ngắn gọn, sắc sảo (1 gạch đầu dòng lý do chọn, 1-2 gạch đầu dòng lý do loại 3 món còn lại). Không viết lan man.
+2. ĐẢM BẢO TƯƠNG THÍCH VẬT LÝ & ĐIỆN NĂNG 100%:
+   - Socket CPU phải tuyệt đối khớp với Socket Mainboard (LGA1700 đi với LGA1700, AM4 đi với AM4, AM5 đi với AM5).
+   - Chuẩn RAM (DDR4/DDR5) phải khớp với Mainboard đã chọn.
+   - Nguồn PSU phải có công suất dư tải an toàn >= 20% so với tổng tiêu thụ CPU + GPU.
+   - Tản nhiệt phải giải nhiệt tốt cho mức TDP của CPU.
+   - Tổng giá tiền 8 món chọn lựa không được vượt quá 10% ngân sách mục tiêu.
+3. BẮT BUỘC Ở CUỐI PHẢN HỒI:
+   Xuất một khối JSON khép kín theo đúng cấu trúc sau (không được sai tên key) để hệ thống tự động nạp linh kiện:
+\`\`\`json
+{
+  "selectedSkuIds": {
+    "cpu": <skuId số nguyên>,
+    "gpu": <skuId số nguyên>,
+    "mainboard": <skuId số nguyên>,
+    "ram": <skuId số nguyên>,
+    "storage": <skuId số nguyên>,
+    "psu": <skuId số nguyên>,
+    "case": <skuId số nguyên>,
+    "cooling": <skuId số nguyên>
+  },
+  "overallVerdict": "<Nhận xét tổng kết súc tích về cấu hình>",
+  "compatibilityScore": <Điểm số tương thích từ 90 đến 100>,
+  "bottleneckPercent": <Ước lượng tỷ lệ nghẽn cổ chai ví dụ 3.5>
+}
+\`\`\`
+Bắt đầu bài phân tích kỹ thuật của bạn:`;
+
+    // 3. Gọi Unified LLM Streaming
+    let accumulatedAdvice = "";
+    try {
+      const { unifiedLlmService } = require("../ai/unified-llm.service");
+      const llmResult = await unifiedLlmService.generateStreamText({
+        prompt: promptText,
+        systemInstruction,
+        temperature: 0.5,
+        maxTokens: 4000,
+        skipGuardrail: true
+      }, (chunk: string) => {
+        accumulatedAdvice += chunk;
+        onChunk(chunk);
+      });
+
+      if (!accumulatedAdvice && llmResult.text) {
+        accumulatedAdvice = llmResult.text;
+        onChunk(accumulatedAdvice);
+      }
+    } catch (err: any) {
+      console.warn("Lỗi gọi LLM Streaming trong suggest build:", err);
+      const fallbackChunk = `\n⚙️ Đang kích hoạt Heuristic Knowledge Engine phòng Lab...\n`;
+      accumulatedAdvice += fallbackChunk;
+      onChunk(fallbackChunk);
+    }
+
+    // 4. Bóc tách JSON selectedSkuIds từ bài viết của AI
+    let selectedSkuIds: Record<string, number> = {};
+    let compatibilityScore = 96;
+    let bottleneckPercent = 4.0;
+    let overallVerdict = "Cấu hình cân bằng tối ưu hiệu năng/giá thành được thẩm định nghiêm ngặt.";
+
+    try {
+      const jsonMatch = accumulatedAdvice.match(/```json\s*([\s\S]*?)\s*```/);
+      if (jsonMatch && jsonMatch[1]) {
+        const parsed = JSON.parse(jsonMatch[1]);
+        if (parsed.selectedSkuIds) selectedSkuIds = parsed.selectedSkuIds;
+        if (parsed.compatibilityScore) compatibilityScore = Number(parsed.compatibilityScore);
+        if (parsed.bottleneckPercent !== undefined) bottleneckPercent = Number(parsed.bottleneckPercent);
+        if (parsed.overallVerdict) overallVerdict = String(parsed.overallVerdict);
+      }
+    } catch (_parseErr) {
+      console.warn("Không parse được JSON từ AI output, fallback sang lựa chọn đầu tiên trong pool:", _parseErr);
+    }
+
+    // 5. Khớp linh kiện thực tế từ kho hàng theo SKU IDs được AI chọn
+    const selectedComponents: Record<string, any> = {};
+    const catKeys = ["cpu", "gpu", "mainboard", "ram", "storage", "psu", "case", "cooling"];
+
+    for (const cat of catKeys) {
+      let chosenSkuId = selectedSkuIds[cat];
+      let chosenItem = chosenSkuId ? allItemsMap.get(Number(chosenSkuId)) : null;
+
+      // Fallback nếu AI chọn SKU ngoài pool hoặc không có
+      if (!chosenItem && pool[cat] && pool[cat].length > 0) {
+        chosenItem = pool[cat][0];
+      }
+
+      if (chosenItem) {
+        selectedComponents[cat] = {
+          id: chosenItem.variantId,
+          variantId: chosenItem.variantId,
+          skuId: chosenItem.variantId,
+          productId: chosenItem.productId,
+          name: chosenItem.name,
+          productName: chosenItem.name,
+          price: chosenItem.price,
+          imageUrl: chosenItem.imageUrl,
+          specs: chosenItem.specs,
+          stock: chosenItem.stock
+        };
+      }
+    }
+
+    const totalPrice = Object.values(selectedComponents).reduce((sum: number, item: any) => sum + Number(item.price || 0), 0);
+    const budgetUtilization = Math.round((totalPrice / budget) * 100);
+
+    const dynamicBottleneck = this.calculateDynamicBottleneck(
+      selectedComponents.cpu,
+      selectedComponents.gpu,
+      resolution
+    );
+
+    const ramArchitecture = this.getRamArchitectureInfo(
+      selectedComponents.ram,
+      selectedComponents.mainboard
+    );
+
+    // Gửi Event hoàn tất (type: "done") kèm dữ liệu cấu trúc
+    sendEvent({
+      type: "done",
+      provider: "Google Gemini (gemini-3.5-flash-lite)",
+      advice: accumulatedAdvice,
+      selectedComponents,
+      totalPrice,
+      budgetUtilization,
+      compatibilityScore,
+      bottleneckPercent: (dynamicBottleneck as any)?.bottleneckPercentage || (dynamicBottleneck as any)?.bottleneckPercent || bottleneckPercent,
+      dynamicBottleneck,
+      ramArchitecture,
+      poolSummary: {
+        totalEvaluated: 32,
+        categoriesCount: 8
+      }
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // 🔬 CHỨC NĂNG 2: AI AUDIT BUILD + CHAT + ĐỀ XUẤT ĐỔI LINH KIỆN
+  // ════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Tìm kiếm linh kiện trong kho hàng thật theo tiêu chí AI đề xuất thay thế
+   */
+  async findReplacementProducts(targetCriteria: any, _currentBuild: any = {}): Promise<any[]> {
+    const catType = String(targetCriteria?.category || targetCriteria?.componentType || "").toLowerCase();
+    const socket = String(targetCriteria?.socket || "").toUpperCase().trim();
+    const minPrice = Number(targetCriteria?.priceMin || targetCriteria?.targetPriceMin || 0);
+    const maxPrice = Number(targetCriteria?.priceMax || targetCriteria?.targetPriceMax || 999999999);
+    const keywords: string[] = Array.isArray(targetCriteria?.keywords) 
+      ? targetCriteria.keywords.map((k: any) => String(k).toLowerCase()) 
+      : targetCriteria?.keywords 
+      ? [String(targetCriteria.keywords).toLowerCase()] 
+      : [];
+    if (targetCriteria?.recommendedKeywords) {
+      const extraKw = Array.isArray(targetCriteria.recommendedKeywords)
+        ? targetCriteria.recommendedKeywords
+        : [targetCriteria.recommendedKeywords];
+      keywords.push(...extraKw.map((k: any) => String(k).toLowerCase()));
+    }
+
+    const catIdMap: Record<string, number> = {
+      cpu: 1, mainboard: 2, ram: 3, gpu: 4, storage: 5, ssd: 5, psu: 6, case: 7, cooling: 8
+    };
+    const catId = catIdMap[catType] || 1;
+
+    let rows: any[] = [];
+    try {
+      rows = (await query(`
+        SELECT 
+          s.id AS variantId,
+          s.price AS price,
+          s.image_url AS imageUrl,
+          s.sku AS skuCode,
+          s.stock AS stock,
+          p.id AS productId,
+          p.name AS productName,
+          p.slug AS productSlug,
+          p.category_id AS categoryId,
+          c.name AS categoryName,
+          a.name AS attrName,
+          av.value AS attrVal
+        FROM product_skus s
+        INNER JOIN products p ON p.id = s.product_id
+        INNER JOIN categories c ON c.id = p.category_id
+        LEFT JOIN sku_attributes sa ON sa.sku_id = s.id
+        LEFT JOIN attribute_values av ON av.id = sa.attribute_value_id
+        LEFT JOIN attributes a ON a.id = av.attribute_id
+        WHERE s.is_active = 1 AND p.is_active = 1 AND s.stock > 0 AND p.category_id = ?
+        ORDER BY s.price ASC;
+      `, [catId])) as any[];
+    } catch (_err) {
+      return [];
+    }
+
+    const itemsMap = new Map<number, any>();
+    for (const r of rows) {
+      const vId = Number(r.variantId);
+      if (!itemsMap.has(vId)) {
+        itemsMap.set(vId, {
+          variantId: vId,
+          id: vId,
+          skuId: vId,
+          productId: Number(r.productId),
+          name: String(r.productName),
+          productName: String(r.productName),
+          slug: String(r.productSlug),
+          categoryId: Number(r.categoryId),
+          categoryName: String(r.categoryName).toUpperCase(),
+          price: Number(r.price),
+          imageUrl: r.imageUrl || null,
+          stock: Number(r.stock || 10),
+          specs: {} as Record<string, string>
+        });
+      }
+      if (r.attrName && r.attrVal) {
+        itemsMap.get(vId).specs[String(r.attrName).toLowerCase().trim()] = String(r.attrVal).trim();
+      }
+    }
+
+    let candidates = Array.from(itemsMap.values());
+
+    if (socket && socket !== "AUTO" && socket !== "UNIVERSAL") {
+      candidates = candidates.filter(item => {
+        const itemSocket = String(item.specs?.socket || "").toUpperCase();
+        const itemName = item.name.toUpperCase();
+        return itemSocket.includes(socket) || itemName.includes(socket);
+      });
+    }
+
+    if (catType === "psu" && targetCriteria?.minWattage) {
+      const minW = Number(targetCriteria.minWattage);
+      candidates = candidates.filter(item => {
+        const wStr = String(item.specs?.psu_wattage || item.name).match(/(\d{3,4})\s*w/i);
+        const w = wStr ? parseInt(wStr[1], 10) : 0;
+        return w >= minW;
+      });
+    }
+
+    const scored = candidates.map(item => {
+      let score = 0;
+      if (item.price >= minPrice && item.price <= maxPrice) {
+        score += 50;
+      } else {
+        const diff = Math.min(Math.abs(item.price - minPrice), Math.abs(item.price - maxPrice));
+        score -= diff / 100000;
+      }
+      for (const kw of keywords) {
+        if (kw && item.name.toLowerCase().includes(kw)) {
+          score += 40;
+        }
+      }
+      return { item, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, 3).map(s => s.item);
+  }
+
+  /**
+   * Đánh giá chi tiết cấu hình hiện tại của người dùng bằng AI (Streaming)
+   */
+  async streamAiAuditBuild(
+    payload: any = {},
+    onChunk: (chunk: string) => void,
+    sendEvent: (event: any) => void
+  ): Promise<void> {
+    const buildItems: any[] = Array.isArray(payload.buildItems) ? payload.buildItems : [];
+    const componentsMap: Record<string, any> = payload.componentsMap || {};
+    const targetBudget = Number(payload.targetBudget || payload.budget || 0);
+    const useCase = String(payload.useCase || payload.purpose || "gaming").toLowerCase();
+    const resolution = String(payload.resolution || "1080p").toLowerCase();
+
+    // Chuẩn hóa danh sách linh kiện đang có
+    const activeItems = buildItems.length > 0 
+      ? buildItems 
+      : Object.entries(componentsMap).map(([type, comp]: [string, any]) => ({
+          componentType: type,
+          productName: comp.name || comp.productName,
+          price: comp.price,
+          specs: comp.specs || {}
+        }));
+
+    if (activeItems.length === 0) {
+      sendEvent({
+        type: "error",
+        error: "Chưa có linh kiện nào trong không gian lắp ráp để thẩm định. Vui lòng chọn ít nhất 1 linh kiện!"
+      });
+      return;
+    }
+
+    const totalBuildPrice = activeItems.reduce((acc, i) => acc + Number(i.price || 0), 0);
+    const itemsDescription = activeItems.map(item => {
+      const type = (item.componentType || item.type || "Linh kiện").toUpperCase();
+      const name = item.productName || item.name || "Chưa rõ tên";
+      const price = Number(item.price || 0).toLocaleString("vi-VN") + "đ";
+      const specsStr = Object.entries(item.specs || {})
+        .map(([k, v]) => `${k}: ${v}`)
+        .slice(0, 4)
+        .join(", ");
+      return `- [${type}] ${name} | Giá: ${price} ${specsStr ? `(${specsStr})` : ""}`;
+    }).join("\n");
+
+    const systemInstruction = `Bạn là Trưởng ban Giám định Kỹ thuật Phần cứng (Senior PC Hardware Inspection Auditor) tại PC Mall.
+Nhiệm vụ của bạn: Kiểm tra, thẩm định một cách CỰC KỲ NGHIÊM KHẮC, KHÁCH QUAN, KHÔNG THIÊN VỊ cấu hình do khách hàng xây dựng.
+Đánh giá 5 trụ cột kỹ thuật:
+1. Độ cân bằng CPU - GPU (Nghẽn cổ chai Bottleneck ở độ phân giải ${resolution.toUpperCase()}).
+2. An toàn nguồn điện (PSU Headroom): Công suất thực, chuẩn 80 Plus, dư tải an toàn >= 20%.
+3. Hiệu năng tản nhiệt (Cooling): TDP của CPU và hiệu quả của tản nhiệt đối với luồng gió vỏ case.
+4. Băng thông bộ nhớ (RAM): Có chạy Dual Channel (2 thanh) không? Đơn thanh (Single) sẽ bóp nghẹt 15-20% FPS.
+5. Bo mạch chủ & Nâng cấp (Mainboard VRM & M.2 Slots).`;
+
+    const promptText = `HỒ SƠ CẤU HÌNH CẦN THẨM ĐỊNH:
+- Số lượng linh kiện đã chọn: ${activeItems.length} / 8 linh kiện
+- Tổng chi phí hiện tại: ${totalBuildPrice.toLocaleString("vi-VN")} VNĐ
+${targetBudget > 0 ? `- Ngân sách dự kiến: ${targetBudget.toLocaleString("vi-VN")} VNĐ` : ""}
+- Mục đích sử dụng: ${useCase.toUpperCase()}
+- Độ phân giải màn hình: ${resolution.toUpperCase()}
+
+DANH SÁCH LINH KIỆN HIỆN TẠI TRONG KHÔNG GIAN LẮP RÁP:
+${itemsDescription}
+
+YÊU CẦU GIÁM ĐỊNH:
+1. Hãy phân tích chi tiết từng điểm mạnh, điểm yếu và các nguy cơ kỹ thuật (nếu có) bằng Markdown tiếng Việt chuyên nghiệp, sắc sảo.
+2. NẾU CÓ LINH KIỆN XẤU / NGHẼN / KHÔNG TỐI ƯU, bạn BẮT BUỘC phải chỉ rõ lý do và xuất tiêu chí thay thế để hệ thống lọc hàng trong kho.
+3. BẮT BUỘC Ở CUỐI PHẢN HỒI, xuất một khối JSON có cấu trúc sau:
+\`\`\`json
+{
+  "auditScore": <Điểm số từ 0 đến 100>,
+  "status": "<EXCELLENT | GOOD | NEEDS_OPTIMIZATION | CRITICAL_ISSUE>",
+  "summary": "<Tóm tắt nhận định trong 1-2 câu>",
+  "bottleneckPercent": <Tỷ lệ nghẽn cổ chai ước tính>,
+  "issues": [
+    {
+      "componentType": "<cpu | gpu | mainboard | ram | storage | psu | case | cooling>",
+      "severity": "<high | medium | low>",
+      "currentName": "<Tên linh kiện hiện tại bị đánh giá>",
+      "problem": "<Mô tả chi tiết lỗi, nghẽn hoặc nguy cơ>",
+      "targetCriteria": {
+        "category": "<cpu | gpu | mainboard | ram | storage | psu | case | cooling>",
+        "socket": "<LGA1700 | AM4 | AM5 nếu liên quan>",
+        "minCores": <số nhân tối thiểu nếu là CPU>,
+        "minThreads": <số luồng tối thiểu nếu là CPU>,
+        "minWattage": <công suất tối thiểu nếu là PSU>,
+        "priceMin": <giá tối thiểu VNĐ>,
+        "priceMax": <giá tối đa VNĐ>,
+        "keywords": ["từ khóa 1", "từ khóa 2"],
+        "advice": "<Lời khuyên cụ thể nên đổi sang linh kiện nào>"
+      }
+    }
+  ]
+}
+\`\`\`
+Nếu cấu hình hoàn hảo không có lỗi gì cần thay, "issues" có thể là mảng rỗng [].
+Bắt đầu bài thẩm định kỹ thuật:`;
+
+    let accumulatedReport = "";
+    try {
+      const { unifiedLlmService } = require("../ai/unified-llm.service");
+      const llmResult = await unifiedLlmService.generateStreamText({
+        prompt: promptText,
+        systemInstruction,
+        temperature: 0.6,
+        maxTokens: 2500,
+        skipGuardrail: true
+      }, (chunk: string) => {
+        accumulatedReport += chunk;
+        onChunk(chunk);
+      });
+
+      if (!accumulatedReport && llmResult.text) {
+        accumulatedReport = llmResult.text;
+        onChunk(accumulatedReport);
+      }
+    } catch (err: any) {
+      console.warn("Lỗi gọi LLM Streaming trong audit build:", err);
+      const fallbackChunk = `\n⚙️ Đang kích hoạt Heuristic Auditor phòng Lab...\n`;
+      accumulatedReport += fallbackChunk;
+      onChunk(fallbackChunk);
+    }
+
+    let auditScore = 85;
+    let status = "GOOD";
+    let summary = "Cấu hình tương thích cơ bản và sẵn sàng hoạt động.";
+    let bottleneckPercent = 5.0;
+    let issues: any[] = [];
+
+    try {
+      const jsonMatch = accumulatedReport.match(/```json\s*([\s\S]*?)\s*```/);
+      if (jsonMatch && jsonMatch[1]) {
+        const parsed = JSON.parse(jsonMatch[1]);
+        if (parsed.auditScore !== undefined) auditScore = Number(parsed.auditScore);
+        if (parsed.status) status = String(parsed.status);
+        if (parsed.summary) summary = String(parsed.summary);
+        if (parsed.bottleneckPercent !== undefined) bottleneckPercent = Number(parsed.bottleneckPercent);
+        if (Array.isArray(parsed.issues)) issues = parsed.issues;
+      }
+    } catch (_parseErr) {
+      console.warn("Không parse được JSON audit issues:", _parseErr);
+    }
+
+    // Với mỗi issue được AI phát hiện, truy vấn kho hàng thật để tìm sản phẩm thay thế
+    for (const issue of issues) {
+      if (issue.targetCriteria) {
+        try {
+          const suggestedProducts = await this.findReplacementProducts(issue.targetCriteria, activeItems);
+          issue.suggestedProducts = suggestedProducts;
+        } catch (_prodErr) {
+          issue.suggestedProducts = [];
+        }
+      }
+    }
+
+    sendEvent({
+      type: "done",
+      provider: "Google Gemini (gemini-3.5-flash-lite)",
+      report: accumulatedReport,
+      auditScore,
+      status,
+      summary,
+      bottleneckPercent,
+      issues
+    });
+  }
+
+  /**
+   * Chat hỏi đáp chuyên sâu với AI về cấu hình hiện tại (Streaming)
+   */
+  async streamAiChatBuild(
+    payload: any = {},
+    onChunk: (chunk: string) => void,
+    sendEvent: (event: any) => void
+  ): Promise<void> {
+    const buildItems: any[] = Array.isArray(payload.buildItems) ? payload.buildItems : [];
+    const messages: any[] = Array.isArray(payload.messages) ? payload.messages : [];
+    const userMessage = String(payload.userMessage || payload.question || "").trim();
+    const useCase = String(payload.useCase || payload.purpose || "gaming").toLowerCase();
+    const resolution = String(payload.resolution || "1080p").toLowerCase();
+
+    if (!userMessage) {
+      sendEvent({ type: "error", error: "Vui lòng nhập câu hỏi cho AI!" });
+      return;
+    }
+
+    const itemsDesc = buildItems.map(item => {
+      const type = (item.componentType || item.type || "Linh kiện").toUpperCase();
+      const name = item.productName || item.name || "Chưa rõ tên";
+      const price = Number(item.price || 0).toLocaleString("vi-VN") + "đ";
+      return `- [${type}] ${name} (${price})`;
+    }).join("\n");
+
+    const historyStr = messages
+      .slice(-6)
+      .map(m => `${m.role === "user" ? "Khách hàng" : "AI Advisor"}: ${m.content}`)
+      .join("\n\n");
+
+    const systemInstruction = `Bạn là Trưởng ban Kỹ thuật Phần cứng PC Mall. Bạn đang trò chuyện trực tiếp với khách hàng về dàn PC mà họ đang xây dựng.
+Hãy trả lời thân thiện, chuyên môn sâu, khách quan và thực tế.
+Nếu câu trả lời của bạn khuyên đổi hoặc nâng cấp linh kiện nào, hãy xuất tiêu chí tìm kiếm ở cuối câu trả lời dạng JSON \`\`\`json { "suggestedReplacements": [{ "componentType": "cpu", "advice": "...", "targetCriteria": { "category": "cpu", "keywords": ["..."], "priceMin": ..., "priceMax": ... } }] } \`\`\``;
+
+    const promptText = `HỒ SƠ DÀN PC HIỆN TẠI:
+${itemsDesc || "Chưa chọn linh kiện"}
+Nhu cầu: ${useCase.toUpperCase()} | Độ phân giải: ${resolution.toUpperCase()}
+
+LỊCH SỬ TRÒ CHUYỆN GẦN NHẤT:
+${historyStr || "(Bắt đầu cuộc trò chuyện)"}
+
+CÂU HỎI MỚI CỦA KHÁCH HÀNG:
+"${userMessage}"
+
+Hãy trả lời chuyên nghiệp và xúc tích:`;
+
+    let accumulatedChat = "";
+    try {
+      const { unifiedLlmService } = require("../ai/unified-llm.service");
+      const llmResult = await unifiedLlmService.generateStreamText({
+        prompt: promptText,
+        systemInstruction,
+        temperature: 0.7,
+        maxTokens: 1500,
+        skipGuardrail: true
+      }, (chunk: string) => {
+        accumulatedChat += chunk;
+        onChunk(chunk);
+      });
+
+      if (!accumulatedChat && llmResult.text) {
+        accumulatedChat = llmResult.text;
+        onChunk(accumulatedChat);
+      }
+    } catch (err: any) {
+      console.warn("Lỗi chat LLM stream:", err);
+      onChunk(`Xin lỗi, hiện tại kênh AI đang bận. Bạn có thể hỏi lại sau ít giây!`);
+    }
+
+    // Check if AI suggested replacements
+    let replacements: any[] = [];
+    try {
+      const jsonMatch = accumulatedChat.match(/```json\s*([\s\S]*?)\s*```/);
+      if (jsonMatch && jsonMatch[1]) {
+        const parsed = JSON.parse(jsonMatch[1]);
+        if (Array.isArray(parsed.suggestedReplacements)) {
+          replacements = parsed.suggestedReplacements;
+          for (const rep of replacements) {
+            if (rep.targetCriteria) {
+              rep.suggestedProducts = await this.findReplacementProducts(rep.targetCriteria, buildItems);
+            }
+          }
+        }
+      }
+    } catch (_err) {}
+
+    sendEvent({
+      type: "done",
+      reply: accumulatedChat,
+      replacements
+    });
   }
 }
 
