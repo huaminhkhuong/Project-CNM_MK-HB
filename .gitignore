@@ -56,3 +56,5 @@ pc_crawler/data/
 **/__pycache__/
 *.pyc
 
+data
+apps/web/public/data/images/products/
