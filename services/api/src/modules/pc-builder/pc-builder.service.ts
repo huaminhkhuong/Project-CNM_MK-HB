@@ -2118,19 +2118,19 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
         key: "socket",
         ok: !dbRuleConflicts.socket && (!cpuSocket || !boardSocket || this.normalizeText(cpuSocket) === this.normalizeText(boardSocket)),
         applicable: hasCpu && hasMainboard,
-        detail: dbRuleConflicts.socket || (cpuSocket && boardSocket ? `${cpuSocket} / ${boardSocket}` : "Need socket specs")
+        detail: cpuSocket && boardSocket ? `${cpuSocket} / ${boardSocket}` : (dbRuleConflicts.socket || "Need socket specs")
       },
       {
         key: "ram",
         ok: !dbRuleConflicts.ram && (!ramType || !boardRam || this.normalizeText(boardRam).includes(this.normalizeText(ramType)) || this.normalizeText(ramType).includes(this.normalizeText(boardRam))),
         applicable: hasRam && hasMainboard,
-        detail: dbRuleConflicts.ram || (ramType && boardRam ? `${ramType} / ${boardRam}` : "Need RAM specs")
+        detail: ramType && boardRam ? `${ramType} / ${boardRam}` : (dbRuleConflicts.ram || "Need RAM specs")
       },
       {
         key: "psu",
         ok: !dbRuleConflicts.psu && (!componentMap.psu || psuWatt === 0 || psuWatt >= requiredWatt),
         applicable: hasPsu && (hasCpu || hasGpu),
-        detail: dbRuleConflicts.psu || (componentMap.psu ? `${psuWatt || "?"}W / need ${requiredWatt}W` : "No PSU selected")
+        detail: componentMap.psu ? `${psuWatt || "?"}W / need ${requiredWatt}W` : (dbRuleConflicts.psu || "No PSU selected")
       },
       {
         key: "gpu_clearance",

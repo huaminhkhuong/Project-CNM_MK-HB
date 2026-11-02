@@ -2771,6 +2771,13 @@ export function PcBuilderPage() {
         xaiReport={xaiReport}
         isLoading={isXaiLoading}
         onRecheck={fetchBackendXaiCompatibility}
+        selectedItems={selectedItems}
+        onNavigateComponent={(compType) => {
+          if (compType) {
+            setActiveComponent(compType);
+            setIsXaiDrawerOpen(false);
+          }
+        }}
       />
 
       {/* ── AI ADVISOR DRAWER ────────────────────────────────── */}
