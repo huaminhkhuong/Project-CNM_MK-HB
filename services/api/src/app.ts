@@ -49,8 +49,16 @@ export function createApp() {
   uploadsDirs.forEach((uploadsDir) => {
     app.use("/uploads", express.static(uploadsDir));
   });
-  app.use("/data/images", express.static(path.resolve(process.cwd(), "../../data/images")));
-  app.use("/data/images", express.static("T:/Khoa_luan/data/images"));
+  const dataDirCandidates = [
+    path.resolve(process.cwd(), "data"),
+    path.resolve(process.cwd(), "../../data"),
+    path.resolve(__dirname, "../../data"),
+    path.resolve(__dirname, "../../../data")
+  ];
+  dataDirCandidates.forEach((d) => {
+    app.use("/data", express.static(d));
+    app.use("/data/images", express.static(path.join(d, "images")));
+  });
   
   app.use("/api", apiRouter);
   app.use(notFoundHandler);

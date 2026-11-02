@@ -121,7 +121,7 @@ export function resolveProductImage(product = {}, options = {}) {
     if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("/")) {
       return url;
     }
-    if (url.startsWith("assets/") || url.startsWith("media/")) {
+    if (url.startsWith("assets/") || url.startsWith("media/") || url.startsWith("data/")) {
       return `/${url}`;
     }
     return `/media/${url}`;

@@ -16,6 +16,10 @@ export default defineConfig({
         target: "http://localhost:4000",
         changeOrigin: true
       },
+      "/data": {
+        target: "http://localhost:4000",
+        changeOrigin: true
+      },
       // WebSocket proxy cho Socket.io
       "/socket.io": {
         target: "http://localhost:4000",
