@@ -11,7 +11,8 @@ import { requestLogger } from "./middlewares/request-logger.middleware";
 import { apiRouter } from "./routes";
 
 (BigInt.prototype as any).toJSON = function () {
-  return Number(this);
+  const num = Number(this);
+  return Number.isSafeInteger(num) ? num : this.toString();
 };
 
 export function createApp() {
@@ -44,10 +45,12 @@ export function createApp() {
     next();
   });
   
-  // Serve static files from uploads directory.
+  // Serve static files from uploads and data directories.
   uploadsDirs.forEach((uploadsDir) => {
     app.use("/uploads", express.static(uploadsDir));
   });
+  app.use("/data/images", express.static(path.resolve(process.cwd(), "../../data/images")));
+  app.use("/data/images", express.static("T:/Khoa_luan/data/images"));
   
   app.use("/api", apiRouter);
   app.use(notFoundHandler);

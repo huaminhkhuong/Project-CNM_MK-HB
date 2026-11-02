@@ -1,7 +1,6 @@
 import { Footer } from "../components/marketplace/Footer";
 import { MainHeader } from "../components/marketplace/MainHeader";
 import { TopBar } from "../components/marketplace/TopBar";
-import { CustomCursor } from "../components/common/CustomCursor";
 import { AiChatWidget } from "../components/chat/AiChatWidget";
 import { Outlet, useLocation } from "react-router-dom";
 
@@ -11,7 +10,6 @@ export function PublicLayout() {
 
   return (
     <div className="market-shell">
-      <CustomCursor />
       <div className="market-sticky">
         <TopBar />
         <MainHeader />

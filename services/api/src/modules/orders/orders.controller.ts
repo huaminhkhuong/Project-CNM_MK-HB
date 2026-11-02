@@ -17,6 +17,7 @@ import {
 } from "./orders.repository";
 import { checkoutSchema, updateOrderStatusSchema } from "./orders.validator";
 import { generateVnpayUrl, verifyVnpayReturn } from "../../utils/vnpay";
+import { validateCoupon } from "../coupons/coupons.service";
 import { generateMomoUrl, verifyMomoSignature } from "../../utils/momo";
 import { env } from "../../config/env";
 import jwt from "jsonwebtoken";
@@ -179,6 +180,7 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
     }
 
     const finalAmount = Math.max(0, total - discountAmount + shippingFee);
+
     
     const order = await tx.order.create({
       data: {
@@ -195,7 +197,7 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
         shipping_address: payload.shippingAddress,
         payment_status: payload.paymentMethod === "COD" ? "UNPAID" : "PENDING_GATEWAY",
         status: "PENDING",
-        note: payload.note,
+        note: orderNote,
         created_at: new Date(),
         updated_at: new Date()
       }
@@ -238,14 +240,21 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
         }
       });
 
-      await tx.productSku.update({
-        where: { id: item.product_variant_id },
+      const updateResult = await tx.productSku.updateMany({
+        where: {
+          id: item.product_variant_id,
+          stock: { gte: item.quantity }
+        },
         data: {
           stock: {
             decrement: item.quantity
           }
         }
       });
+
+      if (updateResult.count === 0) {
+        throw new AppError(`Sản phẩm "${item.name_snapshot}" không đủ số lượng tồn kho`, 400);
+      }
     }
 
     if (!directItems && cartId) {

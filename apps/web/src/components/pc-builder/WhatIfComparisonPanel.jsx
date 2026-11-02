@@ -44,13 +44,16 @@ export function WhatIfComparisonPanel({
   const allTypes = Array.from(new Set([...Object.keys(currentComps), ...Object.keys(simComps)]));
 
   const diffList = allTypes.map((type) => {
-    const curItem = currentComps[type]?.product || currentComps[type] || {};
-    const simItem = simComps[type]?.product || simComps[type] || {};
+    const rawCur = currentComps[type] || {};
+    const curProduct = rawCur.product || rawCur;
+    const curVariant = rawCur.variant || {};
+    const curName = curProduct.name || curProduct.product_name || curProduct.productName || "Chưa chọn";
+    const curPrice = Number(curVariant.price || curProduct.price || rawCur.price || 0);
 
-    const curName = curItem.name || curItem.productName || "Chưa chọn";
-    const simName = simItem.name || simItem.productName || "Chưa chọn";
-    const curPrice = Number(curItem.price || currentComps[type]?.price || 0);
-    const simPriceVal = Number(simItem.price || simComps[type]?.price || 0);
+    const rawSim = simComps[type] || {};
+    const simProduct = rawSim.product || rawSim;
+    const simName = simProduct.name || simProduct.product_name || simProduct.productName || "Chưa chọn";
+    const simPriceVal = Number(simProduct.price || rawSim.price || 0);
 
     const isDifferent = curName !== simName;
     let changeType = "unchanged"; // "upgraded" | "downgraded" | "unchanged"

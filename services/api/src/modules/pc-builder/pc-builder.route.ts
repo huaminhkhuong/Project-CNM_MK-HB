@@ -7,8 +7,8 @@ const router = Router();
 
 const publicAiLimiter = createRateLimiter({
   windowMs: 60 * 1000,
-  max: 20,
-  message: "⚠️ Bạn đã gửi quá nhiều yêu cầu tư vấn AI trong thời gian ngắn. Vui lòng chờ 1 phút trước khi thử lại."
+  max: 60,
+  message: "⚠️ Bạn đã gửi quá nhiều yêu cầu AI trong thời gian ngắn (Tối đa 60 lượt/phút). Vui lòng chờ 1 phút trước khi thử lại."
 });
 
 const publicBuilderLimiter = createRateLimiter({
@@ -28,6 +28,10 @@ router.post("/suggest", publicBuilderLimiter, pcBuilderController.suggestBuild);
 router.post("/check-compatibility", publicBuilderLimiter, pcBuilderController.checkRawCompatibility);
 router.get("/shared/:shareToken", pcBuilderController.getSharedBuild);
 router.post("/ai-advice", publicAiLimiter, pcBuilderController.getAiAdvice);
+router.post("/ai-suggest-stream", publicAiLimiter, pcBuilderController.streamAiSuggestBuild);
+router.post("/ai-audit-stream", publicAiLimiter, pcBuilderController.streamAiAuditBuild);
+router.post("/ai-chat-stream", publicAiLimiter, pcBuilderController.streamAiChatBuild);
+router.get("/rules", pcBuilderController.getRules);
 
 // -- Protected Routes (Require Authentication) --
 router.use(authenticate);

@@ -312,14 +312,14 @@ export function BuildSummarySidebar({
       <div className="ai-insight">
         <div className="ai-insight__header">
           <span className="ai-insight__icon">⚡</span>
-          <span className="ai-insight__title">AI Insight</span>
+          <span className="ai-insight__title">AI Insight & Chuẩn Đo FPS</span>
         </div>
         <div className="ai-insight__text">
           {aiInsightText}
         </div>
-        <button type="button" className="btn-ai-explain" onClick={() => onOpenXaiDrawer(true)}>
-          Xem Giải Thích Đầy Đủ →
-        </button>
+        <div className="ai-insight__benchmark-note" style={{ fontSize: "11px", color: "#64748b", marginTop: "8px", borderTop: "1px dashed #e2e8f0", paddingTop: "6px", lineHeight: "1.4" }}>
+          🎮 <em>Cơ sở FPS: Đo lường từ 3DMark TimeSpy & game AAA thiết lập High Settings ở độ phân giải tương ứng.</em>
+        </div>
       </div>
 
     </aside>

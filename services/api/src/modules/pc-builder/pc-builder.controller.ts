@@ -80,6 +80,80 @@ export const getAiAdvice = asyncHandler(async (req: Request, res: Response) => {
   return sendSuccess(res, "AI advice generated successfully", result);
 });
 
+export const streamAiSuggestBuild = async (req: Request, res: Response) => {
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  const sendEvent = (data: any) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    await pcBuilderService.streamAiSuggestBuild(
+      req.body || {},
+      (chunk: string) => sendEvent({ type: "chunk", text: chunk }),
+      sendEvent
+    );
+  } catch (err: any) {
+    sendEvent({ type: "error", error: err.message || "Lỗi xử lý AI suggest stream" });
+  } finally {
+    res.end();
+  }
+};
+
+export const streamAiAuditBuild = async (req: Request, res: Response) => {
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  const sendEvent = (data: any) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    await pcBuilderService.streamAiAuditBuild(
+      req.body || {},
+      (chunk: string) => sendEvent({ type: "chunk", text: chunk }),
+      sendEvent
+    );
+  } catch (err: any) {
+    sendEvent({ type: "error", error: err.message || "Lỗi xử lý AI audit stream" });
+  } finally {
+    res.end();
+  }
+};
+
+export const streamAiChatBuild = async (req: Request, res: Response) => {
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  const sendEvent = (data: any) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    await pcBuilderService.streamAiChatBuild(
+      req.body || {},
+      (chunk: string) => sendEvent({ type: "chunk", text: chunk }),
+      sendEvent
+    );
+  } catch (err: any) {
+    sendEvent({ type: "error", error: err.message || "Lỗi xử lý AI chat stream" });
+  } finally {
+    res.end();
+  }
+};
+
+export const getRules = asyncHandler(async (_req: Request, res: Response) => {
+  const result = pcBuilderService.getCentralizedRules();
+  return sendSuccess(res, "Centralized rules fetched successfully", result);
+});
+
 export default {
   createBuild,
   getCurrentBuild,
@@ -93,5 +167,9 @@ export default {
   publishBuild,
   getSharedBuild,
   cloneBuild,
-  getAiAdvice
+  getAiAdvice,
+  streamAiSuggestBuild,
+  streamAiAuditBuild,
+  streamAiChatBuild,
+  getRules
 };

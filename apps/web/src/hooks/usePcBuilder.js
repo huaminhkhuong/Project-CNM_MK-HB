@@ -116,8 +116,13 @@ export function usePcBuilder(initialBuildName = "Cấu hình của tôi") {
         const variant = variants.find((v) => String(v.variant_id) === String(variantId));
         setGuestBuild((current) => {
           const currentComponents = current?.components || {};
-          const newComponents = { ...currentComponents, [componentType]: { product, variant } };
-          const newTotal = Object.values(newComponents).reduce((sum, item) => sum + Number(item.variant?.price || 0), 0);
+          const prevQuantity = currentComponents[componentType]?.quantity || 1;
+          const newComponents = { ...currentComponents, [componentType]: { product, variant, quantity: prevQuantity } };
+          const newTotal = Object.values(newComponents).reduce((sum, item) => {
+            const unitPrice = Number(item.variant?.price || item.product?.price || 0);
+            const qty = Math.max(1, Number(item.quantity || 1));
+            return sum + unitPrice * qty;
+          }, 0);
           const saved = saveGuestBuild(
             { components: newComponents, totalPrice: newTotal },
             buildName
@@ -132,6 +137,65 @@ export function usePcBuilder(initialBuildName = "Cấu hình của tôi") {
       handleError(err, "Không thể thêm linh kiện.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const updateComponentQuantity = async (componentType, nextQuantity) => {
+    const qty = Math.max(1, Math.min(4, Number(nextQuantity) || 1));
+    if (isAuthenticated && build?.id) {
+      const currentItem = build.components?.[componentType];
+      const variantId = currentItem?.variant?.id || currentItem?.variant?.variant_id || currentItem?.productVariantId || currentItem?.variantId;
+      if (variantId) {
+        try {
+          const resp = await addBuildItem(build.id, {
+            productVariantId: Number(variantId),
+            componentType,
+            quantity: qty
+          });
+          setBuild(resp?.data?.data || resp?.data || resp);
+          return;
+        } catch (err) {
+          console.warn("[usePcBuilder] Failed to sync quantity to server, fallback local state", err);
+        }
+      }
+      setBuild((current) => {
+        if (!current?.components?.[componentType]) return current;
+        const currentComponents = { ...current.components };
+        currentComponents[componentType] = {
+          ...currentComponents[componentType],
+          quantity: qty
+        };
+        const newTotal = Object.values(currentComponents).reduce((sum, item) => {
+          const unitPrice = Number(item.variant?.price || item.product?.price || item.price || 0);
+          const itemQty = Math.max(1, Number(item.quantity || 1));
+          return sum + unitPrice * itemQty;
+        }, 0);
+        return {
+          ...current,
+          components: currentComponents,
+          totalPrice: newTotal
+        };
+      });
+    } else {
+      setGuestBuild((current) => {
+        if (!current?.components?.[componentType]) return current;
+        const currentComponents = { ...current.components };
+        currentComponents[componentType] = {
+          ...currentComponents[componentType],
+          quantity: qty
+        };
+        const newTotal = Object.values(currentComponents).reduce((sum, item) => {
+          const unitPrice = Number(item.variant?.price || item.product?.price || item.price || 0);
+          const itemQty = Math.max(1, Number(item.quantity || 1));
+          return sum + unitPrice * itemQty;
+        }, 0);
+        const saved = saveGuestBuild(
+          { components: currentComponents, totalPrice: newTotal },
+          buildName
+        );
+        setGuestBuildList(listGuestBuilds());
+        return saved;
+      });
     }
   };
 
@@ -433,6 +497,7 @@ export function usePcBuilder(initialBuildName = "Cấu hình của tôi") {
     actions: {
       activeBuildId,
       applyComponent,
+      updateComponentQuantity,
       batchApplyComponents,
       removeComponent,
       checkCompatibility,

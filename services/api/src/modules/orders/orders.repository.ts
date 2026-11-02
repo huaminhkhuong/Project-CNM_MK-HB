@@ -88,8 +88,7 @@ export async function normalizeOrderRecord<T extends Record<string, any> | null>
 
 export function getOrdersByUser(userId: string) {
   const numericId = parseInt(userId, 10);
-  return repairLegacyPaidOrders().then(() =>
-    prisma.order.findMany({
+  return prisma.order.findMany({
     where: { user_id: numericId },
     include: {
       Shipment: {
@@ -103,13 +102,11 @@ export function getOrdersByUser(userId: string) {
       }
     },
     orderBy: { created_at: "desc" }
-    })
-  );
+  });
 }
 
 export function getOrderById(orderId: string | number) {
-  return repairLegacyPaidOrders(orderId).then(() =>
-    prisma.order.findUnique({
+  return prisma.order.findUnique({
     where: { id: typeof orderId === "string" ? parseInt(orderId, 10) : orderId },
     include: {
       Shipment: {
@@ -122,13 +119,11 @@ export function getOrderById(orderId: string | number) {
         }
       }
     }
-    })
-  );
+  });
 }
 
 export function listOrders() {
-  return repairLegacyPaidOrders().then(() =>
-    prisma.order.findMany({
+  return prisma.order.findMany({
     include: {
       Shipment: {
         orderBy: { id: "desc" },
@@ -141,8 +136,7 @@ export function listOrders() {
       }
     },
     orderBy: { created_at: "desc" }
-    })
-  );
+  });
 }
 
 export async function updateOrderStatus(orderId: string | number, status: string) {

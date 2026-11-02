@@ -3,7 +3,7 @@ import path from "path";
 
 dotenv.config({ path: path.join(__dirname, "..", ".env") });
 
-process.env.NODE_ENV = process.env.NODE_ENV || "test";
+process.env.NODE_ENV = "test";
 process.env.DATABASE_URL =
   process.env.DATABASE_URL || "mysql://root:password@127.0.0.1:3308/cnm_mk_hb";
 process.env.JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || "test_access_secret";

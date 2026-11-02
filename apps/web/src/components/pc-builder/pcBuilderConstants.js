@@ -5,7 +5,8 @@ export const COMPONENT_SECTIONS = [
   { componentType: "mainboard", label: "Mainboard",    categoryName: "MAINBOARD", categoryKeywords: ["MAINBOARD", "BO MẠCH", "MAIN"], icon: "🔌" },
   { componentType: "ram",       label: "RAM",          categoryName: "RAM",       categoryKeywords: ["RAM", "BỘ NHỚ", "MEMORY"], icon: "🧠" },
   { componentType: "gpu",       label: "GPU / VGA",    categoryName: "GPU",       categoryKeywords: ["GPU", "VGA", "CARD MÀN HÌNH", "CARD ĐỒ HỌA", "GRAPHICS"], icon: "🎮" },
-  { componentType: "storage",   label: "SSD",          categoryName: "SSD",       categoryKeywords: ["SSD", "STORAGE", "HDD", "Ổ CỨNG", "Ổ SSD", "M.2", "NVME"], icon: "💾" },
+  { componentType: "storage",   label: "SSD (Ổ chính)", categoryName: "SSD",       categoryKeywords: ["SSD", "STORAGE", "HDD", "Ổ CỨNG", "Ổ SSD", "M.2", "NVME"], icon: "💾" },
+  { componentType: "storage_2", label: "Ổ phụ (SSD 2 / HDD)", categoryName: "SSD", categoryKeywords: ["SSD", "STORAGE", "HDD", "Ổ CỨNG", "Ổ SSD", "M.2", "NVME"], icon: "💽", optional: true },
   { componentType: "psu",       label: "PSU",          categoryName: "PSU",       categoryKeywords: ["PSU", "NGUỒN", "POWER SUPPLY"], icon: "⚡" },
   { componentType: "case",      label: "Case",         categoryName: "CASE",      categoryKeywords: ["CASE", "VỎ CASE", "VỎ MÁY TÍNH"], icon: "📦" },
   { componentType: "cooling",   label: "Cooling",      categoryName: "COOLING",   categoryKeywords: ["COOLING", "TẢN NHIỆT", "QUẠT", "AIO"], icon: "❄️" }
