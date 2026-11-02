@@ -17,7 +17,6 @@ import {
 } from "./orders.repository";
 import { checkoutSchema, updateOrderStatusSchema } from "./orders.validator";
 import { generateVnpayUrl, verifyVnpayReturn } from "../../utils/vnpay";
-import { validateCoupon } from "../coupons/coupons.service";
 import { generateMomoUrl, verifyMomoSignature } from "../../utils/momo";
 import { env } from "../../config/env";
 import jwt from "jsonwebtoken";
@@ -197,7 +196,7 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
         shipping_address: payload.shippingAddress,
         payment_status: payload.paymentMethod === "COD" ? "UNPAID" : "PENDING_GATEWAY",
         status: "PENDING",
-        note: orderNote,
+        note: payload.note || null,
         created_at: new Date(),
         updated_at: new Date()
       }

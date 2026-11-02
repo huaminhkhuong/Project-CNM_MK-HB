@@ -531,7 +531,7 @@ class PcBuilderService {
     return s;
   }
 
-  private getCpuSocket(item: any): string {
+  public getCpuSocket(item: any): string {
     const specSock = item?.specs?.["socket"] || item?.specs?.["socket hỗ trợ"] || item?.specs?.["spec_socket"];
     if (specSock) {
       const norm = this.normalizeSocket(specSock);
@@ -550,7 +550,7 @@ class PcBuilderService {
     return "LGA1700";
   }
 
-  private getMainboardSocket(item: any): string {
+  public getMainboardSocket(item: any): string {
     const specSock = item?.specs?.["socket"] || item?.specs?.["socket hỗ trợ"] || item?.specs?.["spec_socket"];
     if (specSock) {
       const norm = this.normalizeSocket(specSock);
@@ -575,6 +575,8 @@ class PcBuilderService {
     isDualChannel: boolean;
     channelConfig: string;
     advantageNote: string;
+    note?: string;
+    bandwidthMultiplier?: number;
   } {
     if (!ramItem) {
       return { totalCapacityGb: 16, stickCount: 1, isDualChannel: false, channelConfig: "Single Channel (1 thanh)", advantageNote: "" };
@@ -613,7 +615,6 @@ class PcBuilderService {
       stickCount,
       isDualChannel: isDual,
       channelConfig,
-      channelMode: channelConfig,
       advantageNote,
       note: advantageNote,
       bandwidthMultiplier: isDual ? 1.2 : 1.0
@@ -635,7 +636,6 @@ class PcBuilderService {
     if (!cpuItem || !gpuItem) {
       return {
         bottleneckPercentage: 0,
-        bottleneckPercent: 0,
         bottleneckComponent: "BALANCED",
         status: "OPTIMAL",
         resolutionImpact: "Đầy đủ cân bằng.",
@@ -710,7 +710,6 @@ class PcBuilderService {
 
     return {
       bottleneckPercentage,
-      bottleneckPercent: bottleneckPercentage,
       bottleneckComponent,
       status,
       resolutionImpact: `Tại ${resLabel}: Tải trọng ${resLow === "4k" ? "dồn 85% vào GPU" : resLow === "2k" ? "cân bằng 50-50" : "dồn nhiều vào xung nhịp CPU"}.`,
@@ -718,7 +717,7 @@ class PcBuilderService {
     };
   }
 
-  private getMainboardRamType(item: any): "DDR4" | "DDR5" {
+  public getMainboardRamType(item: any): "DDR4" | "DDR5" {
     const specRam = item?.specs?.["ram_type"] || item?.specs?.["chuẩn ram"] || item?.specs?.["spec_ram_type"];
     if (specRam) {
       if (specRam.toUpperCase().includes("DDR5")) return "DDR5";
@@ -736,7 +735,7 @@ class PcBuilderService {
     return "DDR4";
   }
 
-  private getRamType(item: any): "DDR4" | "DDR5" {
+  public getRamType(item: any): "DDR4" | "DDR5" {
     const specRam = item?.specs?.["ram_type"] || item?.specs?.["chuẩn ram"] || item?.specs?.["spec_ram_type"];
     if (specRam) {
       if (specRam.toUpperCase().includes("DDR5")) return "DDR5";
@@ -747,7 +746,7 @@ class PcBuilderService {
     return "DDR4";
   }
 
-  private getPsuWattage(item: any): number {
+  public getPsuWattage(item: any): number {
     const specWatt = item?.specs?.["psu_wattage"] || item?.specs?.["wattage"] || item?.specs?.["công suất"];
     if (specWatt) {
       const m = String(specWatt).match(/(\d+)\s*w?/i);
@@ -765,7 +764,7 @@ class PcBuilderService {
     return 650;
   }
 
-  private getCpuTdp(item: any): number {
+  public getCpuTdp(item: any): number {
     const specTdp = item?.specs?.["tdp"] || item?.specs?.["tdp tiêu thụ"];
     if (specTdp) {
       const m = String(specTdp).match(/(\d+)/);
@@ -779,7 +778,7 @@ class PcBuilderService {
     return 65;
   }
 
-  private getGpuTdp(item: any): number {
+  public getGpuTdp(item: any): number {
     const specTdp = item?.specs?.["tdp"] || item?.specs?.["tdp tiêu thụ"] || item?.specs?.["công suất"];
     if (specTdp) {
       const m = String(specTdp).match(/(\d+)/);

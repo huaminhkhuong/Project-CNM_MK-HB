@@ -13,8 +13,7 @@ export const checkoutSchema = z.object({
   shippingFee: z.coerce.number().min(0).default(0),
   couponCode: z.string().trim().max(50).optional(),
   note: z.string().trim().max(1000).optional(),
-  items: z.array(checkoutItemSchema).min(1).optional(),
-  couponCode: z.string().trim().max(50).optional()
+  items: z.array(checkoutItemSchema).min(1).optional()
 });
 
 export const updateOrderStatusSchema = z.object({
