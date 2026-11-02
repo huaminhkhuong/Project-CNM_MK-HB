@@ -142,6 +142,12 @@ async function runCanonicalMigrations() {
       console.log("✅ [Migration] Added budget to pc_builds.");
     }
 
+    // 5b. Ensure pc_build_items quantity column
+    if (!(await hasColumn(connection, "pc_build_items", "quantity"))) {
+      await connection.query("ALTER TABLE pc_build_items ADD COLUMN quantity INT DEFAULT 1");
+      console.log("✅ [Migration] Added quantity to pc_build_items.");
+    }
+
     // 6. Ensure compatibility_rules name column
     if (!(await hasColumn(connection, "compatibility_rules", "name"))) {
       await connection.query("ALTER TABLE compatibility_rules ADD COLUMN name VARCHAR(255) NULL");
