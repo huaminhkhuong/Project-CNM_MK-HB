@@ -9,7 +9,7 @@
     "packages/*"
   ],
   "scripts": {
-    "start": "node scripts/bootstrap-master.js",
+    "start": "node scripts/dev.js",
     "setup": "node scripts/bootstrap-master.js",
     "bootstrap": "node scripts/bootstrap-master.js",
     "dev": "node scripts/dev.js",

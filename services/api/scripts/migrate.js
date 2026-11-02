@@ -46,7 +46,14 @@ async function hasIndex(connection, tableName, indexName) {
 async function runCanonicalMigrations() {
   console.log("🚀 [Migration] Starting Canonical Database Migration...");
   const pool = getDbPool();
-  const connection = await pool.getConnection();
+  let connection;
+  try {
+    connection = await pool.getConnection();
+  } catch (err) {
+    console.warn(`⚠️ [Migration] Could not connect to MySQL at ${process.env.DB_HOST || "127.0.0.1"}:${process.env.DB_PORT || 3307} (${err.message}).`);
+    console.warn("⚠️ [Migration] Skipping schema migration for now. Backend server will start and wait for MySQL.");
+    return;
+  }
 
   try {
     // 1. Execute consolidated DDL from canonical migration file
