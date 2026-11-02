@@ -360,25 +360,12 @@ export function BuilderProductCard({
         </div>
 
         {whyText && (
-          <div
-            className={`product-card__why-box${isSelected ? " is-selected" : ""}`}
-            style={{
-              marginTop: "10px",
-              marginBottom: "8px",
-              padding: "8px 10px",
-              backgroundColor: isSelected ? "#eff6ff" : "#f8fafc",
-              border: `1px solid ${isSelected ? "#bfdbfe" : "#e2e8f0"}`,
-              borderRadius: "8px",
-              fontSize: "12px",
-              lineHeight: "1.4",
-              color: isSelected ? "#1e40af" : "#475569"
-            }}
-          >
-            <div style={{ fontWeight: "700", fontSize: "11px", color: isSelected ? "#1d4ed8" : "#0369a1", marginBottom: "2px", display: "flex", alignItems: "center", gap: "4px" }}>
+          <div className={`product-card__why-box${isSelected ? " is-selected" : ""}`}>
+            <div className="product-card__why-title">
               <span>💡</span>
               <span>Lý do chọn ({activeComponent.toUpperCase()}):</span>
             </div>
-            <div style={{ fontSize: "11.5px", fontWeight: isSelected ? "600" : "400" }}>
+            <div className="product-card__why-content" style={{ fontWeight: isSelected ? "600" : "400" }}>
               {whyText}
             </div>
           </div>

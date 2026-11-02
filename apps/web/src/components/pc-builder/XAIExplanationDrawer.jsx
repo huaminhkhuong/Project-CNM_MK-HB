@@ -1,227 +1,390 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 /**
- * XAIExplanationDrawer — Panel hiển thị chi tiết các lập luận giải thích XAI tiếng Việt
- * Phân loại màu sắc rõ ràng (Thành công 🟢, Cảnh báo 🟡, Lỗi 🔴)
+ * XAIExplanationDrawer — Panel giải thích tri thức phần cứng XAI tiếng Việt
+ * Tối ưu hiển thị trực quan, phân loại linh kiện đã chọn và linh kiện chưa chọn
+ * Tránh làm người dùng bị rối mắt với các luật kiểm tra của linh kiện chưa thêm vào cấu hình.
  */
 export function XAIExplanationDrawer({ isOpen, onClose, xaiReport, isLoading = false, onRecheck }) {
-  const [filter, setFilter] = useState("all"); // 'all' | 'error' | 'warning' | 'success'
+  const [filter, setFilter] = useState("auto"); // 'auto' | 'error' | 'warning' | 'passed' | 'pending' | 'all'
+  const [showEstimatedScores, setShowEstimatedScores] = useState(false);
+
+  // Check dark theme
+  const [isDark, setIsDark] = useState(false);
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      const checkDark = () => {
+        const theme = document.documentElement.getAttribute("data-theme") || document.body.getAttribute("data-theme");
+        setIsDark(theme === "dark");
+      };
+      checkDark();
+      const observer = new MutationObserver(checkDark);
+      observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+      return () => observer.disconnect();
+    }
+  }, []);
 
   if (!isOpen) return null;
 
   const checks = xaiReport?.checks || [];
   const summary = xaiReport?.summary || {};
 
-  const filteredChecks = checks.filter((c) => {
-    if (filter === "error") return c.explanation?.level === "error" || c.severity === "BLOCKER";
-    if (filter === "warning") return c.explanation?.level === "warning" || c.severity === "WARNING";
-    if (filter === "success") return c.explanation?.level === "success" || c.explanation?.level === "info";
-    return true;
-  });
+  // Xác định luật nào là chờ chọn linh kiện
+  const isPendingCheck = (c) => {
+    if (c.applicable === false) return true;
+    const d = (c.detail || "").toLowerCase();
+    return d.includes("chưa được chọn") || d.includes("chưa chọn") || d.includes("chưa có");
+  };
+
+  const errorChecks = checks.filter(c => !c.ok && (c.severity === "BLOCKER" || c.explanation?.level === "error"));
+  const warningChecks = checks.filter(c => !c.ok && c.severity !== "BLOCKER" && c.explanation?.level !== "error");
+  const passedChecks = checks.filter(c => c.ok && !isPendingCheck(c));
+  const pendingChecks = checks.filter(c => isPendingCheck(c));
+  const evaluatedChecks = checks.filter(c => !isPendingCheck(c));
+
+  // Auto-chọn tab ưu tiên: nếu có lỗi thì luôn ưu tiên mở tab lỗi đầu tiên!
+  let activeFilter = filter;
+  if (filter === "auto") {
+    if (errorChecks.length > 0) activeFilter = "error";
+    else if (warningChecks.length > 0) activeFilter = "warning";
+    else activeFilter = "passed";
+  }
+
+  const filteredChecks = (() => {
+    if (activeFilter === "error") return errorChecks;
+    if (activeFilter === "warning") return warningChecks;
+    if (activeFilter === "passed") return passedChecks;
+    if (activeFilter === "pending") return pendingChecks;
+    if (activeFilter === "evaluated") return evaluatedChecks;
+    return checks; // 'all'
+  })();
+
+  const selectedCount = summary.selectedCount || 3;
+  const isCompleteBuild = Boolean(summary.isCompleteBuild);
+
+  // Clean raw tags [COMP-001] from short text for display
+  const getCleanTitle = (item) => {
+    const raw = item.explanation?.short || item.key || "Kiểm tra kỹ thuật";
+    return raw.replace(/^[❌✅⚠️💡⏳\s]*(\[[^\]]+\]\s*)*/g, "").trim();
+  };
 
   return (
     <div className="xai-drawer-overlay" onClick={onClose} style={styles.overlay}>
-      <div className="xai-drawer-content" onClick={(e) => e.stopPropagation()} style={styles.drawer}>
-        
+      <div
+        className="xai-drawer-content"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          ...styles.drawer,
+          backgroundColor: isDark ? "#0f172a" : "#ffffff",
+          color: isDark ? "#f8fafc" : "#0f172a",
+          borderLeft: isDark ? "1px solid #1e293b" : "none"
+        }}
+      >
         {/* HEADER */}
         <div style={styles.header}>
           <div>
-            <h2 style={styles.title}>🧠 Phân Tích & Giải Thích Tương Thích (XAI)</h2>
-            <p style={styles.subtitle}>Báo cáo lập luận tri thức phần cứng bởi Engine XAI PC Mall Backend</p>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontSize: "20px" }}>🧠</span>
+              <h2 style={styles.title}>Trợ Lý Tri Thức Phần Cứng (XAI)</h2>
+            </div>
+            <p style={styles.subtitle}>
+              Báo cáo giải thích lập luận tương thích và tối ưu linh kiện tự động
+            </p>
           </div>
-          <button style={styles.closeBtn} onClick={onClose}>✕</button>
+          <button style={styles.closeBtn} onClick={onClose} title="Đóng">✕</button>
         </div>
 
-        {/* LOADING STATE OVERLAY OR CARD */}
+        {/* BODY */}
         {isLoading ? (
           <div style={styles.loadingContainer}>
             <div style={styles.spinner} />
-            <p style={{ marginTop: "16px", color: "#1d4ed8", fontWeight: "600", fontSize: "14px" }}>
-              ⚡ Backend Knowledge Engine đang thẩm định 10 quy tắc COMP-001..COMP-010...
+            <p style={{ marginTop: "16px", color: "#3b82f6", fontWeight: "600", fontSize: "14px" }}>
+              ⚡ AI Engine đang phân tích tương thích các linh kiện đã chọn...
             </p>
           </div>
         ) : !xaiReport || !xaiReport.checks || xaiReport.checks.length === 0 ? (
-          <div style={styles.emptyStateContainer}>
-            <div style={{ fontSize: "52px", marginBottom: "16px" }}>🧠</div>
-            <h3 style={{ margin: "0 0 8px 0", color: "#0f172a", fontSize: "17px", fontWeight: "700" }}>
-              Chưa có phân tích từ Backend XAI Engine
+          <div style={styles.emptyStateContainer(isDark)}>
+            <div style={{ fontSize: "52px", marginBottom: "16px" }}>🔍</div>
+            <h3 style={{ margin: "0 0 8px 0", color: isDark ? "#f8fafc" : "#0f172a", fontSize: "17px", fontWeight: "700" }}>
+              Chưa có dữ liệu kiểm tra tương thích
             </h3>
-            <p style={{ margin: "0 0 24px 0", color: "#64748b", fontSize: "14px", lineHeight: "1.6", maxWidth: "380px" }}>
-              Nhấn kiểm tra để xem phân tích đầy đủ, điểm 5 chiều và giải thích chuyên sâu từ Backend Knowledge Engine.
+            <p style={{ margin: "0 0 24px 0", color: isDark ? "#94a3b8" : "#64748b", fontSize: "14px", lineHeight: "1.6", maxWidth: "380px" }}>
+              Hãy chọn thêm ít nhất 2 linh kiện để AI tiến hành kiểm tra tương thích socket, RAM, nguồn điện và kích thước.
             </p>
             {onRecheck && (
               <button style={styles.recheckMainBtn} onClick={onRecheck}>
-                ⚡ Nhấn kiểm tra để xem phân tích đầy đủ
+                ⚡ Kiểm tra tương thích ngay
               </button>
             )}
           </div>
         ) : (
           <>
-            {/* SUMMARY CARD */}
-            <div style={styles.summaryCard}>
-              <div style={styles.scoreBadge(xaiReport.compatible)}>
-                <span style={{ fontSize: "28px", fontWeight: "bold" }}>{xaiReport.score || 0}%</span>
-                <span style={{ fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: "700" }}>
-                  {xaiReport.compatible ? "Tương thích tốt" : "Có xung đột"}
+            {/* OVERALL STATUS BANNER */}
+            <div style={styles.summaryCard(isDark, errorChecks.length > 0)}>
+              <div style={styles.scoreBadge(errorChecks.length === 0)}>
+                <span style={{ fontSize: "26px", fontWeight: "900" }}>
+                  {errorChecks.length === 0 ? "100%" : "0%"}
                 </span>
-                {xaiReport.buildReadiness && (
-                  <span style={{
-                    marginTop: "4px",
-                    fontSize: "10px",
-                    fontWeight: "800",
-                    padding: "2px 6px",
-                    borderRadius: "4px",
-                    backgroundColor: xaiReport.buildReadiness === "READY" ? "#16a34a" : xaiReport.buildReadiness === "BLOCKED" ? "#be123c" : "#d97706",
-                    color: "#ffffff"
-                  }}>
-                    {xaiReport.buildReadiness}
-                  </span>
-                )}
+                <span style={{ fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: "800" }}>
+                  {errorChecks.length === 0 ? "Khớp tốt" : "Xung đột"}
+                </span>
+                <span style={{
+                  marginTop: "4px",
+                  fontSize: "10px",
+                  fontWeight: "800",
+                  padding: "2px 6px",
+                  borderRadius: "4px",
+                  backgroundColor: errorChecks.length === 0 ? "#16a34a" : "#dc2626",
+                  color: "#ffffff"
+                }}>
+                  {errorChecks.length === 0 ? "TƯƠNG THÍCH" : "CẦN SỬA"}
+                </span>
               </div>
 
               <div style={{ flex: 1 }}>
-                <h4 style={{ margin: "0 0 6px 0", color: "#0f172a", fontSize: "15px", fontWeight: "700" }}>
-                  {summary.overallMessage || "Đang phân tích cấu hình..."}
+                <h4 style={{ margin: "0 0 6px 0", color: isDark ? "#f8fafc" : "#0f172a", fontSize: "15px", fontWeight: "700" }}>
+                  {errorChecks.length > 0
+                    ? `Phát hiện ${errorChecks.length} lỗi xung đột cấu hình cần khắc phục!`
+                    : warningChecks.length > 0
+                    ? `Cấu hình hoạt động được nhưng có ${warningChecks.length} điểm cần lưu ý.`
+                    : "Các linh kiện đã chọn hoàn toàn tương thích và khớp chuẩn!"}
                 </h4>
+
+                {/* STATS PILLS */}
                 <div style={styles.countsRow}>
-                  <span style={styles.countBadge("#ecfdf5", "#15803d")}>
-                    ✅ Đạt: {summary.passedChecks ?? checks.filter(c => c.ok).length}
+                  {errorChecks.length > 0 && (
+                    <span style={styles.countBadge("#fee2e2", "#dc2626", "#fecdd3")}>
+                      🔴 Lỗi: {errorChecks.length}
+                    </span>
+                  )}
+                  {warningChecks.length > 0 && (
+                    <span style={styles.countBadge("#fef3c7", "#d97706", "#fde68a")}>
+                      ⚠️ Lưu ý: {warningChecks.length}
+                    </span>
+                  )}
+                  <span style={styles.countBadge("#dcfce7", "#16a34a", "#bbf7d0")}>
+                    ✅ Đã khớp: {passedChecks.length}
                   </span>
-                  <span style={styles.countBadge("#fffbeb", "#b45309")}>
-                    ⚠️ Cảnh báo: {summary.warningCount ?? summary.warningChecks ?? checks.filter(c => !c.ok && c.severity !== "BLOCKER").length}
-                  </span>
-                  <span style={styles.countBadge("#fff1f2", "#be123c")}>
-                    ❌ Lỗi (Blocker): {summary.blockerCount ?? summary.failedChecks ?? checks.filter(c => !c.ok && c.severity === "BLOCKER").length}
-                  </span>
+                  {pendingChecks.length > 0 && (
+                    <span style={styles.countBadge(isDark ? "#1e293b" : "#f1f5f9", isDark ? "#94a3b8" : "#64748b", isDark ? "#334155" : "#e2e8f0")}>
+                      ⏳ Chờ chọn: {pendingChecks.length}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
 
-            {/* 5-DIMENSIONAL SCORECARD BADGES */}
-            {xaiReport.scores && (
-              <div style={styles.scorecardContainer}>
-                {styles.scorePill("🧩 Tương thích", xaiReport.scores.compatibilityScore)}
-                {styles.scorePill("🎮 Hiệu năng", xaiReport.scores.performanceScore)}
-                {styles.scorePill("💰 P/P Giá trị", xaiReport.scores.valueScore)}
-                {styles.scorePill("⚡ Nguồn/Nhiệt", xaiReport.scores.powerThermalScore)}
-                {styles.scorePill("🚀 Nâng cấp", xaiReport.scores.upgradeScore)}
+            {/* PROGRESS BAR FOR INCOMPLETE BUILD */}
+            {!isCompleteBuild ? (
+              <div style={styles.progressCard(isDark)}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                  <span style={{ fontSize: "12.5px", fontWeight: "700", color: isDark ? "#60a5fa" : "#2563eb" }}>
+                    🛠️ Tiến trình lắp ráp: {selectedCount}/8 linh kiện
+                  </span>
+                  <span style={{ fontSize: "12px", fontWeight: "800", color: isDark ? "#94a3b8" : "#64748b" }}>
+                    {Math.min(100, Math.round((selectedCount / 8) * 100))}%
+                  </span>
+                </div>
+                <div style={styles.progressTrack(isDark)}>
+                  <div style={styles.progressFill((selectedCount / 8) * 100)} />
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px" }}>
+                  <span style={{ fontSize: "11.5px", color: isDark ? "#94a3b8" : "#64748b" }}>
+                    💡 AI đang kiểm tra trực tiếp {evaluatedChecks.length} quy tắc giữa các linh kiện đã chọn.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowEstimatedScores(!showEstimatedScores)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: isDark ? "#38bdf8" : "#0284c7",
+                      fontSize: "11.5px",
+                      fontWeight: "700",
+                      cursor: "pointer",
+                      padding: "2px 4px"
+                    }}
+                  >
+                    {showEstimatedScores ? "Ẩn điểm sơ bộ ▲" : "Xem điểm sơ bộ ▾"}
+                  </button>
+                </div>
+
+                {showEstimatedScores && xaiReport.scores && (
+                  <div style={{ ...styles.scorecardContainer, marginTop: "10px", paddingTop: "8px", borderTop: `1px dashed ${isDark ? "#334155" : "#e2e8f0"}` }}>
+                    {styles.scorePill("🧩 Tương thích", xaiReport.scores.compatibilityScore, isDark)}
+                    {styles.scorePill("🎮 Hiệu năng", xaiReport.scores.performanceScore, isDark)}
+                    {styles.scorePill("💰 P/P Giá trị", xaiReport.scores.valueScore, isDark)}
+                    {styles.scorePill("⚡ Nguồn/Nhiệt", xaiReport.scores.powerThermalScore, isDark)}
+                    {styles.scorePill("🚀 Nâng cấp", xaiReport.scores.upgradeScore, isDark)}
+                  </div>
+                )}
               </div>
+            ) : (
+              xaiReport.scores && (
+                <div style={styles.scorecardContainer}>
+                  {styles.scorePill("🧩 Tương thích", xaiReport.scores.compatibilityScore, isDark)}
+                  {styles.scorePill("🎮 Hiệu năng", xaiReport.scores.performanceScore, isDark)}
+                  {styles.scorePill("💰 P/P Giá trị", xaiReport.scores.valueScore, isDark)}
+                  {styles.scorePill("⚡ Nguồn/Nhiệt", xaiReport.scores.powerThermalScore, isDark)}
+                  {styles.scorePill("🚀 Nâng cấp", xaiReport.scores.upgradeScore, isDark)}
+                </div>
+              )
             )}
 
-            {/* RECHECK ACTION BAR */}
+            {/* ACTION BAR */}
             {onRecheck && (
-              <div style={{ padding: "8px 24px 0", display: "flex", justifyContent: "flex-end" }}>
-                <button
-                  onClick={onRecheck}
-                  style={{
-                    backgroundColor: "#eff6ff",
-                    color: "#1d4ed8",
-                    border: "1px solid #bfdbfe",
-                    padding: "6px 12px",
-                    borderRadius: "8px",
-                    fontSize: "12px",
-                    fontWeight: "600",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px"
-                  }}
-                >
-                  🔄 Phân Tích Lại Với Backend XAI
+              <div style={{ padding: "10px 24px 0", display: "flex", justifyContent: "flex-end" }}>
+                <button onClick={onRecheck} style={styles.recheckBtn(isDark)}>
+                  🔄 Cập nhật thẩm định AI
                 </button>
               </div>
             )}
 
-        {/* FILTER TABS */}
-        <div style={styles.filterBar}>
-          <button
-            style={styles.filterTab(filter === "all")}
-            onClick={() => setFilter("all")}
-          >
-            Tất cả ({checks.length})
-          </button>
-          <button
-            style={styles.filterTab(filter === "error")}
-            onClick={() => setFilter("error")}
-          >
-            ❌ Lỗi ({summary.failedChecks ?? checks.filter(c => !c.ok && c.severity === "BLOCKER").length})
-          </button>
-          <button
-            style={styles.filterTab(filter === "warning")}
-            onClick={() => setFilter("warning")}
-          >
-            ⚠️ Cảnh báo ({summary.warningChecks ?? checks.filter(c => !c.ok && c.severity !== "BLOCKER").length})
-          </button>
-          <button
-            style={styles.filterTab(filter === "success")}
-            onClick={() => setFilter("success")}
-          >
-            ✅ Đạt ({summary.passedChecks ?? checks.filter(c => c.ok).length})
-          </button>
-        </div>
+            {/* FILTER TABS */}
+            <div style={{ ...styles.filterBar, borderBottomColor: isDark ? "#1e293b" : "#f1f5f9" }}>
+              {errorChecks.length > 0 && (
+                <button
+                  style={styles.filterTab(activeFilter === "error", "#dc2626", isDark)}
+                  onClick={() => setFilter("error")}
+                >
+                  🔴 Lỗi cần sửa ({errorChecks.length})
+                </button>
+              )}
 
-        {/* CHECKS LIST */}
-        <div style={styles.checksList}>
-          {filteredChecks.length === 0 ? (
-            <div style={styles.emptyState}>Không có mục nào trong bộ lọc này.</div>
-          ) : (
-            filteredChecks.map((item, index) => {
-              const exp = item.explanation || {};
-              const severity = item.severity || (item.ok ? "INFO" : exp.level === "error" ? "BLOCKER" : "WARNING");
-              const level = exp.level || (severity === "BLOCKER" ? "error" : severity === "WARNING" ? "warning" : severity === "ADVISORY" ? "advisory" : "info");
+              {warningChecks.length > 0 && (
+                <button
+                  style={styles.filterTab(activeFilter === "warning", "#d97706", isDark)}
+                  onClick={() => setFilter("warning")}
+                >
+                  ⚠️ Lưu ý ({warningChecks.length})
+                </button>
+              )}
 
-              const severityBadgeMeta = {
-                BLOCKER:  { label: "⛔ BLOCKER (Lỗi Chặn Mua)", bg: "#be123c", color: "#ffffff" },
-                WARNING:  { label: "⚠️ WARNING (Cảnh Báo Cân Nhắc)", bg: "#ea580c", color: "#ffffff" },
-                ADVISORY: { label: "💡 ADVISORY (Gợi Ý Tối Ưu)", bg: "#d97706", color: "#ffffff" },
-                INFO:     { label: "✅ INFO (Tương Thích Tốt)", bg: "#16a34a", color: "#ffffff" }
-              };
-              const badgeStyle = severityBadgeMeta[severity] || severityBadgeMeta.INFO;
+              <button
+                style={styles.filterTab(activeFilter === "passed", "#16a34a", isDark)}
+                onClick={() => setFilter("passed")}
+              >
+                ✅ Đã khớp ({passedChecks.length})
+              </button>
 
-              return (
-                <div key={index} style={styles.checkCard(level, severity)}>
-                  <div style={styles.checkCardHeader}>
-                    <span style={styles.checkTitle}>{exp.short || item.key}</span>
-                    <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                      <span style={{
-                        fontSize: "11px",
-                        fontWeight: "700",
-                        padding: "3px 8px",
-                        borderRadius: "12px",
-                        backgroundColor: badgeStyle.bg,
-                        color: badgeStyle.color,
-                        letterSpacing: "0.5px"
-                      }}>
-                        {badgeStyle.label}
-                      </span>
-                      {item.detail && <span style={styles.detailTag}>{item.detail}</span>}
-                    </div>
-                  </div>
+              {pendingChecks.length > 0 && (
+                <button
+                  style={styles.filterTab(activeFilter === "pending", "#64748b", isDark)}
+                  onClick={() => setFilter("pending")}
+                >
+                  ⏳ Chờ linh kiện ({pendingChecks.length})
+                </button>
+              )}
 
-                  <p style={styles.checkLongText}>{exp.long || item.detail || "Đã kiểm tra thông số kỹ thuật."}</p>
+              <button
+                style={styles.filterTab(activeFilter === "all", "#2563eb", isDark)}
+                onClick={() => setFilter("all")}
+              >
+                📋 Tất cả ({checks.length})
+              </button>
+            </div>
 
-                  {exp.suggestion && (
-                    <div style={styles.suggestionBox}>
-                      <span style={{ fontWeight: "bold", marginRight: "6px" }}>💡 Đề xuất khắc phục:</span>
-                      {exp.suggestion}
-                    </div>
-                  )}
+            {/* CHECKS LIST */}
+            <div style={styles.checksList}>
+              {filteredChecks.length === 0 ? (
+                <div style={{ ...styles.emptyState, color: isDark ? "#64748b" : "#94a3b8" }}>
+                  Không có mục nào trong danh mục này.
                 </div>
-              );
-            })
-          )}
-        </div>
+              ) : (
+                filteredChecks.map((item, index) => {
+                  const exp = item.explanation || {};
+                  const isPending = isPendingCheck(item);
+                  const isError = !item.ok && (item.severity === "BLOCKER" || exp.level === "error");
+                  const isWarn = !item.ok && !isError;
 
-        {/* FOOTER */}
-        <div style={styles.footer}>
-          <span style={{ fontSize: "13px", color: "#64748b" }}>
-            🤖 Powered by PC Mall Knowledge Engine & XAI Model
-          </span>
-          <button style={styles.doneBtn} onClick={onClose}>Đã hiểu</button>
-        </div>
-        </>
+                  const badgeMeta = isError
+                    ? { label: "⛔ Xung đột nghiêm trọng", bg: "#dc2626", color: "#ffffff" }
+                    : isWarn
+                    ? { label: "⚠️ Cần lưu ý", bg: "#d97706", color: "#ffffff" }
+                    : isPending
+                    ? { label: "⏳ Chờ chọn linh kiện", bg: isDark ? "#334155" : "#e2e8f0", color: isDark ? "#94a3b8" : "#475569" }
+                    : { label: "✅ Tương thích tốt", bg: "#16a34a", color: "#ffffff" };
+
+                  return (
+                    <div
+                      key={index}
+                      style={styles.checkCard(isError, isWarn, isPending, isDark)}
+                    >
+                      <div style={styles.checkCardHeader}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1 }}>
+                          <span style={{ fontSize: "16px" }}>
+                            {isError ? "❌" : isWarn ? "⚠️" : isPending ? "⏳" : "✅"}
+                          </span>
+                          <span style={{
+                            ...styles.checkTitle,
+                            color: isDark ? "#f8fafc" : "#0f172a"
+                          }}>
+                            {getCleanTitle(item)}
+                          </span>
+                        </div>
+
+                        <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                          <span style={{
+                            fontSize: "11px",
+                            fontWeight: "700",
+                            padding: "3px 8px",
+                            borderRadius: "12px",
+                            backgroundColor: badgeMeta.bg,
+                            color: badgeMeta.color,
+                            letterSpacing: "0.3px"
+                          }}>
+                            {badgeMeta.label}
+                          </span>
+                          {item.detail && !isPending && (
+                            <span style={styles.detailTag(isDark)}>{item.detail}</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <p style={{ ...styles.checkLongText, color: isDark ? "#cbd5e1" : "#334155" }}>
+                        {isPending
+                          ? `Quy tắc này sẽ tự động kiểm tra ngay khi bạn chọn thêm linh kiện liên quan (${item.detail || item.key}).`
+                          : exp.long || item.detail || "Đã kiểm tra tương thích kỹ thuật."}
+                      </p>
+
+                      {exp.suggestion && isError && (
+                        <div style={styles.suggestionBox(isDark, true)}>
+                          <div style={{ fontWeight: "800", color: isDark ? "#f87171" : "#b91c1c", marginBottom: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+                            <span>💡</span>
+                            <span>Đề xuất khắc phục ngay:</span>
+                          </div>
+                          <div style={{ lineHeight: "1.5" }}>{exp.suggestion}</div>
+                        </div>
+                      )}
+
+                      {exp.suggestion && isWarn && (
+                        <div style={styles.suggestionBox(isDark, false)}>
+                          <div style={{ fontWeight: "800", color: isDark ? "#fbbf24" : "#b45309", marginBottom: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+                            <span>💡</span>
+                            <span>Gợi ý tối ưu:</span>
+                          </div>
+                          <div style={{ lineHeight: "1.5" }}>{exp.suggestion}</div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* FOOTER */}
+            <div style={{
+              ...styles.footer,
+              backgroundColor: isDark ? "#0f172a" : "#f8fafc",
+              borderTopColor: isDark ? "#1e293b" : "#e2e8f0"
+            }}>
+              <span style={{ fontSize: "12.5px", color: isDark ? "#94a3b8" : "#64748b" }}>
+                🤖 Thẩm định tự động bởi AI PC Mall Engine
+              </span>
+              <button style={styles.doneBtn} onClick={onClose}>Đã hiểu</button>
+            </div>
+          </>
         )}
-
       </div>
     </div>
   );
@@ -231,8 +394,8 @@ const styles = {
   overlay: {
     position: "fixed",
     inset: 0,
-    backgroundColor: "rgba(15, 23, 42, 0.65)",
-    backdropFilter: "blur(4px)",
+    backgroundColor: "rgba(15, 23, 42, 0.75)",
+    backdropFilter: "blur(6px)",
     zIndex: 9999,
     display: "flex",
     justifyContent: "flex-end",
@@ -240,13 +403,12 @@ const styles = {
   },
   drawer: {
     width: "100%",
-    maxWidth: "560px",
-    backgroundColor: "#ffffff",
-    boxShadow: "-8px 0 32px rgba(15, 23, 42, 0.2)",
+    maxWidth: "580px",
+    boxShadow: "-8px 0 32px rgba(15, 23, 42, 0.4)",
     display: "flex",
     flexDirection: "column",
     overflow: "hidden",
-    animation: "slideLeft 0.3s ease-out"
+    animation: "slideLeft 0.3s cubic-bezier(0.16, 1, 0.3, 1)"
   },
   header: {
     padding: "20px 24px",
@@ -254,21 +416,23 @@ const styles = {
     color: "#ffffff",
     display: "flex",
     justifyContent: "space-between",
-    alignItems: "center"
+    alignItems: "center",
+    borderBottom: "1px solid rgba(255, 255, 255, 0.1)"
   },
   title: {
     margin: 0,
-    fontSize: "18px",
-    fontWeight: "700",
-    color: "#ffffff"
+    fontSize: "17px",
+    fontWeight: "800",
+    color: "#ffffff",
+    letterSpacing: "-0.01em"
   },
   subtitle: {
     margin: "4px 0 0 0",
-    fontSize: "13px",
+    fontSize: "12.5px",
     color: "#94a3b8"
   },
   closeBtn: {
-    background: "rgba(255, 255, 255, 0.1)",
+    background: "rgba(255, 255, 255, 0.12)",
     border: "none",
     color: "#ffffff",
     width: "36px",
@@ -278,58 +442,87 @@ const styles = {
     fontSize: "16px",
     display: "flex",
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    transition: "background 0.2s"
   },
-  summaryCard: {
+  summaryCard: (isDark, hasErrors) => ({
     margin: "16px 24px 0",
     padding: "16px",
-    backgroundColor: "#f8fafc",
+    backgroundColor: isDark
+      ? hasErrors ? "rgba(225, 29, 72, 0.1)" : "#1e293b"
+      : hasErrors ? "#fff1f2" : "#f8fafc",
     borderRadius: "16px",
-    border: "1px solid #e2e8f0",
+    border: `1px solid ${hasErrors ? (isDark ? "#be123c" : "#fecdd3") : (isDark ? "#334155" : "#e2e8f0")}`,
     display: "flex",
     gap: "16px",
     alignItems: "center"
-  },
+  }),
   scoreBadge: (compatible) => ({
     backgroundColor: compatible ? "#ecfdf5" : "#fff1f2",
     color: compatible ? "#15803d" : "#be123c",
     border: `2px solid ${compatible ? "#bbf7d0" : "#fecdd3"}`,
-    borderRadius: "16px",
-    padding: "12px 16px",
+    borderRadius: "14px",
+    padding: "10px 14px",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    minWidth: "110px"
+    minWidth: "105px"
   }),
   countsRow: {
     display: "flex",
-    gap: "8px",
+    flexWrap: "wrap",
+    gap: "6px",
     marginTop: "8px"
   },
-  countBadge: (bg, color) => ({
+  countBadge: (bg, color, border) => ({
     backgroundColor: bg,
     color: color,
-    fontSize: "12px",
-    fontWeight: "600",
-    padding: "4px 10px",
-    borderRadius: "20px"
+    border: border ? `1px solid ${border}` : "none",
+    fontSize: "11.5px",
+    fontWeight: "700",
+    padding: "3px 9px",
+    borderRadius: "14px"
+  }),
+  progressCard: (isDark) => ({
+    margin: "12px 24px 0",
+    padding: "12px 14px",
+    backgroundColor: isDark ? "rgba(30, 41, 59, 0.6)" : "#f0f9ff",
+    borderRadius: "12px",
+    border: `1px solid ${isDark ? "#334155" : "#bae6fd"}`
+  }),
+  progressTrack: (isDark) => ({
+    width: "100%",
+    height: "6px",
+    backgroundColor: isDark ? "#334155" : "#e2e8f0",
+    borderRadius: "99px",
+    overflow: "hidden"
+  }),
+  progressFill: (percent) => ({
+    width: `${Math.min(100, Math.max(0, percent))}%`,
+    height: "100%",
+    background: "linear-gradient(90deg, #3b82f6, #06b6d4)",
+    borderRadius: "99px",
+    transition: "width 0.4s ease"
   }),
   filterBar: {
     display: "flex",
-    gap: "8px",
-    padding: "16px 24px 8px",
-    borderBottom: "1px solid #f1f5f9"
+    gap: "6px",
+    padding: "14px 24px 8px",
+    borderBottom: "1px solid #f1f5f9",
+    overflowX: "auto"
   },
-  filterTab: (active) => ({
-    padding: "8px 14px",
-    borderRadius: "20px",
-    border: active ? "none" : "1px solid #cbd5e1",
-    backgroundColor: active ? "#1d4ed8" : "#ffffff",
-    color: active ? "#ffffff" : "#475569",
-    fontWeight: active ? "600" : "500",
-    fontSize: "13px",
+  filterTab: (active, activeColor = "#2563eb", isDark = false) => ({
+    padding: "7px 12px",
+    borderRadius: "18px",
+    border: active ? "none" : `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
+    backgroundColor: active ? activeColor : isDark ? "rgba(30, 41, 59, 0.7)" : "#ffffff",
+    color: active ? "#ffffff" : isDark ? "#cbd5e1" : "#475569",
+    fontWeight: active ? "700" : "600",
+    fontSize: "12px",
     cursor: "pointer",
-    transition: "all 0.2s"
+    whiteSpace: "nowrap",
+    transition: "all 0.15s ease",
+    boxShadow: active ? `0 2px 8px ${activeColor}55` : "none"
   }),
   checksList: {
     flex: 1,
@@ -337,34 +530,34 @@ const styles = {
     padding: "16px 24px",
     display: "flex",
     flexDirection: "column",
-    gap: "12px"
+    gap: "10px"
   },
   scorecardContainer: {
-    margin: "12px 24px 0",
+    margin: "8px 24px 0",
     display: "flex",
     flexWrap: "wrap",
     gap: "6px"
   },
-  scorePill: (label, score) => (
+  scorePill: (label, score, isDark = false) => (
     <div key={label} style={{
       fontSize: "11px",
       fontWeight: "600",
-      padding: "4px 10px",
-      borderRadius: "12px",
-      backgroundColor: "#f1f5f9",
-      color: "#334155",
-      border: "1px solid #e2e8f0",
+      padding: "4px 8px",
+      borderRadius: "8px",
+      backgroundColor: isDark ? "rgba(30, 41, 59, 0.8)" : "#f1f5f9",
+      color: isDark ? "#cbd5e1" : "#334155",
+      border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
       display: "flex",
       alignItems: "center",
       gap: "4px"
     }}>
       <span>{label}:</span>
-      <span style={{ fontWeight: "800", color: score >= 80 ? "#15803d" : score >= 60 ? "#b45309" : "#be123c" }}>
+      <span style={{ fontWeight: "800", color: score >= 80 ? "#16a34a" : score >= 60 ? "#d97706" : "#dc2626" }}>
         {score ?? 0}%
       </span>
     </div>
   ),
-  emptyStateContainer: {
+  emptyStateContainer: (isDark) => ({
     flex: 1,
     display: "flex",
     flexDirection: "column",
@@ -372,10 +565,10 @@ const styles = {
     justifyContent: "center",
     padding: "60px 24px",
     textAlign: "center",
-    backgroundColor: "#fafafa"
-  },
+    backgroundColor: isDark ? "#0f172a" : "#fafafa"
+  }),
   recheckMainBtn: {
-    backgroundColor: "#1d4ed8",
+    backgroundColor: "#2563eb",
     color: "#ffffff",
     border: "none",
     padding: "12px 24px",
@@ -383,13 +576,25 @@ const styles = {
     fontWeight: "700",
     cursor: "pointer",
     fontSize: "14px",
-    boxShadow: "0 4px 14px rgba(29, 78, 216, 0.35)",
+    boxShadow: "0 4px 14px rgba(37, 99, 235, 0.35)",
     transition: "all 0.2s ease"
   },
+  recheckBtn: (isDark) => ({
+    backgroundColor: isDark ? "rgba(37, 99, 235, 0.15)" : "#eff6ff",
+    color: isDark ? "#93c5fd" : "#1d4ed8",
+    border: `1px solid ${isDark ? "rgba(59, 130, 246, 0.3)" : "#bfdbfe"}`,
+    padding: "6px 12px",
+    borderRadius: "8px",
+    fontSize: "12px",
+    fontWeight: "700",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    gap: "6px"
+  }),
   emptyState: {
     textAlign: "center",
     padding: "40px 0",
-    color: "#94a3b8",
     fontSize: "14px"
   },
   loadingContainer: {
@@ -401,94 +606,88 @@ const styles = {
     textAlign: "center"
   },
   spinner: {
-    width: "40px",
-    height: "40px",
-    border: "4px solid #f3f3f3",
-    borderTop: "4px solid #1d4ed8",
+    width: "36px",
+    height: "36px",
+    border: "3px solid rgba(59, 130, 246, 0.2)",
+    borderTop: "3px solid #2563eb",
     borderRadius: "50%",
-    animation: "spin 1s linear infinite"
+    animation: "spin 0.8s linear infinite"
   },
-  checkCard: (level, severity) => {
-    const borders = {
-      BLOCKER: "#fecdd3",
-      WARNING: "#ffedd5",
-      ADVISORY: "#fef3c7",
-      INFO: "#bbf7d0",
-      error: "#fecdd3",
-      warning: "#ffedd5",
-      advisory: "#fef3c7",
-      success: "#bbf7d0",
-      info: "#e2e8f0"
-    };
-    const bgs = {
-      BLOCKER: "#fff1f2",
-      WARNING: "#fff7ed",
-      ADVISORY: "#fffbeb",
-      INFO: "#f0fdf4",
-      error: "#fff1f2",
-      warning: "#fff7ed",
-      advisory: "#fffbeb",
-      success: "#f0fdf4",
-      info: "#f8fafc"
-    };
-    const targetKey = severity || level || "info";
+  checkCard: (isError, isWarn, isPending, isDark) => {
+    let bg = isDark ? "#1e293b" : "#ffffff";
+    let border = isDark ? "#334155" : "#e2e8f0";
+
+    if (isError) {
+      bg = isDark ? "rgba(225, 29, 72, 0.08)" : "#fff1f2";
+      border = isDark ? "rgba(225, 29, 72, 0.4)" : "#fecdd3";
+    } else if (isWarn) {
+      bg = isDark ? "rgba(217, 119, 6, 0.08)" : "#fffbeb";
+      border = isDark ? "rgba(217, 119, 6, 0.4)" : "#fde68a";
+    } else if (isPending) {
+      bg = isDark ? "rgba(30, 41, 59, 0.35)" : "#f8fafc";
+      border = isDark ? "#334155" : "#f1f5f9";
+    } else {
+      bg = isDark ? "rgba(16, 185, 129, 0.05)" : "#f0fdf4";
+      border = isDark ? "rgba(16, 185, 129, 0.25)" : "#bbf7d0";
+    }
+
     return {
-      padding: "14px 16px",
+      padding: "12px 14px",
       borderRadius: "12px",
-      border: `1px solid ${borders[targetKey] || "#e2e8f0"}`,
-      backgroundColor: bgs[targetKey] || "#ffffff"
+      border: `1px solid ${border}`,
+      backgroundColor: bg,
+      transition: "transform 0.15s ease"
     };
   },
   checkCardHeader: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: "6px"
+    marginBottom: "4px"
   },
   checkTitle: {
     fontWeight: "700",
-    fontSize: "14px",
-    color: "#0f172a"
+    fontSize: "13.5px"
   },
-  detailTag: {
+  detailTag: (isDark) => ({
     fontSize: "11px",
-    backgroundColor: "#ffffff",
+    fontWeight: "700",
+    backgroundColor: isDark ? "#0f172a" : "#ffffff",
     padding: "2px 8px",
     borderRadius: "6px",
-    color: "#64748b",
-    border: "1px solid #cbd5e1"
-  },
+    color: isDark ? "#93c5fd" : "#2563eb",
+    border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`
+  }),
   checkLongText: {
     margin: "4px 0",
-    fontSize: "13px",
-    color: "#334155",
+    fontSize: "12.5px",
     lineHeight: "1.5"
   },
-  suggestionBox: {
+  suggestionBox: (isDark, isError = true) => ({
     marginTop: "8px",
-    padding: "8px 12px",
-    backgroundColor: "#ffffff",
+    padding: "8px 10px",
+    backgroundColor: isDark ? "rgba(15, 23, 42, 0.6)" : "#ffffff",
     borderRadius: "8px",
     fontSize: "12px",
-    color: "#1e293b",
-    borderLeft: "3px solid #1d4ed8"
-  },
+    color: isDark ? "#f1f5f9" : "#1e293b",
+    borderLeft: `3px solid ${isError ? "#dc2626" : "#d97706"}`
+  }),
   footer: {
-    padding: "16px 24px",
+    padding: "14px 24px",
     borderTop: "1px solid #e2e8f0",
-    backgroundColor: "#f8fafc",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center"
   },
   doneBtn: {
-    backgroundColor: "#1d4ed8",
+    backgroundColor: "#2563eb",
     color: "#ffffff",
     border: "none",
-    padding: "10px 20px",
+    padding: "8px 18px",
     borderRadius: "10px",
-    fontWeight: "600",
+    fontWeight: "700",
     cursor: "pointer",
-    fontSize: "14px"
+    fontSize: "13.5px",
+    boxShadow: "0 2px 8px rgba(37, 99, 235, 0.3)"
   }
 };

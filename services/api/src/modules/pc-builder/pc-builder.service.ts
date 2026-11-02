@@ -47,6 +47,46 @@ export interface Build {
  */
 class PcBuilderService {
   private cachedCentralizedRules: any = null;
+  private cachedDbRules: any[] | null = null;
+  private cachedDbRulesTime: number = 0;
+
+  public invalidateRulesCache(): void {
+    this.cachedDbRules = null;
+    this.cachedDbRulesTime = 0;
+  }
+
+  public async getActiveCompatibilityRules(): Promise<any[]> {
+    const now = Date.now();
+    if (this.cachedDbRules && now - this.cachedDbRulesTime < 60000) {
+      return this.cachedDbRules;
+    }
+    const rows = await query(
+      `
+        SELECT
+          id,
+          name,
+          description,
+          source_category_id AS sourceCategoryId,
+          target_category_id AS targetCategoryId,
+          source_attribute_key AS sourceAttributeKey,
+          target_attribute_key AS targetAttributeKey,
+          operator,
+          is_compatible AS isCompatible,
+          attribute_value_1 AS attributeValue1,
+          attribute_value_2 AS attributeValue2
+        FROM compatibility_rules
+        WHERE is_active = 1
+      `
+    );
+    this.cachedDbRules = (rows as any[]).map(r => ({
+      ...r,
+      isCompatible: Boolean(r.isCompatible),
+      operator: r.operator || "EQUALS",
+      name: r.name || `Rule #${r.id}`
+    }));
+    this.cachedDbRulesTime = now;
+    return this.cachedDbRules;
+  }
 
   public getCentralizedRules(): any {
     if (this.cachedCentralizedRules) return this.cachedCentralizedRules;
@@ -1845,20 +1885,7 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
           `,
           variantIds
         ),
-        query(
-          `
-            SELECT
-              id,
-              attribute_value_1 AS attributeValue1,
-              attribute_value_2 AS attributeValue2,
-              is_compatible AS isCompatible,
-              source_category_id AS sourceCategoryId,
-              target_category_id AS targetCategoryId,
-              description
-            FROM compatibility_rules
-            WHERE is_active = 1
-          `
-        )
+        this.getActiveCompatibilityRules()
       ]);
       rows = fetchedRows as any[];
       dbRules = fetchedRules as any[];
@@ -2008,8 +2035,12 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
 
     // Đánh giá trực tiếp các luật từ bảng compatibility_rules theo từng tiêu chí
     const dbRuleConflicts: Record<string, string> = {};
+    const matchedDbChecks: any[] = [];
     if (dbRules.length > 0) {
-      const allComponents = Object.values(componentMap) as any[];
+      const allComponents = Object.entries(componentMap).map(([type, comp]: [string, any]) => ({
+        componentType: type,
+        ...comp
+      }));
       for (let i = 0; i < allComponents.length; i++) {
         for (let j = i + 1; j < allComponents.length; j++) {
           const compA = allComponents[i];
@@ -2027,26 +2058,36 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
                   (rule.attributeValue1 === valA && rule.attributeValue2 === valB && (!rule.sourceCategoryId || rule.sourceCategoryId === catA)) ||
                   (rule.attributeValue1 === valB && rule.attributeValue2 === valA && (!rule.sourceCategoryId || rule.sourceCategoryId === catB));
 
-                if (match && Number(rule.isCompatible) === 0) {
+                if (match) {
+                  const ruleKey = `rule_${rule.id}`;
+                  const isOk = Boolean(rule.isCompatible);
                   const conflictMsg = rule.description || `Xung đột: ${compA.productName} không tương thích với ${compB.productName}`;
-                  // Phân loại vào check key phù hợp
-                  const ruleKey = (rule.source_attribute_key || rule.sourceAttributeKey || "").toLowerCase();
-                  if (ruleKey === "socket" || ruleKey.includes("socket")) {
-                    dbRuleConflicts.socket = conflictMsg;
-                  } else if (ruleKey === "ram_type" || ruleKey.includes("ram")) {
-                    dbRuleConflicts.ram = conflictMsg;
-                  } else if (ruleKey === "form_factor" || ruleKey.includes("form")) {
-                    dbRuleConflicts.case_form_factor = conflictMsg;
-                  } else if (ruleKey === "radiator_size" || ruleKey.includes("radiator")) {
-                    dbRuleConflicts.radiator_fit = conflictMsg;
-                  } else if (ruleKey === "psu_wattage" || ruleKey.includes("watt")) {
-                    dbRuleConflicts.psu = conflictMsg;
-                  } else if (ruleKey === "cooling_capacity") {
-                    dbRuleConflicts.cooling_tdp = conflictMsg;
-                  } else if (ruleKey === "cooler_height") {
-                    dbRuleConflicts.cooler_height = conflictMsg;
-                  } else {
-                    dbRuleConflicts.general = conflictMsg;
+                  if (!isOk) {
+                    const rKey = (rule.source_attribute_key || rule.sourceAttributeKey || "").toLowerCase();
+                    if (rKey === "socket" || rKey.includes("socket")) dbRuleConflicts.socket = conflictMsg;
+                    else if (rKey === "ram_type" || rKey.includes("ram")) dbRuleConflicts.ram = conflictMsg;
+                    else if (rKey === "form_factor" || rKey.includes("form")) dbRuleConflicts.case_form_factor = conflictMsg;
+                    else if (rKey === "radiator_size" || rKey.includes("radiator")) dbRuleConflicts.radiator_fit = conflictMsg;
+                    else if (rKey === "psu_wattage" || rKey.includes("watt")) dbRuleConflicts.psu = conflictMsg;
+                    else if (rKey === "cooling_capacity") dbRuleConflicts.cooling_tdp = conflictMsg;
+                    else if (rKey === "cooler_height") dbRuleConflicts.cooler_height = conflictMsg;
+                    else dbRuleConflicts.general = conflictMsg;
+                  }
+                  if (!matchedDbChecks.some((c) => c.key === ruleKey)) {
+                    matchedDbChecks.push({
+                      key: ruleKey,
+                      ok: isOk,
+                      applicable: true,
+                      detail: isOk ? (rule.description || `${rule.name}: Phù hợp tương thích`) : conflictMsg,
+                      meta: {
+                        ruleId: `RULE-${rule.id}`,
+                        ruleName: rule.name || `Quy tắc #${rule.id}`,
+                        ruleDescription: rule.description,
+                        severity: isOk ? "INFO" : "BLOCKER",
+                        sourceComponent: compA.componentType,
+                        targetComponent: compB.componentType
+                      }
+                    });
                   }
                 }
               }
@@ -2064,70 +2105,91 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
     };
     const m2Count = (isStorageM2(componentMap.storage) ? 1 : 0) + (isStorageM2(componentMap.storage_2) ? 1 : 0);
 
+    const hasCpu = Boolean(componentMap.cpu?.productName);
+    const hasMainboard = Boolean(componentMap.mainboard?.productName);
+    const hasRam = Boolean(componentMap.ram?.productName);
+    const hasGpu = Boolean(componentMap.gpu?.productName);
+    const hasPsu = Boolean(componentMap.psu?.productName);
+    const hasCase = Boolean(componentMap.case?.productName);
+    const hasStorage = Boolean(componentMap.storage?.productName || componentMap.storage_2?.productName);
+
     const checks = [
       {
         key: "socket",
         ok: !dbRuleConflicts.socket && (!cpuSocket || !boardSocket || this.normalizeText(cpuSocket) === this.normalizeText(boardSocket)),
+        applicable: hasCpu && hasMainboard,
         detail: dbRuleConflicts.socket || (cpuSocket && boardSocket ? `${cpuSocket} / ${boardSocket}` : "Need socket specs")
       },
       {
         key: "ram",
         ok: !dbRuleConflicts.ram && (!ramType || !boardRam || this.normalizeText(boardRam).includes(this.normalizeText(ramType)) || this.normalizeText(ramType).includes(this.normalizeText(boardRam))),
+        applicable: hasRam && hasMainboard,
         detail: dbRuleConflicts.ram || (ramType && boardRam ? `${ramType} / ${boardRam}` : "Need RAM specs")
       },
       {
         key: "psu",
         ok: !dbRuleConflicts.psu && (!componentMap.psu || psuWatt === 0 || psuWatt >= requiredWatt),
+        applicable: hasPsu && (hasCpu || hasGpu),
         detail: dbRuleConflicts.psu || (componentMap.psu ? `${psuWatt || "?"}W / need ${requiredWatt}W` : "No PSU selected")
       },
       {
         key: "gpu_clearance",
         ok: !gpuLength || !caseClearance || caseClearance >= gpuLength,
+        applicable: hasGpu && hasCase,
         detail: gpuLength && caseClearance ? `${gpuLength}mm / ${caseClearance}mm` : "Need GPU/case size specs"
       },
       {
         key: "cooling_required",
         ok: !cpu.productName || !requiresCooling || hasCooling,
+        applicable: hasCpu,
         detail: requiresCooling ? (hasCooling ? "Dedicated cooler selected" : "CPU requires a separate cooler") : "Cooling is optional for this CPU"
       },
       {
         key: "cooling_socket",
         ok: !hasCooling || this.socketMatches(cpuSocket, coolerSockets),
+        applicable: hasCooling && hasCpu,
         detail: hasCooling ? (coolerSockets || "No cooler socket data") : "Cooling not selected"
       },
       {
         key: "cooling_tdp",
         ok: !dbRuleConflicts.cooling_tdp && (!hasCooling || coolerCapacity === 0 || cpuTdp === 0 || coolerCapacity >= cpuTdp),
+        applicable: hasCooling && hasCpu,
         detail: dbRuleConflicts.cooling_tdp || (hasCooling ? `${coolerCapacity || "?"}W cooler / ${cpuTdp || "?"}W CPU` : "Cooling not selected")
       },
       {
         key: "radiator_fit",
         ok: !dbRuleConflicts.radiator_fit && (!hasCooling || radiatorSize === 0 || caseRadiatorSupport === 0 || caseRadiatorSupport >= radiatorSize),
+        applicable: hasCooling && hasCase && radiatorSize > 0,
         detail: dbRuleConflicts.radiator_fit || (hasCooling ? `${radiatorSize || "?"}mm radiator / ${caseRadiatorSupport || "?"}mm case` : "Cooling not selected")
       },
       {
         key: "cooler_height",
         ok: !dbRuleConflicts.cooler_height && (!hasCooling || coolerHeight === 0 || caseCoolerClearance === 0 || caseCoolerClearance >= coolerHeight),
+        applicable: hasCooling && hasCase && coolerHeight > 0,
         detail: dbRuleConflicts.cooler_height || (hasCooling ? `${coolerHeight || "?"}mm cooler / ${caseCoolerClearance || "?"}mm case` : "Cooling not selected")
       },
       {
         key: "ram_slots",
         ok: isRamSlotsOk,
+        applicable: hasRam && hasMainboard,
         detail: componentMap.ram && componentMap.mainboard ? `${ramSticks} RAM stick(s) / ${ramSlots} slots on MB` : "RAM or Mainboard not selected"
       },
       {
         key: "psu_connectors",
         ok: !componentMap.psu || psuWatt >= (gpuTdp > 250 ? 650 : 450),
+        applicable: hasPsu && hasGpu,
         detail: componentMap.psu ? `PSU ${psuWatt}W connector output checked` : "PSU not selected"
       },
       {
         key: "storage_m2",
         ok: m2Count === 0 || m2Slots >= m2Count,
+        applicable: hasStorage && hasMainboard,
         detail: (componentMap.storage || componentMap.storage_2) ? `${m2Count} M.2 NVMe SSD(s) / ${m2Slots} M.2 slot(s) on Mainboard` : "Storage not selected"
       },
       {
         key: "case_form_factor",
         ok: !dbRuleConflicts.case_form_factor && (!componentMap.mainboard || !componentMap.case || isFormFactorCompatible(boardFormFactor, caseFormFactor)),
+        applicable: hasMainboard && hasCase,
         detail: dbRuleConflicts.case_form_factor || (componentMap.mainboard && componentMap.case ? `MB ${boardFormFactor || "ATX"} / Case ${caseFormFactor || "ATX"}` : "Mainboard or Case not selected")
       },
       {
@@ -2154,6 +2216,7 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
           const gpuTier = getGpuTier(gpu.productName);
           return Math.abs(cpuTier - gpuTier) <= 1;
         })(),
+        applicable: hasCpu && hasGpu,
         detail: (() => {
           if (!componentMap.cpu || !componentMap.gpu) return "CPU or GPU not selected";
           const getCpuTier = (name: string): number => {
@@ -2189,6 +2252,7 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
           const isEntryMainboard = mbName.includes("h610") || mbName.includes("a620") || mbName.includes("a520") || mbName.includes("h510") || mbName.includes("h410");
           return !(isHighPowerCpu && isEntryMainboard);
         })(),
+        applicable: hasCpu && hasMainboard,
         detail: (() => {
           if (!componentMap.cpu || !componentMap.mainboard) return "Chưa chọn CPU hoặc Mainboard";
           const cpuName = this.normalizeText(cpu.productName);
@@ -2212,6 +2276,7 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
           const isWeakPsu = psuWatt < 850;
           return !(isHighEndGpu && (isCompactCase || isWeakPsu));
         })(),
+        applicable: hasGpu && hasCase && hasPsu,
         detail: (() => {
           if (!componentMap.gpu || !componentMap.case || !componentMap.psu) return "Chưa đủ tổ hợp GPU + Case + Nguồn";
           const gpuName = this.normalizeText(gpu.productName);
@@ -2234,6 +2299,7 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
           const isAirCoolerSmall = !coolName.includes("360") && !coolName.includes("420") && !coolName.includes("aio") && !coolName.includes("ak620") && !coolName.includes("fc140");
           return !(isExtremeCpu && isAirCoolerSmall);
         })(),
+        applicable: hasCpu && hasCooling && hasCase,
         detail: (() => {
           if (!componentMap.cpu || !componentMap.cooling || !componentMap.case) return "Chưa đủ tổ hợp CPU + Tản + Case";
           const cpuName = this.normalizeText(cpu.productName);
@@ -2245,6 +2311,8 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
         })()
       }
     ];
+
+    checks.push(...matchedDbChecks);
 
     const xaiReport = xaiExplanationService.buildCompleteReport(checks, componentMap);
 
