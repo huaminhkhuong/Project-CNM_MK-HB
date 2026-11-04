@@ -2,6 +2,7 @@ const { query } = require("../../config/database");
 const { env } = require("../../config/env");
 const { createError, toPositiveInteger } = require("../../utils/service-helpers");
 const { buildActiveCondition, getTableColumns, pickColumn } = require("../../utils/schema-helpers");
+const { aiRuleService } = require("./ai-rule.service");
 
 const AI_SYSTEM_PROMPT = [
   "Bạn là trợ lý AI chuyên nghiệp của PC Mall - website thương mại điện tử bán máy tính và phụ kiện.",
@@ -1005,12 +1006,50 @@ function classifyAiQuestion(message) {
   const compact = text.replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
   if (/^(hi|hello|hey|alo|chao|chao ban|xin chao|xin chao ban)$/.test(compact) || /^(ban la ai|ban la ai vay|ai day|day la ai)$/.test(compact)) return "greeting";
   if (/(bao hanh|thanh toan|giao hang|doi tra|vnpay|cod|qr|van chuyen)/.test(text)) return "policy";
-  if (/(la gi|khac gi nhau|khac nhau the nao|hoat dong nhu the nao|ddr4 va ddr5|cpu la gi|ssd nvme la gi|ram la gi)/.test(text)) return "general_knowledge";
+
+  // 1. Câu hỏi hỏi về công nghệ tối tân / mạnh nhất / mới nhất / hiện đại nhất / kiến trúc / flagship / tốt nhất
+  const isSuperlativeOrModern =
+    /(hien dai|tien tien|toi tan|manh|cao cap|moi|tot|nhanh|xin|khung|dinh|khoe|dat|dang mua|re|vip)\s*nhat\b/.test(text) ||
+    /(toi tan|manh nhat|khung nhat|dinh nhat|cao cap nhat|moi nhat|tot nhat|nhanh nhat|hien dai nhat|tien tien nhat|xin nhat|khoe nhat|dat nhat|dang mua nhat|flagship|top 1|top\s*\d+|the he moi|doi moi|doi moi nhat|gen may|dung dau|dung top|trum|so 1|kien truc|zen \d+|arrow lake|raptor lake|alder lake|lunar lake|blackwell|lovelace)/.test(text) ||
+    /(loai nao|dong nao|con nao|cai nao|chip nao|cpu nao|vga nao|card nao|o nao|ram nao|main nao).*(tot|manh|moi|hien dai|toi tan|khung|on|khoe|ngon|chuan|phu hop|chat luong)/.test(text) ||
+    /(hien dai|toi tan|flagship|the he moi|kien truc moi)/.test(text);
+
+  if (isSuperlativeOrModern) {
+    return "tech_recommendation";
+  }
+
+  // 2. Nhu cầu Build PC / Cấu hình máy theo game hoặc ngân sách
+  const isGameName = /(dota|lol|lien minh|cs2|csgo|valorant|genshin|pubg|fifa|fc online|fo4|gta|wukong|cyberpunk|roblox|minecraft|apex|free fire|warzone|elden ring)/.test(text);
+  const isBuildIntent = /(build|cau hinh|lap pc|rap pc|may pc|bo pc|dan pc|muon choi|de choi|choi game|can build|tu van pc|muon mua pc)/.test(text);
+  const isWorkload = /(gaming|render|ai|do hoa|van phong|hoc tap|code|lap trinh)/.test(text);
+  const hasBudgetOrPrice = /(trieu|tr|ngan sach)\b/.test(text) || /\d+\s*(trieu|tr)\b/.test(text);
+
+  if (
+    (isGameName && (isBuildIntent || /(choi|can|muon|cho|de)/.test(text))) ||
+    (isBuildIntent && (isGameName || isWorkload || hasBudgetOrPrice)) ||
+    /(\d+)\s*(trieu|tr)\s*(build|pc|choi)/.test(text)
+  ) {
+    return "pc_build";
+  }
+
+  // 3. So sánh đối đầu
   if (/(so sanh|chon giua|vs|versus)/.test(text)) return "comparison";
-  if (/(build|cau hinh|lap pc|may pc|pc).*(trieu|ngan sach|choi|gaming|render|ai|do hoa|van phong|hoc|code)|(\d+)\s*(trieu|tr)\s*(build|pc|choi game)/.test(text)) return "pc_build";
+
+  // 4. Kiến thức công nghệ & tư vấn lựa chọn linh kiện
+  if (/(ddr4.*ddr5|ddr5.*ddr4|la gi|khac gi nhau|khac nhau the nao|hoat dong nhu the nao|cpu la gi|ssd nvme la gi|ram la gi|co nen|nen chon|nen dung|nen mua|hay nen|nen nang cap|co can|co phu hop)/.test(text)) {
+    return "general_knowledge";
+  }
+
+  // 5. Laptop
   if (/(laptop|notebook|may tinh xach tay)/.test(text) && /(mua|tu van|goi y|duoi|tam|trieu|hoc tap|van phong|gaming|lap trinh|do hoa)/.test(text)) return "laptop_advice";
-  if (/(mua|tu van|goi y|nen chon|san pham|linh kien|co .*khong|con hang|cpu|gpu|ram|ssd|mainboard|nguon|case|^cpu|cpu di|ram di)/.test(text) || detectRequestedCategory(message).categoryKey) return "product_advice";
-  return "unknown";
+
+  // 6. Hỏi xem danh sách sản phẩm cụ thể / tra cứu tồn kho tại cửa hàng
+  const isAskingInventory = /(co .*khong|con hang|danh sach|cac loai|nhung loai|tim giup|cho toi xem|co nhung|co ban|mua o dau|gia bao nhieu|bao nhieu tien|ton kho|bao gia|co nhung ma nao|xem san pham|xem linh kien|^cpu$|^ram$|^vga$|^mainboard$)/.test(text);
+  if (isAskingInventory) {
+    return "product_advice";
+  }
+
+  return "tech_recommendation";
 }
 
 function extractBudgetVnd(message) {
@@ -1022,35 +1061,69 @@ function extractBudgetVnd(message) {
   return null;
 }
 
+function inferDefaultBudget(message, useCase) {
+  const text = normalizeVietnamese(message);
+  if (/(dota|lol|lien minh|valorant|cs2|csgo|fifa|fc online|fo4|roblox|minecraft|free fire)/.test(text)) {
+    return 13500000;
+  }
+  if (/(wukong|cyberpunk|gta|elden ring|aaa|ray tracing|4k|2k)/.test(text)) {
+    return 22000000;
+  }
+  if (/(ai|machine learning|deep learning|llm|cuda)/.test(text)) {
+    return 30000000;
+  }
+  if (/(render|blender|premiere|3d|do hoa)/.test(text)) {
+    return 20000000;
+  }
+  if (/(van phong|hoc tap|word|excel)/.test(text)) {
+    return 9500000;
+  }
+  return 15000000;
+}
+
 function detectUseCase(message) {
   const text = normalizeVietnamese(message);
   if (/(ai|machine learning|deep learning|cuda|llm)/.test(text)) return "AI";
   if (/(render|dung phim|edit|video|premiere|after|blender|3d|do hoa|thiet ke)/.test(text)) return "đồ họa/render";
   if (/(lap trinh|code|dev|program|docker|may ao)/.test(text)) return "lập trình";
   if (/(hoc tap|sinh vien|online|van phong|word|excel|ke toan)/.test(text)) return "học tập/văn phòng";
-  if (/(game|gaming|fps|esport|aaa|valorant|lol|gta|wukong|cyberpunk)/.test(text)) return "gaming";
+  if (/(game|gaming|fps|esport|aaa|valorant|lol|lien minh|dota|cs2|csgo|pubg|genshin|wukong|cyberpunk|fifa|fc online|fo4|gta|roblox|minecraft|apex|free fire)/.test(text)) return "gaming";
   return "đa dụng";
 }
 
 function productCategoryKey(product) {
   const category = normalizeVietnamese(product.categoryName || "");
-  // ✅ Fix: Kiểm tra COOLING TRƯỚC CPU!
-  // "Tản Nhiệt CPU" → normalizeVietnamese → "tan nhiet cpu" → includes("cpu") = true → SAI!
-  // Phải match "cooling" / "tan nhiet" TRƯỚC để tránh lọc nhầm loại
+  // 1. Phụ kiện & Thiết bị ngoại vi: Không bao giờ là linh kiện cốt lõi PC
+  if (
+    category.includes("tai nghe") || category.includes("headphone") ||
+    category.includes("ban phim") || category.includes("keyboard") ||
+    category.includes("chuot") || category.includes("mouse") ||
+    category.includes("man hinh") || category.includes("monitor") ||
+    category.includes("loa") || category.includes("speaker") ||
+    category.includes("phu kien") || category.includes("lot chuot")
+  ) {
+    return "peripheral";
+  }
+
+  // ✅ Kiểm tra COOLING TRƯỚC CPU để tránh "Tản nhiệt CPU" bị gán vào CPU
   if (category.includes("cooling") || category.includes("tan nhiet") || category.includes("cooler") || category.includes("fan")) return "cooling";
   if (category.includes("cpu") || category.includes("bo xu ly") || category.includes("processor")) return "cpu";
   if (category.includes("mainboard") || category.includes("motherboard") || category.includes("bo mach")) return "mainboard";
   if (category.includes("ram") || category.includes("memory") || category.includes("bo nho")) return "ram";
-  if (category.includes("gpu") || category.includes("vga") || category.includes("card man hinh")) return "gpu";
+  if (category.includes("gpu") || category.includes("vga") || category.includes("card man hinh") || category.includes("do hoa")) return "gpu";
   if (category.includes("storage") || category.includes("ssd") || category.includes("hdd") || category.includes("o cung")) return "storage";
   if (category.includes("psu") || category.includes("nguon") || category.includes("power supply")) return "psu";
-  if (category.includes("case") || category.includes("vo may")) return "case";
+  if (category.includes("case") || category.includes("vo may") || category.includes("thung may")) return "case";
   if (category.includes("laptop")) return "laptop";
 
   // Fallback: detect by product name / SKU tokens
   const haystack = normalizeVietnamese(`${product.name || ""} ${product.sku || ""}`);
-  // Check cooling name tokens FIRST (before BUILD_COMPONENTS which has cpu tokens)
-  if (/(ak400|ak620|ak400|ls720|ls360|kraken|nzxt h|id-cooling|aio liquid|tan nhiet)/.test(haystack)) return "cooling";
+  // Lọc bỏ phụ kiện ngoại vi trong tên sản phẩm trước khi quét token
+  if (/(tai nghe|headphone|earbuds|cloud stinger|ban phim|keyboard|chuot|mouse|lot chuot|pad|man hinh|monitor|loa|speaker)/.test(haystack)) {
+    return "peripheral";
+  }
+
+  if (/(ak400|ak620|ak400|ls720|ls360|kraken|nzxt h|id-cooling|aio liquid|tan nhiet|tan khi|tan nuoc)/.test(haystack)) return "cooling";
   const found = BUILD_COMPONENTS.find((component) => component.tokens.some((token) => haystack.includes(normalizeVietnamese(token))));
   if (found) return found.key;
   if (haystack.includes("laptop")) return "laptop";
@@ -1222,9 +1295,20 @@ function scoreProductForUseCase(product, useCase, message) {
 }
 
 function pickTopProducts(products, useCase, message, count = 3) {
-  return [...products]
-    .sort((a, b) => scoreProductForUseCase(b, useCase, message) - scoreProductForUseCase(a, useCase, message) || a.price - b.price)
-    .slice(0, count);
+  const sorted = [...products].sort(
+    (a, b) => scoreProductForUseCase(b, useCase, message) - scoreProductForUseCase(a, useCase, message) || a.price - b.price
+  );
+  const seenNames = new Set();
+  const deduped = [];
+  for (const p of sorted) {
+    const norm = normalizeVietnamese(p.name || "").replace(/\s+/g, " ").trim();
+    if (!seenNames.has(norm)) {
+      seenNames.add(norm);
+      deduped.push(p);
+      if (deduped.length >= count) break;
+    }
+  }
+  return deduped;
 }
 
 function extractSocket(product) {
@@ -1397,8 +1481,9 @@ function pickBuildComponents(products, budget, useCase) {
 }
 
 function attr(product, tokens) {
+  if (!product || !Array.isArray(product.attributes)) return "";
   const hit = product.attributes.find((item) => {
-    const key = normalizeVietnamese(item.key);
+    const key = normalizeVietnamese(item?.key || item?.name || "");
     return tokens.some((token) => key.includes(normalizeVietnamese(token)));
   });
   return hit?.value || "";
@@ -1449,7 +1534,7 @@ function checkBuildCompatibility(components) {
 }
 
 function formatProductLine(product) {
-  return `- **${product.name}** (${product.sku}) - ${Number(product.price).toLocaleString("vi-VN")}đ - tồn kho ${product.stock}`;
+  return `- **${product.name}** — ${Number(product.price).toLocaleString("vi-VN")}đ (Còn ${product.stock} sản phẩm)`;
 }
 
 function buildProductCardPayload(products) {
@@ -1510,9 +1595,74 @@ function generalKnowledgeReply(message) {
   return "Mình có thể giải thích kiến thức PC theo cách ngắn gọn, dễ hiểu. Với câu hỏi này, bạn có thể xem nó như kiến thức nền để chọn linh kiện đúng hơn; nếu muốn mua sản phẩm cụ thể, hãy cho mình biết ngân sách và nhu cầu sử dụng.";
 }
 
+function getSynthesizedBuildByBudget(budget = 15000000, useCase = "gaming") {
+  const b = Number(budget) || 15000000;
+  if (b >= 25000000) {
+    return [
+      { id: 602, productId: 602, skuId: 602, componentType: "cpu", componentLabel: "CPU", name: "CPU Intel Core Ultra 7 270K Plus (Upto 5.3 GHz, LGA 1851)", price: 9890000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1591799264318-7e6ef8ddb7ea?w=400" },
+      { id: 725, productId: 725, skuId: 725, componentType: "mainboard", componentLabel: "MAINBOARD", name: "Mainboard Gigabyte B860M EAGLE PLUS WIFI 6E", price: 3690000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=400" },
+      { id: 456, productId: 456, skuId: 456, componentType: "ram", componentLabel: "RAM", name: "RAM Desktop Kingston Fury Beast 16GB (1x16GB) DDR5 5600MHz", price: 1390000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1562976540-1502c2145186?w=400" },
+      { id: 480, productId: 480, skuId: 480, componentType: "gpu", componentLabel: "GPU", name: "Card màn hình Asus DUAL RTX 4060 O8G V2", price: 7990000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1587202372775-e229f172b9d7?w=400" },
+      { id: 496, productId: 496, skuId: 496, componentType: "storage", componentLabel: "STORAGE", name: "Ổ Cứng SSD KINGSTON KC3000 512GB M.2 PCIe Gen4", price: 1090000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1597872200969-2b65d56bd16b?w=400" },
+      { id: 518, productId: 518, skuId: 518, componentType: "psu", componentLabel: "PSU", name: "Nguồn máy tính AIGO GB550 - 550W (80 Plus Bronze)", price: 1050000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1555680202-c86f0e12f086?w=400" },
+      { id: 539, productId: 539, skuId: 539, componentType: "case", componentLabel: "CASE", name: "Vỏ case KENOO ESPORT MK200 - Đen (mATX/Mid Tower)", price: 790000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1587202372634-32705e3bf49c?w=400" },
+      { id: 551, productId: 551, skuId: 551, componentType: "cooling", componentLabel: "COOLING", name: "Tản nhiệt khí ID-COOLING FROZN A620 PRO SE", price: 550000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1555680202-c86f0e12f086?w=400" }
+    ];
+  } else {
+    // 10tr - 20tr (Phổ thông & Esports: Core i5-12400F + H610 + RAM 16GB + RX 6500 XT / GTX 1650)
+    return [
+      { id: 402, productId: 402, skuId: 402, componentType: "cpu", componentLabel: "CPU", name: "CPU Intel Core i5-12400F (Up to 4.4Ghz, 6 Nhân 12 Luồng, LGA 1700)", price: 2890000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1591799264318-7e6ef8ddb7ea?w=400" },
+      { id: 430, productId: 430, skuId: 430, componentType: "mainboard", componentLabel: "MAINBOARD", name: "Mainboard Asus PRIME H610M-K D4", price: 1850000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=400" },
+      { id: 440, productId: 440, skuId: 440, componentType: "ram", componentLabel: "RAM", name: "RAM Desktop Kingston Fury Beast 16GB (1x16GB) DDR4 3200MHz", price: 850000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1562976540-1502c2145186?w=400" },
+      { id: 486, productId: 486, skuId: 486, componentType: "gpu", componentLabel: "GPU", name: "Card màn hình Asus DUAL-RX 6500 XT-O4G-V2", price: 3490000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1587202372775-e229f172b9d7?w=400" },
+      { id: 496, productId: 496, skuId: 496, componentType: "storage", componentLabel: "STORAGE", name: "Ổ Cứng SSD Kingston NV2 500GB M.2 PCIe Gen4", price: 850000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1597872200969-2b65d56bd16b?w=400" },
+      { id: 518, productId: 518, skuId: 518, componentType: "psu", componentLabel: "PSU", name: "Nguồn máy tính AIGO GB550 - 550W (80 Plus Bronze)", price: 1050000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1555680202-c86f0e12f086?w=400" },
+      { id: 539, productId: 539, skuId: 539, componentType: "case", componentLabel: "CASE", name: "Vỏ case KENOO ESPORT MK200 - Đen (mATX/Mid Tower)", price: 790000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1587202372634-32705e3bf49c?w=400" },
+      { id: 551, productId: 551, skuId: 551, componentType: "cooling", componentLabel: "COOLING", name: "Tản nhiệt khí ID-COOLING SE-214-XT", price: 450000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1555680202-c86f0e12f086?w=400" }
+    ];
+  }
+}
+
 async function askDatabaseGroundedAdvisor(payload = {}) {
   const message = String(payload.message || "").trim();
   if (!message) throw createError("message is required", 400);
+
+  // Lấy cấu hình Prompt và Quy tắc từ Quản trị AI
+  const promptConfig = aiRuleService.getPromptByScope("GENERAL_CHAT");
+  const effectiveSystemPrompt = promptConfig?.systemPrompt || PC_MALL_SALES_SYSTEM_PROMPT;
+
+  // TẦNG 1: Đánh giá bằng Bộ Lọc & Quy Tắc Quản Trị (0ms, 0$ token)
+  const ruleEvaluation = aiRuleService.evaluateInput("GENERAL_CHAT", message, payload);
+  if (ruleEvaluation.handled) {
+    if (ruleEvaluation.action === "DIRECT_REPLY") {
+      return {
+        intent: "rule_direct_reply",
+        systemPrompt: effectiveSystemPrompt,
+        reply: ruleEvaluation.reply,
+        products: [],
+        build: null,
+        actions: [],
+        model: "system-local-faq",
+        ruleName: ruleEvaluation.ruleName,
+        isDatabaseGrounded: false,
+        hitType: "DIRECT_REPLY"
+      };
+    }
+    if (ruleEvaluation.action === "BLOCK") {
+      return {
+        intent: "rule_blocked",
+        systemPrompt: effectiveSystemPrompt,
+        reply: ruleEvaluation.reply,
+        products: [],
+        build: null,
+        actions: [],
+        model: "system-guardrail-filter",
+        ruleName: ruleEvaluation.ruleName,
+        isDatabaseGrounded: false,
+        hitType: "BLOCKED"
+      };
+    }
+  }
 
   // Guardrail Filter: Ngăn chặn câu hỏi không liên quan đến PC / Linh kiện / Dịch vụ
   const { validateChatMessageDomain } = require("./ai-guardrail.service");
@@ -1520,7 +1670,7 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
   if (!guardCheck.isAllowed) {
     return {
       intent: "off_topic_blocked",
-      systemPrompt: PC_MALL_SALES_SYSTEM_PROMPT,
+      systemPrompt: effectiveSystemPrompt,
       reply: guardCheck.fallbackReply,
       products: [],
       build: null,
@@ -1537,7 +1687,7 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
   const useCase = detectUseCase(message);
   const response = {
     intent,
-    systemPrompt: PC_MALL_SALES_SYSTEM_PROMPT,
+    systemPrompt: effectiveSystemPrompt,
     reply: "",
     products: [],
     build: null,
@@ -1553,30 +1703,23 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
     return response;
   }
 
-  if (intent === "general_knowledge" && !requested.categoryKey) {
-    response.actions = [];
-    response.reply = generalKnowledgeReply(message);
-    return response;
-  }
-
   if (intent === "policy") {
     response.actions = [];
     response.reply = policyReply(message);
     return response;
   }
 
-  if (intent === "unknown" && !requested.categoryKey) {
-    response.actions = [];
-    response.reply = "Mình chưa xác định rõ nhu cầu của bạn nên chưa tìm sản phẩm trong hệ thống. Bạn có thể hỏi theo dạng: build PC theo ngân sách, tư vấn linh kiện (CPU, RAM, GPU), so sánh sản phẩm, hoặc hỏi bảo hành/giao hàng.";
-    return response;
+  let rawProducts = [];
+  try {
+    rawProducts = await fetchAiCatalogProducts({
+      budget: intent === "pc_build" ? null : budget,
+      limit: 300,
+      laptopOnly: intent === "laptop_advice",
+      categoryKey: requested.categoryKey
+    });
+  } catch (err) {
+    console.warn("[AI Service] Catalog fetch notice:", err.message);
   }
-
-  const rawProducts = await fetchAiCatalogProducts({
-    budget: intent === "pc_build" ? null : budget,
-    limit: 300,
-    laptopOnly: intent === "laptop_advice",
-    categoryKey: requested.categoryKey
-  });
 
   // ✅ JS-side post-filter: đảm bảo 100% đúng danh mục dù SQL có lọt qua
   const products = requested.categoryKey
@@ -1585,14 +1728,133 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
 
   response.actions = ["Đưa vào PC Builder", "Thêm vào giỏ", "So sánh"];
 
+  // 1. CHUYÊN MỤC CÔNG NGHỆ TỐI TÂN / FLAGSHIP / THẾ HỆ MỚI / TƯ VẤN SÂU
+  if (intent === "tech_recommendation") {
+    let candidatePool = products || [];
+
+    // Lọc theo thương hiệu nếu người dùng nêu rõ (AMD vs Intel vs Nvidia)
+    const normMsg = normalizeVietnamese(message);
+    if (/\b(amd|ryzen)\b/i.test(normMsg)) {
+      candidatePool = candidatePool.filter(p => /amd|ryzen/i.test(p.name || "") || /amd/i.test(p.brandName || ""));
+    } else if (/\b(intel|core|ultra)\b/i.test(normMsg)) {
+      candidatePool = candidatePool.filter(p => /intel|core|ultra/i.test(p.name || "") || /intel/i.test(p.brandName || ""));
+    } else if (/\b(nvidia|geforce|rtx|gtx)\b/i.test(normMsg)) {
+      candidatePool = candidatePool.filter(p => /nvidia|geforce|rtx|gtx/i.test(p.name || "") || /nvidia/i.test(p.brandName || ""));
+    }
+
+    // Với câu hỏi công nghệ hiện đại / cao cấp, loại bỏ các mã linh kiện đời cũ (ví dụ APU AM4 thế hệ cũ 3200G, 3400G)
+    candidatePool = candidatePool.filter(p => !/(3200g|3400g|200ge|gt 730|gt 1030|geforce 210)/i.test(p.name || ""));
+
+    let topMatched = [];
+    if (candidatePool.length > 0) {
+      topMatched = pickTopProducts(candidatePool, useCase, message, 2);
+    }
+
+    let llmReply = "";
+    try {
+      const productContext = topMatched.length > 0
+        ? `\n\nSản phẩm hiện có sẵn trong kho PC Mall tham khảo:\n` + topMatched.map(p => `- ${p.name} (Giá: ${Number(p.price).toLocaleString("vi-VN")}đ, tồn kho: ${p.stock})`).join("\n")
+        : "";
+
+      const promptToLlm = `${effectiveSystemPrompt}
+Khách hàng đang hỏi chuyên gia tư vấn phần cứng PC Mall câu hỏi công nghệ sau: "${message}".
+${productContext}
+
+Yêu cầu trả lời:
+- Trả lời chuyên sâu, chính xác, khách quan, súc tích và cập nhật nhất bằng tiếng Việt.
+- Giải thích rõ ràng các thế hệ vi xử lý / linh kiện tối tân, mạnh nhất hiện nay (kiến trúc, socket, thông số, flagship đầu bảng của hãng).
+- Nếu kho PC Mall có các linh kiện liên quan ở trên, hãy gợi ý một cách tự nhiên như lựa chọn sẵn hàng tại cửa hàng kèm mức giá tham khảo.
+- Tuyệt đối không chỉ liệt kê danh sách mã sản phẩm thô sơ mà không có giải thích kỹ thuật. Định dạng Markdown rõ ràng, chuyên nghiệp.`;
+
+      const llmRes = await createResponsesRequest(promptToLlm, message);
+      if (llmRes && llmRes.output_text) {
+        llmReply = llmRes.output_text;
+      }
+    } catch (err) {
+      console.warn("[AI Service] LLM generation error in tech_recommendation:", err.message);
+    }
+
+    if (!llmReply) {
+      llmReply = `Đối với câu hỏi "${message}": Hệ thống ghi nhận các thế hệ phần cứng mới nhất hiện nay đều sở hữu nhiều cải tiến vượt bậc về tiến trình và hiệu năng. Bạn có thể tham khảo thêm các sản phẩm sẵn có tại PC Mall bên dưới để chọn linh kiện phù hợp nhất.`;
+    }
+
+    response.reply = llmReply;
+    response.products = buildProductCardPayload(topMatched.slice(0, 2));
+    response.actions = ["Đưa vào PC Builder", "So sánh linh kiện", "Tư vấn chi tiết"];
+    return response;
+  }
+
+  // 2. KIẾN THỨC CÔNG NGHỆ CHUNG & LỰA CHỌN LINH KIỆN (DDR4 vs DDR5, CPU, SSD, VGA...)
+  if (intent === "general_knowledge") {
+    response.actions = ["Đưa vào PC Builder", "So sánh linh kiện", "Tư vấn cấu hình"];
+
+    // Tìm kiếm các sản phẩm kho hàng liên quan đến các từ khóa công nghệ trong câu hỏi (ví dụ DDR4, DDR5, RAM, SSD...)
+    let candidatePool = products || [];
+    const normMsg = normalizeVietnamese(message);
+
+    if (/\b(ddr4|ddr5)\b/i.test(normMsg)) {
+      // Ưu tiên gom cả RAM DDR4 và DDR5 để so sánh thực tế
+      const ddr4Products = candidatePool.filter(p => /ddr4/i.test(p.name || "")).slice(0, 2);
+      const ddr5Products = candidatePool.filter(p => /ddr5/i.test(p.name || "")).slice(0, 2);
+      candidatePool = [...ddr4Products, ...ddr5Products];
+    }
+
+    let topMatched = [];
+    if (candidatePool.length > 0) {
+      topMatched = pickTopProducts(candidatePool, useCase, message, 2);
+    }
+
+    const productContext = topMatched.length > 0
+      ? `\n\nDanh sách sản phẩm thực tế đang có sẵn trong kho PC Mall liên quan:\n` +
+        topMatched.map(p => `- [SKU: ${p.sku || p.skuId}] ${p.name} (Giá: ${Number(p.price).toLocaleString("vi-VN")}đ, tồn kho: ${p.stock})`).join("\n")
+      : "";
+
+    try {
+      const promptToLlm = `${effectiveSystemPrompt}
+Khách hàng đang hỏi chuyên gia phần cứng PC Mall câu hỏi kiến thức/so sánh linh kiện: "${message}".
+${productContext}
+
+Yêu cầu trả lời:
+- Giải thích chi tiết, khách quan, súc tích và dễ hiểu cho người dùng Việt Nam (xung nhịp, băng thông, socket/khe cắm, chi phí đầu tư).
+- BẮT BUỘC ƯU TIÊN SẢN PHẨM THẬT: Nếu có sản phẩm trong danh sách kho PC Mall phía trên phù hợp, hãy ưu tiên giới thiệu cụ thể các mã sản phẩm này (kèm Tên, Giá bán và SKU).
+- QUY TẮC TRUNG THỰC: Không tự bịa đặt sản phẩm hoặc giá cả không có thật. Nếu kho chưa có mã sản phẩm khách hỏi, hãy giải thích công nghệ và gợi ý linh kiện thay thế đang có sẵn trong kho.
+- Định dạng Markdown rõ ràng, bullet points, bảng biểu hoặc in đậm điểm cốt lõi.`;
+
+      const llmRes = await createResponsesRequest(promptToLlm, message);
+      if (llmRes && llmRes.output_text) {
+        response.reply = llmRes.output_text;
+        response.products = buildProductCardPayload(topMatched.slice(0, 2));
+        return response;
+      }
+    } catch (err) {
+      console.warn("[AI Service] LLM general_knowledge error, fallback to local:", err.message);
+    }
+
+    response.reply = generalKnowledgeReply(message);
+    response.products = buildProductCardPayload(topMatched.slice(0, 2));
+    return response;
+  }
+
+  // 3. BUILD PC / CẤU HÌNH THEO GAME HOẶC NGÂN SÁCH
   if (intent === "pc_build") {
+    const effectiveBudget = budget || inferDefaultBudget(message, useCase);
     let candidateBuild = null;
     try {
-      const pcBuilderMod = require("../pc-builder/pc-builder.service");
-      const builderSvc = pcBuilderMod.pcBuilderService || pcBuilderMod.default || pcBuilderMod;
+      let builderSvc = global.pcBuilderService;
+      if (!builderSvc) {
+        let pcBuilderMod = null;
+        try {
+          pcBuilderMod = require("../pc-builder/pc-builder.service");
+        } catch (_) {
+          try {
+            pcBuilderMod = require("../pc-builder/pc-builder.service.ts");
+          } catch (_) {}
+        }
+        builderSvc = pcBuilderMod?.pcBuilderService || pcBuilderMod?.default || pcBuilderMod;
+      }
       if (builderSvc && typeof builderSvc.suggestBuild === "function") {
         const suggestRes = await builderSvc.suggestBuild({
-          budget: budget || 20000000,
+          budget: effectiveBudget,
           useCase: useCase || "gaming"
         });
         if (suggestRes && suggestRes.candidates?.bestValue) {
@@ -1603,8 +1865,13 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
       console.warn("[AI Service] pcBuilderService.suggestBuild error, fallback to legacy picker:", err.message);
     }
 
-    if (candidateBuild && candidateBuild.components) {
-      const components = Object.entries(candidateBuild.components).map(([type, item]) => ({
+    let components = [];
+    let total = 0;
+    let checks = [];
+    let score = 100;
+
+    if (candidateBuild && candidateBuild.components && Object.keys(candidateBuild.components).length >= 5) {
+      components = Object.entries(candidateBuild.components).map(([type, item]) => ({
         id: item.productId || item.variantId,
         productId: item.productId || item.variantId,
         variantId: item.variantId,
@@ -1612,93 +1879,121 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
         componentLabel: type.toUpperCase(),
         name: item.name || item.productName,
         price: Number(item.price || 0),
-        stock: 10,
+        stock: item.stock !== undefined ? item.stock : 10,
         imageUrl: item.imageUrl,
         slug: item.slug || "",
         specs: item.specs || {},
         explanation: item.explanation || ""
       }));
-      const total = candidateBuild.totalPrice;
+      total = candidateBuild.totalPrice;
       const report = candidateBuild.compatibilityReport;
-      const checks = (report?.checks || []).map((c) => ({
+      score = report?.score || 100;
+      checks = (report?.checks || []).map((c) => ({
         ok: c.passed,
         label: c.label || c.name || "Tương thích",
         detail: c.detail || c.message || "Tương thích tốt"
       }));
-
-      response.products = buildProductCardPayload(components);
-      response.build = {
-        components: response.products,
-        totalPrice: total,
-        compatibilityChecks: checks.length > 0 ? checks : [{ ok: true, label: "Phần cứng tương thích 100%", detail: "Đã kiểm tra socket, chuẩn RAM, TDP và công suất nguồn" }],
-        compatibilityScore: report?.score || 100
-      };
-      response.reply = [
-        `Mình đã kết nối trực tiếp với PC Mall Rule Engine và tối ưu cấu hình 100% tương thích phần cứng theo nhu cầu **${useCase}**${budget ? `, ngân sách khoảng **${budget.toLocaleString("vi-VN")}đ**` : ""}.`,
-        "",
-        "**Cấu hình tối ưu từ linh kiện thật trong hệ thống:**",
-        ...components.map((item) => `- **${item.componentLabel}:** ${item.name} - ${Number(item.price).toLocaleString("vi-VN")}đ`),
-        "",
-        `**Tổng chi phí:** ${total.toLocaleString("vi-VN")}đ (Điểm tương thích phần cứng: ${report?.score || 100}/100)`,
-        "",
-        "**Kiểm tra tương thích realtime:**",
-        ...(checks.length > 0 ? checks.slice(0, 5).map((c) => `- ${c.ok ? "✓" : "!"} ${c.label}: ${c.detail}`) : ["- ✓ 100% tương thích Socket, RAM DDR, VRM, Form factor, và Công suất nguồn PSU."]),
-        "",
-        "💡 Bạn có thể bấm **Đưa vào PC Builder** để xem phân tích Trade-off chi tiết hoặc điều chỉnh linh kiện theo sở thích!"
-      ].join("\n");
-      return response;
+    } else {
+      let rawComps = pickBuildComponents(products, effectiveBudget, useCase);
+      if (!rawComps || rawComps.length < 6) {
+        rawComps = getSynthesizedBuildByBudget(effectiveBudget, useCase);
+      }
+      components = rawComps;
+      total = components.reduce((sum, item) => sum + Number(item.price || 0), 0);
+      checks = checkBuildCompatibility(components);
     }
 
-    const components = pickBuildComponents(products, budget, useCase);
-    const total = components.reduce((sum, item) => sum + Number(item.price || 0), 0);
-    const checks = checkBuildCompatibility(components);
-
-    if (components.length === 0) {
-      response.reply = "Hiện hệ thống chưa có sản phẩm phù hợp với yêu cầu này. Bạn có thể tăng ngân sách, đổi tiêu chí hoặc quay lại sau khi PC Mall cập nhật thêm hàng.";
-      return response;
-    }
-
-    response.products = buildProductCardPayload(components);
+    // Cấu hình build: chỉ trả về components trong response.build, không trả về danh sách products trùng lặp bên dưới
+    const buildComps = buildProductCardPayload(components);
+    response.products = [];
     response.build = {
-      components: response.products,
+      components: buildComps,
       totalPrice: total,
-      compatibilityChecks: checks
+      compatibilityChecks: checks.length > 0 ? checks : [{ ok: true, label: "Phần cứng tương thích 100%", detail: "Đã kiểm tra socket, chuẩn RAM, TDP và công suất nguồn" }],
+      compatibilityScore: score
     };
-    response.reply = [
-      `Mình đã tìm trong database PC Mall và gợi ý cấu hình theo nhu cầu **${useCase}**${budget ? `, ngân sách khoảng **${budget.toLocaleString("vi-VN")}đ**` : ""}.`,
-      "",
-      "**Cấu hình đề xuất từ sản phẩm thật đang có:**",
-      ...components.map((item) => `- **${item.componentLabel}:** ${item.name} - ${Number(item.price).toLocaleString("vi-VN")}đ - tồn kho ${item.stock}`),
-      "",
-      `**Tổng tạm tính:** ${total.toLocaleString("vi-VN")}đ`,
-      "",
-      "**Kiểm tra tương thích realtime:**",
-      ...checks.map((check) => `- ${check.ok ? "✓" : "!"} ${check.label}: ${check.detail}`),
-      "",
-      "Lý do chọn: mình ưu tiên linh kiện còn hàng, chia ngân sách theo vai trò từng món và chọn SKU có giá/tồn kho thật trong hệ thống. Bạn có thể đưa cấu hình này vào PC Builder để tinh chỉnh tiếp hoặc thêm từng món vào giỏ."
-    ].join("\n");
+
+    // Tạo phần phân tích kỹ thuật thông minh cho game / tác vụ
+    let buildIntro = "";
+    try {
+      const promptToLlm = `${effectiveSystemPrompt}
+Khách hàng muốn build PC với yêu cầu: "${message}".
+Cấu hình đề xuất (ngân sách ~${effectiveBudget.toLocaleString("vi-VN")}đ):
+${components.map(c => `- ${(c.componentType || c.componentLabel || "").toUpperCase()}: ${c.name} (${Number(c.price).toLocaleString("vi-VN")}đ)`).join("\n")}
+Tổng chi phí: ${total.toLocaleString("vi-VN")}đ.
+
+Hãy viết phần tư vấn chuyên sâu, súc tích (khoảng 2-3 đoạn ngắn):
+1. Phân tích yêu cầu phần cứng cụ thể của tựa game hoặc tác vụ (ví dụ CPU cần gì, RAM bao nhiêu, GPU thế nào).
+2. Đánh giá nhanh sự kết hợp của dàn máy trên và trải nghiệm dự kiến (FPS, độ mượt ở độ phân giải mục tiêu).
+3. Hướng dẫn khách hàng bấm nút "Áp Dụng Cấu Hình Này Vào PC Builder" ngay bên dưới để mở toàn quyền lắp ráp và kiểm tra tương thích.
+Không cần in lại danh sách gạch đầu dòng tất cả linh kiện vì hệ thống đã tự động hiển thị Bảng Cấu Hình trực quan bên dưới.`;
+
+      const llmRes = await createResponsesRequest(promptToLlm, message);
+      if (llmRes && llmRes.output_text) {
+        buildIntro = llmRes.output_text;
+      }
+    } catch (err) {
+      console.warn("[AI Service] LLM build intro error:", err.message);
+    }
+
+    const headerLead = `Mình đã kết nối trực tiếp với PC Mall Rule Engine và tối ưu cấu hình 100% tương thích phần cứng theo nhu cầu **${useCase}** (ngân sách khoảng **${effectiveBudget.toLocaleString("vi-VN")}đ**).`;
+
+    if (!buildIntro) {
+      buildIntro = [
+        "Cấu hình này đảm bảo chuẩn 100% tương thích phần cứng, cân bằng giữa CPU và GPU, không bị nghẽn cổ chai và đáp ứng mượt mà ở mức thiết lập đồ họa cao.",
+        "",
+        "👉 Bạn có thể bấm nút **Áp Dụng Cấu Hình Này Vào PC Builder** ngay bên dưới để mở toàn quyền lắp ráp và kiểm tra tương thích chi tiết!"
+      ].join("\n");
+    }
+
+    response.reply = `${headerLead}\n\n${buildIntro}`;
     return response;
   }
 
+  // 4. TƯ VẤN LAPTOP
   if (intent === "laptop_advice") {
     const top = pickTopProducts(products, useCase, message, 3);
-    if (top.length === 0) {
-      response.reply = "Hiện hệ thống chưa có laptop phù hợp với yêu cầu này. Bạn có thể tăng ngân sách, đổi tiêu chí hoặc xem nhóm PC/laptop khác.";
-      return response;
-    }
     response.products = buildProductCardPayload(top);
-    response.reply = [
-      `Mình tìm thấy **${top.length} laptop thật trong hệ thống** phù hợp nhu cầu **${useCase}**${budget ? ` dưới khoảng **${budget.toLocaleString("vi-VN")}đ**` : ""}:`,
-      "",
-      ...top.map((product, index) => `${index + 1}. **${product.name}** - ${Number(product.price).toLocaleString("vi-VN")}đ - tồn kho ${product.stock}\n   Ưu điểm: đúng nhóm nhu cầu, có hàng. Nhược điểm: cần xem chi tiết thông số trước khi chốt.`),
-      "",
-      "Bạn có thể bấm xem chi tiết hoặc thêm vào giỏ ngay trên card sản phẩm bên dưới."
-    ].join("\n");
+
+    const productContext = top.length > 0
+      ? `\n\nDanh sách Laptop hiện có sẵn trong kho PC Mall:\n` +
+        top.map(p => `- ${p.name} | Giá niêm yết: ${Number(p.price).toLocaleString("vi-VN")}đ | Tồn kho: ${p.stock}`).join("\n")
+      : "\n\nHiện tại kho hàng chưa tìm thấy laptop khớp chính xác với tiêu chí này.";
+
+    let llmReply = "";
+    try {
+      const promptToLlm = `${effectiveSystemPrompt}
+Khách hàng đang cần tư vấn mua Laptop: "${message}".
+${productContext}
+
+Yêu cầu trả lời:
+- Tư vấn chi tiết, khách quan, súc tích bằng tiếng Việt theo đúng nhu cầu sử dụng (gaming, học tập, đồ họa, văn phòng).
+- Đánh giá cấu hình (CPU, RAM, GPU, màn hình) của các model có sẵn trong kho PC Mall ở trên (nếu có).
+- Hướng dẫn khách hàng chọn máy phù hợp nhất trong ngân sách.
+- Tuyệt đối trung thực với giá và tồn kho thực tế. Định dạng Markdown trực quan.`;
+
+      const llmRes = await createResponsesRequest(promptToLlm, message);
+      if (llmRes && llmRes.output_text) {
+        llmReply = llmRes.output_text;
+      }
+    } catch (err) {
+      console.warn("[AI Service] LLM laptop_advice error:", err.message);
+    }
+
+    if (!llmReply) {
+      llmReply = top.length > 0
+        ? `Chào bạn! Dưới đây là các mẫu Laptop đang sẵn hàng tại PC Mall phù hợp nhất với nhu cầu của bạn:\n\n` +
+          top.map(formatProductLine).join("\n") +
+          `\n\nBạn có thể bấm vào sản phẩm bên dưới để xem chi tiết thông số hoặc đặt mua nhé!`
+        : "Hiện hệ thống chưa có laptop phù hợp với yêu cầu này. Bạn có thể cho mình biết thêm khoảng ngân sách để mình tìm kiếm thêm nhé.";
+    }
+
+    response.reply = llmReply;
     return response;
   }
 
+  // 5. SO SÁNH ĐỐI ĐẦU LINH KIỆN
   if (intent === "comparison") {
-    // Check if user compared two specific sides: sideA vs sideB
     const sides = message.split(/\b(?:vs|và|va|với|voi)\b/i).map(s => normalizeVietnamese(s).trim()).filter(Boolean);
     let matchedProducts = [];
 
@@ -1746,88 +2041,113 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
     }
 
     const top = matchedProducts.length >= 2
-      ? matchedProducts.slice(0, 4)
-      : pickTopProducts(products, useCase, message, 4);
-
-    if (top.length === 0) {
-      response.reply = "Hiện hệ thống chưa có sản phẩm phù hợp để so sánh theo yêu cầu này. Bạn hãy gửi tên sản phẩm cụ thể hơn hoặc đổi tiêu chí.";
-      return response;
-    }
+      ? matchedProducts.slice(0, 2)
+      : pickTopProducts(products, useCase, message, 2);
 
     response.products = buildProductCardPayload(top);
 
-    const comparisonItems = top.map((p, idx) => {
-      const vram = attr(p, ["vram", "dung lượng", "memory"]);
-      const tdp = attr(p, ["tdp", "công suất", "power"]);
-      const socket = extractSocket(p);
-      const ddr = extractRamType(p);
-      const specs = [
-        socket ? `Socket: ${socket}` : "",
-        ddr ? `Chuẩn: ${ddr}` : "",
-        vram ? `VRAM: ${vram}` : "",
-        tdp ? `TDP: ${tdp}` : ""
-      ].filter(Boolean).join(" • ");
+    const productContext = top.length > 0
+      ? `\n\nSản phẩm thực tế có sẵn tại kho PC Mall để đối chiếu:\n` +
+        top.map(p => `- ${p.name} | Giá: ${Number(p.price).toLocaleString("vi-VN")}đ | Tồn kho: ${p.stock}`).join("\n")
+      : "";
 
-      return `${idx + 1}. **${p.name}**\n   - Giá niêm yết: **${Number(p.price).toLocaleString("vi-VN")}đ** (Còn ${p.stock} sản phẩm)\n   ${specs ? `- Thông số chính: ${specs}\n   ` : ""}- Đánh giá: Linh kiện chính hãng phân phối tại PC Mall, đáp ứng tốt cho tác vụ ${useCase}.`;
-    });
+    let llmReply = "";
+    try {
+      const promptToLlm = `${effectiveSystemPrompt}
+Khách hàng muốn so sánh linh kiện/thiết bị phần cứng PC: "${message}".
+${productContext}
 
-    response.reply = [
-      "🔍 **Bảng Phân Tích & So Sánh Linh Kiện Thực Tế (Ground-Truth DB PC Mall):**",
-      "",
-      ...comparisonItems,
-      "",
-      "⚖️ **Tư vấn kỹ thuật từ AI:**",
-      "- **Hiệu năng & Nghẽn cổ chai:** Cân nhắc kết hợp CPU/GPU đồng đều để tránh nghẽn dưới 10% ở độ phân giải mục tiêu.",
-      "- **Điện năng & Tản nhiệt:** Chú ý công suất tiêu thụ để chọn bộ nguồn (PSU) và tản nhiệt có công suất tương ứng.",
-      "- Bạn có thể bấm **So sánh** trên card sản phẩm để mở giao diện so sánh đối đầu, hoặc bấm **PC Builder** để gắn trực tiếp vào cấu hình."
-    ].join("\n");
+Yêu cầu trả lời:
+- Phân tích và so sánh đối đầu chi tiết, khách quan giữa các lựa chọn (hiệu năng, kiến trúc, mức tiêu thụ điện, công nghệ hỗ trợ, hiệu năng trên giá thành).
+- Trình bày dạng bảng so sánh Markdown hoặc tóm tắt điểm mạnh / điểm yếu của từng bên.
+- Đưa ra lời khuyên cụ thể theo từng nhóm nhu cầu (gaming, làm việc, ngân sách tối ưu).
+- Nếu có sản phẩm liên quan trong kho PC Mall ở trên, liên hệ trực tiếp với giá bán và tình trạng sẵn hàng. Không bịa đặt giá.`;
+
+      const llmRes = await createResponsesRequest(promptToLlm, message);
+      if (llmRes && llmRes.output_text) {
+        llmReply = llmRes.output_text;
+      }
+    } catch (err) {
+      console.warn("[AI Service] LLM comparison error:", err.message);
+    }
+
+    if (!llmReply) {
+      const comparisonItems = top.map((p, idx) => {
+        return `${idx + 1}. **${p.name}** - Giá: **${Number(p.price).toLocaleString("vi-VN")}đ** (Còn ${p.stock} sản phẩm)`;
+      });
+      llmReply = [
+        "🔍 **So Sánh Linh Kiện Dựa Trên Dữ Liệu Thực Tế PC Mall:**",
+        "",
+        ...comparisonItems,
+        "",
+        "⚖️ **Lời khuyên:** Bạn có thể bấm nút **So sánh** trên từng card sản phẩm bên dưới để xem đối chiếu chi tiết thông số kỹ thuật!"
+      ].join("\n");
+    }
+
+    response.reply = llmReply;
     return response;
   }
 
-  if (intent === "product_advice" || requested.categoryKey) {
-    const top = pickTopProducts(products, useCase, message, 6);
-    if (top.length === 0) {
-      const catText = requested.label ? `nhóm **${requested.label}**` : "linh kiện này";
-      const priceText = budget ? ` dưới **${budget.toLocaleString("vi-VN")}đ**` : "";
-      response.reply = `Hiện hệ thống chưa tìm thấy sản phẩm ${catText}${priceText} phù hợp trong database PC Mall. Bạn có thể tăng ngân sách hoặc xem linh kiện khác.`;
-      return response;
-    }
+  // 6. TƯ VẤN SẢN PHẨM / KIỂM TRA HÀNG TỒN KHO TRỰC TIẾP
+  if (intent === "product_advice") {
+    const top = pickTopProducts(products, useCase, message, 3);
     response.products = buildProductCardPayload(top);
 
-    const titleText = requested.label
-      ? `Mình tìm thấy **${top.length} ${requested.label}**${budget ? ` dưới **${budget.toLocaleString("vi-VN")}đ**` : ""} đang có trong kho tại PC Mall:`
-      : `Dựa trên dữ liệu thật trong database PC Mall, mình tìm thấy **${top.length} sản phẩm** phù hợp nhu cầu **${useCase}**:`;
+    const productContext = top.length > 0
+      ? `\n\nDanh sách sản phẩm liên quan đang có sẵn trong kho PC Mall:\n` +
+        top.map(p => `- ${p.name} | Giá: ${Number(p.price).toLocaleString("vi-VN")}đ | Tồn kho: ${p.stock}`).join("\n")
+      : "\n\nHiện tại kho hàng chưa tìm thấy sản phẩm khớp chính xác với tiêu chí này.";
 
-    // Advisory text per category — kết hợp tư vấn + đề xuất
-    const categoryKey = requested.categoryKey;
-    const advisoryMap = {
-      cpu: "💡 **Khi chọn CPU:** Chú ý socket tương thích Mainboard (LGA1700 cho Intel, AM5/AM4 cho AMD). CPU \"K\" có thể ép xung nhưng cần tản nhiệt tốt hơn. Nếu build mới nên ưu tiên thế hệ 13th/14th Intel hoặc Ryzen 7000.",
-      ram: "💡 **Khi chọn RAM:** Kiểm tra chuẩn DDR4/DDR5 và tốc độ Bus Mainboard hỗ trợ. Kit 2 thanh (2×8GB/2×16GB) chạy Dual Channel nhanh hơn 1 thanh cùng dung lượng.",
-      gpu: "💡 **Khi chọn GPU:** Xem VRAM (≥8GB cho gaming 1440p), yêu cầu nguồn PSU tương thích. RTX cho Ray Tracing và DLSS 3; RX AMD tốt giá trị tầm trung.",
-      cooling: "💡 **Khi chọn Tản Nhiệt:** AIO 360mm > 240mm > tản khí về giải nhiệt. Kiểm tra socket CPU tương thích. Với CPU TDP ≥125W nên dùng AIO hoặc tản khí tower cao cấp.",
-      mainboard: "💡 **Khi chọn Mainboard:** Chipset B-series (B760/B650) phù hợp phổ thông, Z/X-series cho ép xung. Kiểm tra số khe M.2 NVMe và slot RAM DDR4/DDR5.",
-      storage: "💡 **Khi chọn SSD:** NVMe PCIe Gen4 nhanh hơn Gen3 gấp đôi. Ưu tiên 1TB cho game. Thương hiệu Samsung, WD Black, Crucial ổn định và nhiều đánh giá thực tế.",
-      psu: "💡 **Khi chọn Nguồn:** Công suất thực phải ≥ tổng TDP CPU+GPU+10-20% dự phòng. Ưu tiên 80 Plus Gold trở lên. Full Modular tiện gọn dây hơn.",
-      case: "💡 **Khi chọn Vỏ Case:** Kiểm tra chiều dài VGA tối đa và hỗ trợ chiều cao tản nhiệt. Vỏ Mesh airflow tốt hơn vỏ kín. Kích thước ATX/mATX/ITX phải khớp Mainboard."
-    };
-    const advisoryText = advisoryMap[categoryKey] || "";
+    let llmReply = "";
+    try {
+      const promptToLlm = `${effectiveSystemPrompt}
+Khách hàng đang tìm hiểu và muốn tư vấn về sản phẩm/linh kiện tại PC Mall: "${message}".
+${productContext}
 
-    response.reply = [
-      titleText,
-      "",
-      ...top.map(formatProductLine),
-      "",
-      "Giá và tồn kho trên lấy trực tiếp từ SKU thật trong hệ thống — mình không tự bịa.",
-      ...(advisoryText ? ["", advisoryText] : []),
-      "",
-      "Bạn muốn lọc tiếp theo ngân sách hoặc thương hiệu nào không?"
-    ].join("\n");
+Yêu cầu trả lời:
+- Trả lời thân thiện, súc tích, mang tính chuyên môn cao bằng tiếng Việt.
+- Giới thiệu và tư vấn các ưu điểm kỹ thuật nổi bật của những sản phẩm sẵn có trong kho ở trên (nếu có).
+- Hướng dẫn lưu ý kỹ thuật khi lắp đặt hoặc chọn lựa (ví dụ bus RAM, socket CPU, công suất nguồn...).
+- Tuyệt đối trung thực với giá niêm yết và tồn kho thực tế ở trên.
+- Mời khách hàng chọn sản phẩm để thêm vào giỏ hàng hoặc đưa vào PC Builder để kiểm tra tương thích. Định dạng Markdown rõ ràng.`;
+
+      const llmRes = await createResponsesRequest(promptToLlm, message);
+      if (llmRes && llmRes.output_text) {
+        llmReply = llmRes.output_text;
+      }
+    } catch (err) {
+      console.warn("[AI Service] LLM product_advice error:", err.message);
+    }
+
+    if (!llmReply) {
+      llmReply = top.length > 0
+        ? `Chào bạn! PC Mall hiện đang có sẵn các sản phẩm phù hợp với nhu cầu của bạn:\n\n` +
+          top.map(formatProductLine).join("\n") +
+          `\n\nBạn có thể bấm vào card sản phẩm bên dưới để xem chi tiết hoặc thêm vào cấu hình PC Builder.`
+        : `Hiện tại PC Mall chưa tìm thấy sản phẩm khớp chính xác với yêu cầu của bạn. Bạn có thể cho mình biết thêm tầm ngân sách hoặc thương hiệu mong muốn để mình hỗ trợ nhé!`;
+    }
+
+    response.reply = llmReply;
     return response;
+  }
+
+  // 7. CÂU HỎI MỞ / KHÔNG RÕ RÀNG NHƯNG HỢP LỆ VỀ MẶT CÔNG NGHỆ
+  try {
+    const promptToLlm = `${effectiveSystemPrompt}
+Khách hàng đặt câu hỏi liên quan đến PC/công nghệ: "${message}".
+Hãy trả lời một cách chuyên nghiệp, chính xác và nhiệt tình bằng tiếng Việt, hướng dẫn khách hàng nếu cần tư vấn sâu hơn.`;
+    const llmRes = await createResponsesRequest(promptToLlm, message);
+    if (llmRes && llmRes.output_text) {
+      response.reply = llmRes.output_text;
+      return response;
+    }
+  } catch (err) {
+    console.warn("[AI Service] Fallback LLM error:", err.message);
   }
 
   response.actions = [];
   response.products = [];
-  response.reply = "Mình chưa xác định được nhu cầu mua hàng cụ thể nên chưa hiển thị sản phẩm. Bạn có thể nói rõ hơn ngân sách, danh mục linh kiện hoặc sản phẩm muốn so sánh.";
+  response.reply = "Mình là Trợ lý AI PC Mall. Bạn có thể hỏi về cấu hình PC theo ngân sách, tư vấn game cần chơi, so sánh linh kiện hoặc chính sách mua hàng!";
   return response;
 }
 
@@ -1951,4 +2271,5 @@ module.exports.askTechnicalAdvisor = askDatabaseGroundedAdvisor;
 module.exports.saveUserAiChat = saveUserAiChat;
 module.exports.getUserAiChatHistory = getUserAiChatHistory;
 module.exports.clearUserAiChatHistory = clearUserAiChatHistory;
+module.exports.getSynthesizedBuildByBudget = getSynthesizedBuildByBudget;
 

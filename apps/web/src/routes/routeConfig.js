@@ -50,6 +50,7 @@ export const routeConfig = {
     skus: "/admin/skus",
     compatibilityRules: "/admin/compatibility-rules",
     users: "/admin/users",
-    paymentApproval: "/admin/payment-approval"
+    paymentApproval: "/admin/payment-approval",
+    aiConfig: "/admin/ai-config"
   }
 };

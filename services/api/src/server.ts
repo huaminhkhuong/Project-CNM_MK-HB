@@ -5,6 +5,8 @@ import { initSocketIO } from "./socket/socket.service";
 import { verifyEmailConnection } from "./services/email.service";
 import pcBuilderService from "./modules/pc-builder/pc-builder.service";
 
+(global as any).pcBuilderService = pcBuilderService;
+
 const app = createApp();
 const httpServer = createServer(app);
 

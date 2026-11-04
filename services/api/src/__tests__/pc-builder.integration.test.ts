@@ -220,8 +220,8 @@ describe("AI PC Builder Core & Guardrail Integration Test Suite", () => {
         context: null
       });
 
-      assert.equal(res.intent, "off_topic_blocked");
-      assert.equal(res.model, "pc-mall-guardrail-filter");
+      assert.ok(res.intent === "rule_blocked" || res.intent === "off_topic_blocked");
+      assert.ok(res.model === "system-guardrail-filter" || res.model === "pc-mall-guardrail-filter");
       assert.ok(res.reply.includes("PC Mall"));
       assert.equal(res.isDatabaseGrounded, false);
     });

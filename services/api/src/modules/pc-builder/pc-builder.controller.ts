@@ -91,6 +91,18 @@ export const streamAiSuggestBuild = async (req: Request, res: Response) => {
   };
 
   try {
+    // TẦNG 1: Kiểm tra quy tắc lọc đầu vào BUILDER_SUGGEST
+    const { aiRuleService } = require("../ai/ai-rule.service");
+    const evalResult = aiRuleService.evaluateInput("BUILDER_SUGGEST", "", { budget: req.body?.budget });
+    if (evalResult.handled && evalResult.action === "BLOCK") {
+      sendEvent({
+        type: "error",
+        error: evalResult.reply || "Yêu cầu cấu hình không hợp lệ."
+      });
+      res.end();
+      return;
+    }
+
     await pcBuilderService.streamAiSuggestBuild(
       req.body || {},
       (chunk: string) => sendEvent({ type: "chunk", text: chunk }),
@@ -137,6 +149,30 @@ export const streamAiChatBuild = async (req: Request, res: Response) => {
   };
 
   try {
+    // TẦNG 1: Kiểm tra quy tắc lọc đầu vào BUILDER_AUDIT_CHAT
+    const { aiRuleService } = require("../ai/ai-rule.service");
+    const evalResult = aiRuleService.evaluateInput("BUILDER_AUDIT_CHAT", req.body?.userMessage || "", req.body || {});
+    if (evalResult.handled && evalResult.action === "DIRECT_REPLY") {
+      sendEvent({
+        type: "done",
+        result: {
+          reply: evalResult.reply,
+          replacements: [],
+          model: "system-local-faq"
+        }
+      });
+      res.end();
+      return;
+    }
+    if (evalResult.handled && evalResult.action === "BLOCK") {
+      sendEvent({
+        type: "error",
+        error: evalResult.reply || "Yêu cầu không thuộc phạm vi giám định."
+      });
+      res.end();
+      return;
+    }
+
     await pcBuilderService.streamAiChatBuild(
       req.body || {},
       (chunk: string) => sendEvent({ type: "chunk", text: chunk }),

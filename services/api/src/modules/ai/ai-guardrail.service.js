@@ -48,35 +48,73 @@ const PROHIBITED_PATTERNS = [
 ];
 
 // Danh sách từ khóa hợp lệ trong domain Máy Tính / Phụ Kiện / Ecommerce PC Mall
-// Lưu ý: Dùng word boundary hoặc từ có nghĩa để tránh match substring ngẫu nhiên (ví dụ 'thi' chứa 'hi')
+// Bao gồm: Thương hiệu, Công nghệ hiện đại (DDR4/5, Socket, Bus), Loại linh kiện, Nơi sản xuất & Xuất xứ
 const DOMAIN_WHITELIST_KEYWORDS = [
-  // Phần cứng & Linh kiện
-  "pc", "may tinh", "laptop", "cpu", "mainboard", "main", "ram", "gpu", "vga", "card",
-  "ssd", "hdd", "o cung", "nvme", "sata", "psu", "nguon", "case", "vo may", "cooling",
-  "tan nhiet", "fan", "quat", "aio", "man hinh", "monitor", "ban phim", "chuot", "keyboard",
-  "mouse", "tai nghe", "headphone", "gear", "loa", "webcam", "micro", "thermal", "keo tan nhiet",
+  // 1. Phần cứng & Loại linh kiện (Accented & Unaccented)
+  "pc", "may tinh", "laptop", "cpu", "chip", "chipset", "vi xu ly", "bo xu ly", "phan cung",
+  "mainboard", "main", "bo mach", "bo mach chu", "ram", "gpu", "vga", "card", "card man hinh", "card do hoa",
+  "ssd", "hdd", "o cung", "o the ran", "o dia", "nvme", "sata", "sata 3", "m.2",
+  "psu", "nguon", "nguon may tinh", "case", "vo may", "vo case", "thung may",
+  "cooling", "tan nhiet", "tan khi", "tan nuoc", "aio", "tan thap", "dual tower",
+  "fan", "quat", "quat case", "thermal", "keo tan nhiet",
+  "man hinh", "monitor", "ban phim", "chuot", "keyboard", "mouse", "tai nghe", "headphone", "gear", "loa", "webcam", "micro",
 
-  // Thương hiệu & Dòng chip nổi tiếng
-  "intel", "amd", "nvidia", "asus", "gigabyte", "msi", "asrock", "corsair", "kingston",
-  "western digital", "wd", "seagate", "samsung", "lexar", "teamgroup", "thermalright",
-  "deepcool", "nzxt", "coolermaster", "ryzen", "core i", "core ultra", "rtx", "gtx", "radeon",
-  "blackwell", "ddr4", "ddr5", "lga", "am4", "am5",
+  // 2. Thương hiệu toàn cầu (Brands)
+  "intel", "amd", "nvidia", "asus", "gigabyte", "msi", "asrock", "colorful", "galax", "zotac",
+  "palit", "inno3d", "sapphire", "powercolor", "xfx", "corsair", "kingston", "gskill", "g.skill",
+  "teamgroup", "patriot", "samsung", "western digital", "wd", "seagate", "crucial", "klevv", "pny",
+  "lexar", "adata", "transcend", "dahua", "hikvision", "deepcool", "thermalright", "cooler master", "coolermaster",
+  "nzxt", "lian li", "antec", "montech", "xigmatek", "mik", "segotep", "seasonic", "super flower", "fsp",
+  "be quiet", "bequiet", "silverstone", "id-cooling", "idcooling", "arctic", "noctua",
+  "dell", "hp", "lenovo", "acer", "lg", "viewsonic", "aoc", "philips", "benq", "logitech", "razer", "steelseries",
 
-  // Tác vụ công nghệ & Nhu cầu
+  // 3. Công nghệ hiện đại, Thế hệ & Thông số kỹ thuật (DDR4/5, Socket, Kiến trúc, Bus, VRAM, GPU)
+  "ddr3", "ddr4", "ddr5", "lpddr4", "lpddr5", "bus", "3200", "3600", "4800", "5200", "5600", "6000", "6400", "7200",
+  "xmp", "expo", "cl16", "cl18", "cl30", "cl32", "cl36", "dual channel", "quad channel",
+  "pcie", "pcie 3.0", "pcie 4.0", "pcie 5.0", "gen 3", "gen 4", "gen 5",
+  "atx 3.0", "atx 3.1", "12vhpwr", "12v-2x6", "80 plus", "bronze", "silver", "gold", "platinum", "titanium",
+  "full modular", "semi modular", "non modular",
+  "lga 1700", "lga 1851", "lga 1200", "socket 1700", "socket 1851", "am4", "am5", "socket am4", "socket am5",
+  "zen 2", "zen 3", "zen 4", "zen 5", "raptor lake", "alder lake", "arrow lake", "meteor lake", "lunar lake",
+  "core ultra", "ultra 5", "ultra 7", "ultra 9", "245k", "250k", "250kf", "265k", "285k",
+  "core i3", "core i5", "core i7", "core i9", "12100", "12400", "12600", "13100", "13400", "13600", "13700", "13900", "14100", "14400", "14600", "14700", "14900",
+  "ryzen 3", "ryzen 5", "ryzen 7", "ryzen 9", "3200g", "3400g", "5600", "5600x", "5700x", "5800x3d", "7500f", "7600", "7700", "7800x3d", "9600x", "9700x", "9800x3d", "9900x", "9950x", "x3d",
+  "rtx", "gtx", "radeon", "blackwell", "ada lovelace",
+  "rtx 3050", "3060", "3060 ti", "3070", "3070 ti", "3080", "3090",
+  "rtx 4060", "4060 ti", "4070", "4070 super", "4070 ti", "4070 ti super", "4080", "4080 super", "4090",
+  "rtx 5070", "5080", "5090", "gtx 1650", "1660",
+  "rx 6600", "rx 7600", "rx 7700 xt", "rx 7800 xt", "rx 7900 xt", "rx 7900 xtx",
+  "arc a380", "arc a580", "arc a750", "arc a770", "battlemage",
+  "dlss", "dlss 3", "dlss 3.5", "fsr", "fsr 3", "xess", "ray tracing", "path tracing", "frame generation",
+  "vram", "8gb", "12gb", "16gb", "24gb", "gddr6", "gddr6x", "tdp", "65w", "105w", "125w", "250w",
+  "vrm", "heatsink", "argb", "rgb", "pwm", "120mm", "140mm",
+  "wifi 6", "wifi 6e", "wifi 7", "bluetooth", "2.5gbe", "10gbe", "thunderbolt", "usb4", "type-c", "displayport", "hdmi 2.1",
+  "oled", "qd-oled", "mini led", "ips", "va", "144hz", "165hz", "180hz", "240hz", "360hz", "g-sync", "freesync", "hdr",
+
+  // 4. Xuất xứ, Nơi sản xuất & Phân phối (Origin / Manufacturing / Warranty)
+  "chinh hang", "hang cong ty", "nguyen seal", "full box", "tray", "box", "xach tay", "nhap khau",
+  "like new", "troi bao hanh", "xuat xu", "noi san xuat", "san xuat tai", "made in",
+  "taiwan", "dai loan", "china", "trung quoc", "vietnam", "viet nam", "korea", "han quoc", "usa", "my",
+  "malaysia", "philippines", "costa rica", "synnex fpt", "fpt", "vien son", "vinh xuan", "mai hoang", "khai thien", "dgw", "digiworld",
+
+  // 5. Tác vụ công nghệ & Nhu cầu (Gaming, Đồ họa, Lập trình, Văn phòng)
   "build", "rap may", "lap may", "cau hinh", "choi game", "gaming", "esport", "aaa",
-  "fps", "valorant", "csgo", "cs2", "lol", "lien minh", "genshin", "wukong", "cyberpunk",
-  "gta", "render", "do hoa", "blender", "premiere", "photoshop", "autocad", "3ds max",
-  "lap trinh", "code", "dev", "docker", "may ao", "vm", "machine learning", "deep learning",
+  "fps", "valorant", "csgo", "cs2", "lol", "lien minh", "dota", "dota 2", "genshin", "wukong", "cyberpunk",
+  "gta", "fifa", "fc online", "fo4", "pubg", "free fire", "roblox", "minecraft", "apex", "warzone", "elden ring",
+  "render", "do hoa", "blender", "premiere", "photoshop", "autocad", "3ds max",
+  "lap trinh", "code", "dev", "docker", "may ao", "vm", "machine learning", "deep learning", "ai",
   "van phong", "hoc tap", "word", "excel", "sinh vien",
 
-  // Khái niệm kỹ thuật & So sánh
-  "nghen co chai", "bottleneck", "overclock", "ep xung", "vrm", "tdp", "watt", "cong suat",
-  "socket", "bus", "cl", "timing", "pcie", "m.2", "clearance", "kich thuoc", "atx", "matx",
-  "itx", "airflow", "so sanh", "nang cap", "tu van", "lua chon", "ngan sach", "trieu",
+  // 6. Khái niệm kỹ thuật & So sánh
+  "nghen co chai", "bottleneck", "overclock", "ep xung", "watt", "cong suat",
+  "socket", "bus", "timing", "clearance", "kich thuoc", "atx", "matx", "itx", "airflow",
+  "so sanh", "nang cap", "tu van", "lua chon", "ngan sach", "trieu",
+  "toi tan", "manh nhat", "tot nhat", "moi nhat", "hien dai", "hien dai nhat", "tien tien", "xin nhat", "khung nhat", "dinh nhat",
+  "flagship", "linh kien",
 
-  // Giao dịch & Hỗ trợ khách hàng PC Mall
+  // 7. Giao dịch & Dịch vụ PC Mall
   "bao hanh", "doi tra", "giao hang", "ship", "don hang", "thanh toan", "vnpay", "cod",
-  "gio hang", "khuyen mai", "giam gia", "mua hang", "pc mall", "cua hang"
+  "gio hang", "khuyen mai", "giam gia", "mua hang", "pc mall", "cua hang", "showroom"
 ];
 
 function checkWordMatch(text, keyword) {

@@ -2,8 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { clearAiChatHistory, getAiChatHistory, sendAiChat } from "../../services/ai.service";
-import { addItemToCart } from "../../services/cart.service";
-import { createChatSession, getChatSession, sendChatMessage } from "../../services/chat.service";
 import { useAuth } from "../../hooks/useAuth";
 import { routeConfig } from "../../routes/routeConfig";
 import { addStoredCompareId, buildCompareUrl } from "../../utils/compare";
@@ -14,26 +12,16 @@ import {
   setGuestAiChatMessages
 } from "../../utils/guestStorage";
 
-const LIVE_SESSION_KEY = "pcmall_sales_consultation_session";
-const AI_HISTORY_KEY_VERSION = "pcmall_ai_chat_utf8_v2";
+const AI_HISTORY_KEY_VERSION = "pcmall_ai_chat_v3_clean";
 
 const QUICK_ACTIONS = [
-  { label: "Build PC theo ngân sách", prompt: "Build PC 15 triệu chơi game", icon: "🧩" },
-  { label: "Tư vấn laptop học tập", prompt: "Laptop học tập dưới 15 triệu", icon: "💻" },
-  { label: "So sánh linh kiện", prompt: "So sánh RTX 4060 và RTX 4070", icon: "⚖️" },
-  { label: "Kiểm tra tương thích", prompt: "Kiểm tra tương thích CPU, mainboard, RAM và PSU cho cấu hình gaming", icon: "✅" },
-  { label: "Hỏi bảo hành", prompt: "Chính sách bảo hành PC Mall như thế nào?", icon: "🛡️" },
-  { label: "Gặp nhân viên bán hàng", prompt: "", icon: "🎧", live: true }
+  { label: "Build PC chơi Dota 2", prompt: "Tôi muốn chơi Dota 2 cần build PC như thế nào?", icon: "🎮" },
+  { label: "Build PC 15 triệu gaming", prompt: "Tư vấn cấu hình PC gaming khoảng 15 triệu", icon: "🧩" },
+  { label: "CPU Intel Core Ultra mới", prompt: "CPU nào hiện tại đang tối tân nhất của Intel?", icon: "🚀" },
+  { label: "AMD Ryzen 9000 Zen 5", prompt: "CPU AMD nào đang hiện đại và mạnh nhất hiện nay?", icon: "💎" },
+  { label: "RAM DDR4 vs DDR5", prompt: "Nên chọn RAM DDR4 hay DDR5?", icon: "⚡" },
+  { label: "So sánh RTX 4060 vs 4070", prompt: "So sánh RTX 4060 và RTX 4070", icon: "⚖️" }
 ];
-
-const STATUS_META = {
-  ai: { label: "AI đang tư vấn", detail: "Phản hồi tự động dựa trên dữ liệu PC Mall" },
-  waiting_staff: { label: "Đã gửi yêu cầu cho nhân viên", detail: "Nhân viên bán hàng sẽ phản hồi sớm nhất" },
-  open: { label: "Đã gửi yêu cầu cho nhân viên", detail: "Nhân viên bán hàng sẽ phản hồi sớm nhất" },
-  assigned: { label: "Nhân viên đang phản hồi", detail: "Bạn đang chat trực tiếp với nhân viên bán hàng" },
-  waiting_customer: { label: "Nhân viên đang chờ bạn", detail: "Bạn có thể phản hồi ngay trong khung chat" },
-  resolved: { label: "Đã giải quyết", detail: "Phiên tư vấn đã kết thúc" }
-};
 
 function createMessage(role, content, metadata = {}) {
   return {
@@ -43,7 +31,9 @@ function createMessage(role, content, metadata = {}) {
     products: metadata.products || [],
     build: metadata.build || null,
     intent: metadata.intent || "",
-    handoffSuggested: Boolean(metadata.handoffSuggested),
+    model: metadata.model || "",
+    ruleName: metadata.ruleName || "",
+    hitType: metadata.hitType || "",
     createdAt: new Date().toISOString()
   };
 }
@@ -74,11 +64,6 @@ function renderContent(content) {
   return String(content || "")
     .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
     .replace(/\n/g, "<br/>");
-}
-
-function getSessionStatus(session) {
-  if (!session) return STATUS_META.ai;
-  return STATUS_META[session.status] || STATUS_META.waiting_staff;
 }
 
 function getBuildComponents(build) {
@@ -113,54 +98,39 @@ function getBuildComponents(build) {
       stock: variant?.stock || variant?.stock_quantity || product?.stock || "",
       imageUrl: product?.imageUrl || product?.image_url || item?.imageUrl || "",
       slug: product?.slug || item?.slug || "",
-      brandName: product?.brandName || item?.brandName || "",
-      categoryName: product?.categoryName || item?.categoryName || ""
+      brandName: product?.brand_name || product?.brandName || "",
+      categoryName: product?.category_name || product?.categoryName || ""
     };
   });
 }
 
-function mapLiveMessages(session) {
-  return (session?.messages || []).map((message) => ({
-    id: message.id,
-    role: message.sender === "customer" ? "user" : message.sender === "system" ? "system" : "staff",
-    content: message.text,
-    products: [],
-    build: message.buildData || null,
-    createdAt: message.timestamp
-  }));
-}
-
 export function AiChatPage() {
   const navigate = useNavigate();
-  const { isAuthenticated, authState } = useAuth();
-  const textareaRef = useRef(null);
-  const chatMessagesRef = useRef(null);
-  const shouldStickToBottomRef = useRef(false);
-  const didMountRef = useRef(false);
-  const [mode, setMode] = useState("ai");
+  const { user, isAuthenticated } = useAuth();
+
   const [aiMessages, setAiMessages] = useState(() => {
-    if (localStorage.getItem(AI_HISTORY_KEY_VERSION) !== "1") {
-      clearGuestAiChatMessages();
-      localStorage.setItem(AI_HISTORY_KEY_VERSION, "1");
+    try {
+      const savedVersion = localStorage.getItem("pcmall_ai_chat_ver");
+      if (savedVersion !== AI_HISTORY_KEY_VERSION) {
+        localStorage.removeItem("pcmall_ai_chat_guest_messages");
+        localStorage.setItem("pcmall_ai_chat_ver", AI_HISTORY_KEY_VERSION);
+        return [];
+      }
+      return getGuestAiChatMessages();
+    } catch {
+      return [];
     }
-    return getGuestAiChatMessages();
   });
-  const [humanMessages, setHumanMessages] = useState([]);
+
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
-  const [liveSessionId, setLiveSessionId] = useState(() => localStorage.getItem(LIVE_SESSION_KEY) || "");
-  const [liveSession, setLiveSession] = useState(null);
-  const [actionProductId, setActionProductId] = useState(null);
-  const [loadingBuildCart, setLoadingBuildCart] = useState(false);
 
-  const canSend = useMemo(() => String(question || "").trim().length > 0 && !loading, [loading, question]);
-  const isHumanMode = mode === "human";
-  const visibleMessages = isHumanMode ? humanMessages : aiMessages;
-  const chatStatus = isHumanMode ? getSessionStatus(liveSession) : STATUS_META.ai;
-  const isGuestUser = !isAuthenticated;
-  const customerName = authState?.user?.fullName || authState?.user?.email || "Khách vãng lai";
-  const customerAvatarLabel = isGuestUser ? "KH" : getAvatarLabel(authState?.user, "KH");
+  const chatMessagesRef = useRef(null);
+  const textareaRef = useRef(null);
+
+  const customerAvatarLabel = useMemo(() => getAvatarLabel(user, "KH"), [user]);
+  const canSend = Boolean(question.trim()) && !loading;
 
   useEffect(() => {
     setGuestAiChatMessages(aiMessages);
@@ -172,18 +142,17 @@ export function AiChatPage() {
 
     async function loadDbHistory() {
       try {
-        const response = await getAiChatHistory(30);
-        const data = normalizeApiData(response);
-        const dbMsgs = Array.isArray(data?.messages) ? data.messages : [];
-        if (!isCancelled && dbMsgs.length > 0) {
-          const mapped = dbMsgs.map((m) => ({
-            id: m.id || `${m.role}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            role: m.role,
-            content: m.content,
+        const historyRes = await getAiChatHistory();
+        const data = historyRes?.data?.data || historyRes?.data || [];
+        if (!isCancelled && Array.isArray(data) && data.length > 0) {
+          const mapped = data.map((m) => ({
+            id: m.id || `db-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            role: m.sender === "user" ? "user" : "assistant",
+            content: m.message || "",
             products: m.products || [],
             build: m.build || null,
             intent: m.intent || "",
-            handoffSuggested: Boolean(m.handoffSuggested),
+            model: m.model || "",
             createdAt: m.created_at || m.createdAt || new Date().toISOString()
           }));
           setAiMessages(mapped);
@@ -199,61 +168,20 @@ export function AiChatPage() {
     };
   }, [isAuthenticated]);
 
+  // Tự động cuộn mượt xuống đáy khung chat mỗi khi có tin nhắn mới
   useEffect(() => {
-    if (!liveSessionId) {
-      localStorage.removeItem(LIVE_SESSION_KEY);
-      setLiveSession(null);
-      return undefined;
-    }
-
-    localStorage.setItem(LIVE_SESSION_KEY, liveSessionId);
-
-    async function poll() {
-      try {
-        const response = await getChatSession(liveSessionId);
-        const session = normalizeApiData(response);
-        setLiveSession(session);
-        setHumanMessages(mapLiveMessages(session));
-      } catch {
-        setStatusMessage("Chưa đồng bộ được phiên tư vấn. Tin nhắn của bạn vẫn được giữ trên trình duyệt.");
-      }
-    }
-
-    poll();
-    const intervalId = setInterval(poll, 3000);
-    return () => clearInterval(intervalId);
-  }, [liveSessionId]);
-
-  useEffect(() => {
-    if (!didMountRef.current) {
-      didMountRef.current = true;
-      return;
-    }
-
-    if (!shouldStickToBottomRef.current) return;
     const container = chatMessagesRef.current;
     if (!container) return;
-
-    container.scrollTo({
-      top: container.scrollHeight,
-      behavior: "smooth"
-    });
-    shouldStickToBottomRef.current = false;
-  }, [visibleMessages, loading, statusMessage]);
-
-  function markChatAutoScroll() {
-    const container = chatMessagesRef.current;
-    if (!container) {
-      shouldStickToBottomRef.current = true;
-      return;
-    }
-
-    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    shouldStickToBottomRef.current = distanceFromBottom < 120;
-  }
+    const timer = setTimeout(() => {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: "smooth"
+      });
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [aiMessages, loading]);
 
   async function handleClearChatHistory() {
-    if (!confirm("Xóa lịch sử AI chat trên trình duyệt và rời phiên tư vấn hiện tại?")) return;
     if (isAuthenticated) {
       try {
         await clearAiChatHistory();
@@ -262,93 +190,15 @@ export function AiChatPage() {
       }
     }
     setAiMessages(clearGuestAiChatMessages());
-    setHumanMessages([]);
-    setLiveSessionId("");
-    setLiveSession(null);
-    setMode("ai");
     setStatusMessage("");
-    shouldStickToBottomRef.current = false;
   }
 
-  function switchMode(nextMode) {
-    setMode(nextMode);
-    setStatusMessage("");
-    shouldStickToBottomRef.current = false;
-    textareaRef.current?.focus();
-  }
-
-  async function handleStartLiveChat(initialMessage = "") {
-    try {
-      markChatAutoScroll();
-      setLoading(true);
-      setStatusMessage("");
-      const response = await createChatSession({
-        customerName,
-        initialMessage,
-        conversationType: "SALES_CONSULTATION"
-      });
-      const session = normalizeApiData(response);
-      if (session?.sessionId) {
-        setLiveSessionId(session.sessionId);
-        setLiveSession(session);
-        setHumanMessages(mapLiveMessages(session));
-        setMode("human");
-        setStatusMessage("Yêu cầu tư vấn đã được gửi. Nhân viên bán hàng sẽ phản hồi sớm nhất.");
-      }
-    } catch {
-      setStatusMessage("Yêu cầu tư vấn đã được gửi. Nhân viên bán hàng sẽ phản hồi sớm nhất.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleStartNewLiveChat(initialMessage = "") {
-    setLiveSessionId("");
-    setLiveSession(null);
-    setHumanMessages([]);
-    await handleStartLiveChat(initialMessage);
-  }
-
-  function openOrStartLiveChat(initialMessage = "") {
-    const isResolvedSession = String(liveSession?.status || "").toLowerCase() === "resolved";
-    if (isResolvedSession) {
-      handleStartNewLiveChat(initialMessage);
-      return;
-    }
-    if (liveSessionId) {
-      switchMode("human");
-      return;
-    }
-    handleStartLiveChat(initialMessage);
-  }
-
-  async function handleSubmit(event) {
-    event?.preventDefault();
-    const trimmedQuestion = String(question || "").trim();
+  async function submitQuestion(queryText) {
+    const trimmedQuestion = String(queryText || "").trim();
     if (!trimmedQuestion || loading) return;
 
     const userMessage = createMessage("user", trimmedQuestion);
     setQuestion("");
-    markChatAutoScroll();
-
-    if (isHumanMode && liveSessionId) {
-      if (String(liveSession?.status || "").toLowerCase() === "resolved") {
-        await handleStartNewLiveChat(trimmedQuestion);
-        textareaRef.current?.focus();
-        return;
-      }
-      try {
-        setHumanMessages((prev) => [...prev, userMessage]);
-        await sendChatMessage(liveSessionId, {
-          sender: "customer",
-          text: trimmedQuestion
-        });
-        textareaRef.current?.focus();
-      } catch {
-        setStatusMessage("Tin nhắn chưa gửi được. Bạn thử lại sau ít phút.");
-      }
-      return;
-    }
 
     const nextMessages = [...aiMessages, userMessage];
     try {
@@ -368,10 +218,7 @@ export function AiChatPage() {
       const data = normalizeApiData(response);
       const reply =
         String(data.reply || "").trim() ||
-        "Hiện hệ thống chưa có thông tin phù hợp. Mình có thể chuyển yêu cầu này cho nhân viên bán hàng để hỗ trợ kỹ hơn.";
-      const handoffSuggested =
-        ["unknown"].includes(String(data.intent || "")) ||
-        /nhan vien|nhân viên|chua xac dinh|chưa xác định|chua co san pham|chưa có sản phẩm/i.test(reply);
+        "Hiện mình chưa tìm thấy thông tin phù hợp trong danh mục. Bạn có thể hỏi cụ thể hơn về tầm giá hoặc tên linh kiện nhé!";
 
       setAiMessages((prev) => [
         ...prev,
@@ -379,41 +226,28 @@ export function AiChatPage() {
           products: data.products || [],
           build: data.build || null,
           intent: data.intent || "",
-          handoffSuggested
+          model: data.model || "",
+          ruleName: data.ruleName || "",
+          hitType: data.hitType || ""
         })
       ]);
       textareaRef.current?.focus();
     } catch {
-      setStatusMessage("AI đang phản hồi chậm. Bạn có thể thử lại hoặc gửi yêu cầu cho nhân viên bán hàng.");
+      setStatusMessage("Kênh AI đang phản hồi chậm. Bạn vui lòng thử lại sau ít giây.");
       setQuestion(trimmedQuestion);
     } finally {
       setLoading(false);
     }
   }
 
-  function handleAction(action) {
-    if (action.live) {
-      openOrStartLiveChat(question);
-      return;
-    }
-    setMode("ai");
-    setQuestion(action.prompt);
-    textareaRef.current?.focus();
+  async function handleSubmit(event) {
+    event?.preventDefault();
+    await submitQuestion(question);
   }
 
-  async function handleAddToCart(product) {
-    if (!isAuthenticated) {
-      navigate(routeConfig.public.login);
-      return;
-    }
-    try {
-      setActionProductId(product.id);
-      await addItemToCart({ productId: product.id, quantity: 1 });
-      setStatusMessage("Đã thêm sản phẩm vào giỏ hàng.");
-    } catch {
-      setStatusMessage("Chưa thể thêm sản phẩm vào giỏ hàng. Bạn thử lại sau.");
-    } finally {
-      setActionProductId(null);
+  function handleAction(action) {
+    if (action.prompt) {
+      submitQuestion(action.prompt);
     }
   }
 
@@ -422,27 +256,7 @@ export function AiChatPage() {
     navigate(buildCompareUrl(compareIds));
   }
 
-  function handlePcBuilder(product) {
-    navigate(routeConfig.public.pcBuilder, {
-      state: {
-        loadItem: {
-          id: product.id || product.productId,
-          productId: product.id || product.productId,
-          name: product.name || product.productName,
-          productName: product.name || product.productName,
-          skuId: product.skuId || product.id,
-          price: product.price,
-          componentType: product.componentType || (product.categoryName || "").toLowerCase(),
-          categoryName: product.categoryName,
-          brandName: product.brandName,
-          imageUrl: product.imageUrl,
-          slug: product.slug
-        }
-      }
-    });
-  }
-
-  function handleLoadBuildToBuilder(build) {
+  function handleApplyBuildToBuilder(build) {
     const components = getBuildComponents(build);
     if (components.length === 0) return;
 
@@ -465,675 +279,740 @@ export function AiChatPage() {
     });
   }
 
-  async function handleAddToCartFullBuild(build) {
-    if (!isAuthenticated) {
-      navigate(routeConfig.public.login);
-      return;
-    }
-    const components = getBuildComponents(build);
-    if (components.length === 0) {
-      setStatusMessage("Không tìm thấy linh kiện trong cấu hình để thêm vào giỏ hàng.");
-      return;
-    }
-
-    setLoadingBuildCart(true);
-    setStatusMessage(`Đang thêm ${components.length} linh kiện vào giỏ hàng...`);
-
-    let successCount = 0;
-    let failCount = 0;
-
-    for (const item of components) {
-      try {
-        const pId = item.productId || item.id;
-        const vId = item.skuId && item.skuId !== pId ? item.skuId : undefined;
-        await addItemToCart({
-          productId: pId,
-          variantId: vId,
-          quantity: 1
-        });
-        successCount++;
-      } catch (err) {
-        failCount++;
-      }
-    }
-
-    setLoadingBuildCart(false);
-    if (successCount > 0) {
-      setStatusMessage(`Đã thêm thành công cả dàn PC (${successCount}/${components.length} linh kiện) vào giỏ hàng!`);
-    } else {
-      setStatusMessage("Không thể thêm linh kiện vào giỏ hàng. Bạn vui lòng thử lại sau.");
-    }
-  }
-
   return (
-    <div className="ai-advisor-page">
+    <div className="ai-chat-window-frame">
       <style>{aiChatStyles}</style>
 
-      <section className="ai-consult-hero">
-        <div>
-          <span>AI + Sales Consultation</span>
-          <h1>AI Tư Vấn PC Mall</h1>
-          <p>Tư vấn build PC, laptop, linh kiện, kiểm tra tương thích, bảo hành và thanh toán. Khi cần hỗ trợ sâu hơn, bạn có thể chuyển tiếp cho nhân viên bán hàng ngay trong cùng luồng chat.</p>
-        </div>
-        <div className="ai-status-card">
-          <strong>{chatStatus.label}</strong>
-          <small>{chatStatus.detail}</small>
-          {liveSession?.staffName ? <em>Phụ trách: {liveSession.staffName}</em> : <em>PC Mall Sales Center</em>}
-        </div>
-      </section>
-
-      <section className="ai-action-bar" aria-label="Tác vụ tư vấn nhanh">
-        {QUICK_ACTIONS.map((action) => (
-          <button key={action.label} type="button" className={action.live ? "ai-action ai-action--live" : "ai-action"} onClick={() => handleAction(action)}>
-            <span>{action.icon}</span>
-            {action.label}
-          </button>
-        ))}
-      </section>
-
-      <section className="ai-consult-shell">
-        <aside className="ai-consult-sidebar">
-          <div className="ai-mode-card">
-            <span>Chế độ hội thoại</span>
-            <strong>{isHumanMode ? "Sales consultation" : "AI chat"}</strong>
-            <p>{isHumanMode ? "Tin nhắn đang được lưu vào phiên tư vấn để nhân viên bán hàng theo dõi." : "AI phản hồi nhanh theo intent và dữ liệu sản phẩm thật trong database."}</p>
+      {/* 1. Header Khung Chat: Tiêu đề + Trạng thái AI + Phím tắt thao tác */}
+      <header className="ai-window-header">
+        <div className="ai-header-left">
+          <div className="ai-header-avatar">
+            <span className="ai-avatar-icon">🤖</span>
+            <span className="ai-online-dot" />
           </div>
-          <div className="ai-mode-list">
-            <button type="button" className={!isHumanMode ? "is-active" : ""} onClick={() => switchMode("ai")}>
-              <span>AI</span>
-              <strong>AI chat</strong>
-              <small>Tư vấn nhanh, không bịa sản phẩm.</small>
-            </button>
-            <button type="button" className={isHumanMode ? "is-active" : ""} onClick={() => openOrStartLiveChat(question)}>
-              <span>Sales</span>
-              <strong>Human support</strong>
-              <small>Nhân viên bán hàng phản hồi trực tiếp.</small>
-            </button>
-          </div>
-            <button type="button" className="ai-live-button" onClick={() => openOrStartLiveChat(question)} disabled={loading}>
-            {String(liveSession?.status || "").toLowerCase() === "resolved" ? "Tạo phiên tư vấn mới" : liveSessionId ? "Mở Human support" : "Kết nối nhân viên bán hàng"}
-          </button>
-          <button type="button" className="ai-clear-button" onClick={handleClearChatHistory}>
-            Xóa lịch sử chat
-          </button>
-        </aside>
-
-        <main className="ai-chat-panel">
-          <div className="ai-chat-head">
-            <div>
-              <strong>{isHumanMode ? "Tư vấn với nhân viên bán hàng" : "Trung tâm tư vấn thông minh"}</strong>
-              <span>{isHumanMode ? `Mã phiên ${liveSessionId.slice(0, 8)}...` : "AI phân loại intent trước khi tìm sản phẩm"}</span>
+          <div className="ai-header-meta">
+            <div className="ai-title-row">
+              <h1 className="ai-title">Khung Tư Vấn Trợ Lý AI</h1>
+              <span className="ai-pill-status">● Trực Tuyến 24/7</span>
+              <span className="ai-pill-model">Gemini 1.5 Flash Grounded</span>
             </div>
-            <div className="ai-chat-head-actions">
-              {isHumanMode ? (
-                <button type="button" className="ai-back-ai-button" onClick={() => switchMode("ai")}>
-                  Quay lại AI
-                </button>
-              ) : null}
-              <span className={`ai-status-pill ai-status-pill--${isHumanMode ? "human" : "ai"}`}>{chatStatus.label}</span>
-            </div>
+            <p className="ai-subtitle">Tư vấn cấu hình phần cứng • Dữ liệu kho & giá thật PC Mall</p>
           </div>
+        </div>
 
-          <div className="ai-chat-messages" ref={chatMessagesRef}>
-            {visibleMessages.length === 0 ? (
-              <div className="ai-empty-state">
-                <div>{isHumanMode ? "NV" : "AI"}</div>
-                <h2>Bắt đầu bằng nhu cầu của bạn</h2>
-                <p>Nhập ngân sách, mục đích sử dụng hoặc chọn một quick action phía trên để AI tư vấn. Nếu cần chốt cấu hình, hãy kết nối nhân viên bán hàng.</p>
+        <div className="ai-header-actions">
+          <Link to={routeConfig.public.pcBuilder} className="ai-btn-nav ai-btn-nav--builder" title="Mở không gian lắp ráp">
+            <span>🚀</span> PC Builder
+          </Link>
+          <button type="button" className="ai-btn-nav ai-btn-nav--clear" onClick={handleClearChatHistory} title="Làm mới phiên chat">
+            <span>🔄</span> Làm mới
+          </button>
+        </div>
+      </header>
+
+      {/* 2. Thân Khung Chat: Danh sách tin nhắn cuộn nội bộ mượt mà */}
+      <main className="ai-window-feed" ref={chatMessagesRef}>
+        <div className="ai-feed-inner">
+          {aiMessages.length === 0 ? (
+            <div className="ai-empty-hero">
+              <div className="ai-hero-badge">⚡ CHUYÊN GIA TƯ VẤN PHẦN CỨNG THỜI GIAN THỰC</div>
+              <h2 className="ai-hero-heading">
+                Xin chào! Tôi có thể giúp gì cho dàn PC của bạn?
+              </h2>
+              <p className="ai-hero-sub">
+                Đặt câu hỏi về công nghệ vi xử lý, so sánh RAM/VGA hoặc yêu cầu cấu hình tối ưu theo tựa game yêu thích với 100% linh kiện chính hãng sẵn có trong kho PC Mall.
+              </p>
+
+              <div className="ai-hero-grid">
+                {QUICK_ACTIONS.slice(0, 4).map((action) => (
+                  <button
+                    key={action.label}
+                    type="button"
+                    className="ai-hero-card"
+                    onClick={() => handleAction(action)}
+                  >
+                    <span className="ai-hero-card-icon">{action.icon}</span>
+                    <div className="ai-hero-card-body">
+                      <strong>{action.label}</strong>
+                      <span>{action.prompt}</span>
+                    </div>
+                  </button>
+                ))}
               </div>
-            ) : null}
+            </div>
+          ) : null}
 
-            {visibleMessages.map((message) => {
-              const isUser = message.role === "user";
-              const isSystem = message.role === "system";
-              const isStaff = message.role === "staff";
+          {aiMessages.map((message) => {
+            const isUser = message.role === "user";
 
-              if (isSystem) {
-                return <div key={message.id} className="ai-system-message">{message.content}</div>;
-              }
-
-              return (
-                <article key={message.id} className={`ai-message ${isUser ? "ai-message--user" : ""}`}>
-                  {!isUser ? <div className={`ai-avatar ${isStaff ? "ai-avatar--staff" : ""}`}>{isStaff ? "NV" : "AI"}</div> : null}
-                  <div className="ai-message__content">
-                    <div className="ai-message-meta">{isUser ? "Bạn" : isStaff ? "Nhân viên bán hàng" : "AI PC Mall"}</div>
-                    <div className="ai-bubble" dangerouslySetInnerHTML={{ __html: renderContent(message.content) }} />
-
-                    {!isUser && message.handoffSuggested ? (
-                      <button type="button" className="ai-inline-handoff" onClick={() => openOrStartLiveChat(question)}>
-                        Kết nối nhân viên bán hàng
-                      </button>
-                    ) : null}
-
-                    {!isUser && message.build ? (
-                      <div className="ai-build-card">
-                        <div className="ai-card-head">
-                          <strong>Cấu hình đề xuất (Chuẩn 100% Tương thích)</strong>
-                          <span>{formatCurrency(message.build.totalPrice)}đ</span>
-                        </div>
-                        <div className="ai-build-list">
-                          {getBuildComponents(message.build).map((item) => (
-                            <div key={`${item.componentType}-${item.skuId || item.name}`} className="ai-build-item-row">
-                              <span className="ai-build-slot">{String(item.componentType || "").toUpperCase()}</span>
-                              <strong className="ai-build-pname" title={item.name}>{item.name}</strong>
-                              <small className="ai-build-price">{formatCurrency(item.price)}đ{item.stock !== "" ? ` · còn ${item.stock}` : ""}</small>
-                              <button
-                                type="button"
-                                className="ai-build-item-pick"
-                                title="Nạp linh kiện này vào Workspace Builder"
-                                onClick={() => handlePcBuilder(item)}
-                              >
-                                + Chọn
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="ai-build-actions">
-                          <button
-                            type="button"
-                            className="ai-btn-builder"
-                            onClick={() => handleLoadBuildToBuilder(message.build)}
-                          >
-                            🧩 Nạp Dàn PC vào Builder
-                          </button>
-                          <button
-                            type="button"
-                            className="ai-btn-cart"
-                            disabled={loadingBuildCart}
-                            onClick={() => handleAddToCartFullBuild(message.build)}
-                          >
-                            {loadingBuildCart ? "Đang thêm..." : "🛒 Thêm cả dàn vào Giỏ"}
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {!isUser && (message.products || []).length > 0 ? (
-                      <div className="ai-product-grid">
-                        {message.products.map((product) => (
-                          <article className="ai-product-card" key={`${product.id}-${product.skuId || product.sku}`}>
-                            <div className="ai-product-card__image">
-                              <img src={resolveProductImage(product)} alt={product.name} loading="lazy" />
-                              <span>Còn {product.stock}</span>
-                            </div>
-                            <div className="ai-product-card__body">
-                              <small>{product.brandName || product.categoryName || "PC Mall"}</small>
-                              <strong>{product.name}</strong>
-                              <span>{formatCurrency(product.price)}đ</span>
-                              <div className="ai-product-actions">
-                                <Link to={routeConfig.public.productDetail.replace(":idOrSlug", String(product.slug || product.id))}>Chi tiết</Link>
-                                <button type="button" disabled={actionProductId === product.id} onClick={() => handleAddToCart(product)}>
-                                  {actionProductId === product.id ? "Đang thêm..." : "Thêm giỏ"}
-                                </button>
-                                <button type="button" onClick={() => handleCompare(product)}>So sánh</button>
-                                <button type="button" onClick={() => handlePcBuilder(product)}>+ Chọn vào Builder</button>
-                              </div>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    ) : null}
+            return (
+              <article key={message.id} className={`ai-msg-row ${isUser ? "ai-msg-row--user" : "ai-msg-row--bot"}`}>
+                {!isUser ? (
+                  <div className="ai-avatar ai-avatar--bot">
+                    <span>AI</span>
                   </div>
-                  {isUser ? <div className="ai-avatar ai-avatar--user">{customerAvatarLabel}</div> : null}
-                </article>
-              );
-            })}
+                ) : null}
 
-            {loading ? (
-              <article className="ai-message">
-                <div className="ai-avatar">AI</div>
-                <div className="ai-typing"><span /><span /><span /></div>
+                <div className="ai-msg-content-shell">
+                  <div className="ai-msg-sender-label">
+                    {isUser ? "Bạn" : "Trợ lý AI PC Mall"}
+                  </div>
+
+                  <div className="ai-bubble" dangerouslySetInnerHTML={{ __html: renderContent(message.content) }} />
+
+                  {/* Thẻ Cấu Hình PC Tương Thích 100% */}
+                  {!isUser && message.build ? (
+                    <div className="ai-compact-build-card">
+                      <div className="ai-build-card-top">
+                        <div>
+                          <span className="ai-build-badge">🧩 CẤU HÌNH ĐỀ XUẤT TỐI ƯU</span>
+                          <div className="ai-build-title">Dàn máy chuẩn 100% tương thích phần cứng</div>
+                        </div>
+                        <div className="ai-build-total">
+                          <small>Tổng chi phí dự kiến</small>
+                          <strong>{formatCurrency(message.build.totalPrice)}đ</strong>
+                        </div>
+                      </div>
+
+                      <div className="ai-build-components-list">
+                        {getBuildComponents(message.build).map((item) => {
+                          const typeLabel = (item.componentLabel || item.componentType || "").toUpperCase();
+                          return (
+                            <div key={`${item.componentType}-${item.skuId || item.name}`} className="ai-build-component-row">
+                              <span className="ai-comp-type-badge">{typeLabel}</span>
+                              <div className="ai-comp-main-info">
+                                <span className="ai-comp-full-name">{item.name}</span>
+                              </div>
+                              <span className="ai-comp-row-price">{formatCurrency(item.price)}đ</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="ai-build-card-bottom">
+                        <button
+                          type="button"
+                          className="ai-btn-apply-builder"
+                          onClick={() => handleApplyBuildToBuilder(message.build)}
+                        >
+                          🚀 Áp Dụng Cấu Hình Này Vào Không Gian Lắp Ráp →
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* Thẻ Sản Phẩm Thực Tế Tại Cửa Hàng - CHỈ HIỂN THỊ KHI KHÔNG PHẢI BUILD PC */}
+                  {!isUser && !message.build && (message.products || []).length > 0 ? (
+                    <div className="ai-product-grid">
+                      {message.products.map((product) => (
+                        <article className="ai-product-card" key={`${product.id}-${product.skuId || product.sku}`}>
+                          <div className="ai-product-card__image">
+                            <img src={resolveProductImage(product)} alt={product.name} loading="lazy" />
+                            <span>Còn {product.stock}</span>
+                          </div>
+                          <div className="ai-product-card__body">
+                            <small>{product.brandName || product.categoryName || "PC Mall"}</small>
+                            <strong>{product.name}</strong>
+                            <span>{formatCurrency(product.price)}đ</span>
+                            <div className="ai-product-actions">
+                              <Link to={routeConfig.public.productDetail.replace(":idOrSlug", String(product.slug || product.id))}>Chi tiết</Link>
+                              <button type="button" onClick={() => handleCompare(product)}>So sánh</button>
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+
+                {isUser ? <div className="ai-avatar ai-avatar--user">{customerAvatarLabel}</div> : null}
               </article>
-            ) : null}
+            );
+          })}
 
-            {statusMessage ? <div className="ai-status-message">{statusMessage}</div> : null}
-          </div>
-
-          <form className="ai-composer" onSubmit={handleSubmit}>
-            {isHumanMode && String(liveSession?.status || "").toLowerCase() === "resolved" ? (
-              <div className="ai-resolved-session-notice">
-                Phiên tư vấn này đã kết thúc. Nếu bạn gửi tin nhắn mới, PC Mall sẽ mở một phiên tư vấn mới cho bạn.
+          {loading ? (
+            <article className="ai-msg-row ai-msg-row--bot">
+              <div className="ai-avatar ai-avatar--bot">AI</div>
+              <div className="ai-msg-content-shell">
+                <div className="ai-typing">
+                  <span />
+                  <span />
+                  <span />
+                  <span />
+                </div>
               </div>
-            ) : null}
-            <textarea
-              ref={textareaRef}
-              value={question}
-              onChange={(event) => {
-                setQuestion(event.target.value);
-                setStatusMessage("");
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  if (canSend) handleSubmit(event);
-                }
-              }}
-              rows={2}
-              placeholder={isHumanMode ? "Nhập tin nhắn cho nhân viên bán hàng..." : "Hỏi AI về build PC, laptop, linh kiện..."}
-            />
-            <button type="submit" disabled={!canSend} aria-label="Gửi tin nhắn">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
-            </button>
-          </form>
-        </main>
-      </section>
+            </article>
+          ) : null}
+
+          {statusMessage ? <div className="ai-status-message">{statusMessage}</div> : null}
+        </div>
+      </main>
+
+      {/* 3. Khung Soạn Thảo Tin Nhắn Nằm Gọn Bên Trong Khung Chat */}
+      <footer className="ai-window-composer">
+        {/* Dải Gợi Ý Câu Hỏi Nhanh (Pills) */}
+        <div className="ai-composer-quick-strip">
+          <span className="ai-strip-label">💡 Gợi ý:</span>
+          <div className="ai-strip-scroll">
+            {QUICK_ACTIONS.map((action) => (
+              <button
+                key={action.label}
+                type="button"
+                className="ai-strip-pill"
+                onClick={() => handleAction(action)}
+              >
+                <span>{action.icon}</span>
+                <span>{action.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Khung Nhập Liệu Dạng Capsule Thanh Lịch */}
+        <form className="ai-composer-capsule" onSubmit={handleSubmit}>
+          <textarea
+            ref={textareaRef}
+            value={question}
+            onChange={(event) => {
+              setQuestion(event.target.value);
+              setStatusMessage("");
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                if (canSend) handleSubmit(event);
+              }
+            }}
+            rows={1}
+            placeholder="Nhập yêu cầu: 'Nên chọn RAM DDR4 hay DDR5?', 'Build PC Dota 2 khoảng 15 triệu'..."
+          />
+          <button type="submit" disabled={!canSend} aria-label="Gửi tin nhắn" className="ai-btn-send">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+          </button>
+        </form>
+
+        <div className="ai-composer-foot-hints">
+          <span>Nhấn <strong>Enter</strong> để gửi • <strong>Shift + Enter</strong> xuống dòng</span>
+          <span>⚡ Kết nối trực tiếp kho hàng thực tế PC Mall</span>
+        </div>
+      </footer>
     </div>
   );
 }
 
 const aiChatStyles = `
-.ai-advisor-page {
-  display: grid;
-  gap: 18px;
-  min-height: calc(100vh - 140px);
-  padding: 24px 0 0;
-}
-
-.ai-consult-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 22px;
-  align-items: end;
-  padding: 30px;
-  border-radius: 24px;
-  color: #fff;
-  background:
-    radial-gradient(circle at top right, rgba(59, 130, 246, 0.42), transparent 34%),
-    linear-gradient(135deg, #07111f 0%, #0f2b57 48%, #2563eb 100%);
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.2);
-}
-
-.ai-consult-hero span {
-  color: #bfdbfe;
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.ai-consult-hero h1 {
-  margin: 8px 0 10px;
-  font-size: clamp(32px, 5vw, 52px);
-  line-height: 1.05;
-}
-
-.ai-consult-hero p {
-  max-width: 780px;
-  margin: 0;
-  color: rgba(255, 255, 255, 0.84);
-  line-height: 1.7;
-}
-
-.ai-status-card,
-.ai-mode-card,
-.ai-consult-sidebar,
-.ai-chat-panel,
-.ai-product-card,
-.ai-build-card {
+/* ═══════════════════════════════════════════════════════════════════
+   KHUNG CHAT CHUYÊN NGHIỆP — DEDICATED DESKTOP CHAT WINDOW FRAME
+   ═══════════════════════════════════════════════════════════════════ */
+.ai-chat-window-frame {
+  width: 100%;
+  height: 100%;
+  background: #ffffff;
+  border-radius: 20px;
   border: 1px solid #e2e8f0;
-  background: #fff;
-  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 16px 40px -12px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.03);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
 }
 
-.ai-status-card {
-  display: grid;
-  gap: 6px;
-  padding: 18px;
-  border-color: rgba(255,255,255,0.2);
-  border-radius: 18px;
-  background: rgba(15, 23, 42, 0.36);
+/* 1. HEADER KHUNG CHAT */
+.ai-window-header {
+  flex-shrink: 0;
+  background: #ffffff;
+  border-bottom: 1px solid #f1f5f9;
+  padding: 14px 22px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 10;
 }
 
-.ai-status-card strong,
-.ai-status-card em {
-  color: #fff;
+.ai-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-.ai-status-card small {
-  color: rgba(255, 255, 255, 0.76);
+.ai-header-avatar {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.22);
 }
 
-.ai-action-bar {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.ai-action {
-  display: grid;
-  place-items: center;
-  gap: 7px;
-  min-height: 78px;
-  padding: 12px;
-  border: 1px solid #dbe4f0;
-  border-radius: 16px;
-  color: #0f172a;
-  background: #fff;
-  font-weight: 900;
-  cursor: pointer;
-  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
-}
-
-.ai-action:hover {
-  transform: translateY(-2px);
-  border-color: #93c5fd;
-  box-shadow: 0 12px 26px rgba(37, 99, 235, 0.14);
-}
-
-.ai-action span {
+.ai-avatar-icon {
   font-size: 22px;
 }
 
-.ai-action--live {
-  color: #fff;
-  border-color: transparent;
-  background: linear-gradient(135deg, #0f172a, #2563eb);
+.ai-online-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #10b981;
+  border: 2px solid #ffffff;
 }
 
-.ai-consult-shell {
-  display: grid;
-  grid-template-columns: 290px minmax(0, 1fr);
-  gap: 18px;
-  align-items: stretch;
-}
-
-.ai-consult-sidebar,
-.ai-chat-panel {
-  overflow: hidden;
-  border-radius: 24px;
-}
-
-.ai-consult-sidebar {
+.ai-header-meta {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 18px;
-  align-self: start;
+  gap: 2px;
 }
 
-.ai-mode-card {
-  display: grid;
+.ai-title-row {
+  display: flex;
+  align-items: center;
   gap: 8px;
-  padding: 16px;
-  border-radius: 16px;
+  flex-wrap: wrap;
 }
 
-.ai-mode-card span,
-.ai-mode-list span,
-.ai-message-meta {
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 900;
-  text-transform: uppercase;
-}
-
-.ai-mode-card strong {
-  color: #0f172a;
-  font-size: 20px;
-}
-
-.ai-mode-card p,
-.ai-mode-list small {
+.ai-title {
   margin: 0;
-  color: #64748b;
-  line-height: 1.55;
-}
-
-.ai-mode-list {
-  display: grid;
-  gap: 10px;
-}
-
-.ai-mode-list button {
-  display: grid;
-  gap: 4px;
-  width: 100%;
-  text-align: left;
-  padding: 12px;
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  background: #f8fafc;
-  font: inherit;
-  cursor: pointer;
-}
-
-.ai-mode-list button.is-active {
-  border-color: #2563eb;
-  background: #eff6ff;
-}
-
-.ai-live-button,
-.ai-clear-button,
-.ai-inline-handoff {
-  min-height: 42px;
-  border: 0;
-  border-radius: 12px;
-  font: inherit;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.ai-live-button,
-.ai-inline-handoff {
-  color: #fff;
-  background: linear-gradient(135deg, #0f172a, #2563eb);
-}
-
-.ai-live-button:disabled {
-  opacity: 0.75;
-  cursor: not-allowed;
-}
-
-.ai-clear-button {
-  color: #64748b;
-  background: #f1f5f9;
-}
-
-.ai-chat-panel {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  height: min(720px, calc(100vh - 270px));
-  min-height: 560px;
-  max-height: calc(100vh - 270px);
-  background: rgba(255,255,255,0.86);
-}
-
-.ai-chat-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: center;
-  padding: 16px 20px;
-  border-bottom: 1px solid #e2e8f0;
-  background: #fff;
-}
-
-.ai-chat-head-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.ai-back-ai-button {
-  min-height: 34px;
-  padding: 0 12px;
-  border: 1px solid #bfdbfe;
-  border-radius: 999px;
-  color: #1d4ed8;
-  background: #eff6ff;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.ai-chat-head > div:first-child {
-  display: grid;
-  gap: 3px;
-}
-
-.ai-chat-head strong {
+  font-size: 16.5px;
+  font-weight: 800;
   color: #0f172a;
-  font-size: 18px;
+  letter-spacing: -0.01em;
 }
 
-.ai-chat-head span {
-  color: #64748b;
-  font-size: 13px;
-}
-
-.ai-status-pill {
-  padding: 8px 12px;
-  border-radius: 999px;
-  color: #1d4ed8;
-  background: #eff6ff;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.ai-status-pill--human {
-  color: #047857;
+.ai-pill-status {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #059669;
   background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  padding: 2px 7px;
+  border-radius: 10px;
 }
 
-.ai-chat-messages {
+.ai-pill-model {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #2563eb;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  padding: 2px 7px;
+  border-radius: 10px;
+}
+
+.ai-subtitle {
+  margin: 0;
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+.ai-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-btn-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: 9px;
+  text-decoration: none;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ai-btn-nav:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.ai-btn-nav--builder {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.ai-btn-nav--builder:hover {
+  background: #dbeafe;
+}
+
+.ai-btn-nav--clear {
+  color: #64748b;
+}
+
+/* 2. KHUNG NỘI DUNG TIN NHẮN (FEED CHAT) */
+.ai-window-feed {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
+  background: #fbfcfd;
+  scroll-behavior: smooth;
+}
+
+/* Scrollbar tinh tế */
+.ai-window-feed::-webkit-scrollbar {
+  width: 6px;
+}
+.ai-window-feed::-webkit-scrollbar-track {
+  background: transparent;
+}
+.ai-window-feed::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
+}
+.ai-window-feed::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.ai-feed-inner {
+  max-width: 840px;
+  margin: 0 auto;
+  width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  min-height: 0;
-  height: 100%;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 24px;
+  gap: 16px;
 }
 
-.ai-empty-state {
-  display: grid;
-  place-items: center;
-  gap: 10px;
-  margin: auto;
-  max-width: 430px;
+/* EMPTY HERO TRẠNG THÁI CHƯA CÓ TIN NHẮN */
+.ai-empty-hero {
+  padding: 30px 20px 20px;
   text-align: center;
-  color: #64748b;
 }
 
-.ai-empty-state div {
-  display: grid;
-  place-items: center;
-  width: 64px;
-  height: 64px;
-  border-radius: 22px;
-  color: #fff;
-  background: linear-gradient(135deg, #0f172a, #2563eb);
-  font-weight: 900;
+.ai-hero-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 800;
+  color: #2563eb;
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
+  padding: 4px 12px;
+  border-radius: 20px;
+  letter-spacing: 0.04em;
+  margin-bottom: 12px;
 }
 
-.ai-empty-state h2 {
-  margin: 0;
+.ai-hero-heading {
+  margin: 0 0 8px;
+  font-size: 21px;
+  font-weight: 800;
   color: #0f172a;
 }
 
-.ai-system-message,
-.ai-status-message {
-  align-self: center;
-  padding: 8px 14px;
-  border-radius: 999px;
-  color: #475569;
-  background: #f1f5f9;
+.ai-hero-sub {
+  margin: 0 auto 24px;
+  max-width: 640px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #64748b;
+}
+
+.ai-hero-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.ai-hero-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.ai-hero-card:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);
+}
+
+.ai-hero-card-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.ai-hero-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.ai-hero-card-body strong {
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
+  color: #1e293b;
 }
 
-.ai-status-message {
-  color: #075985;
-  background: #e0f2fe;
+.ai-hero-card-body span {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.ai-message {
+/* HÀNG TIN NHẮN (MESSAGE ROWS) */
+.ai-msg-row {
   display: flex;
   gap: 12px;
-  align-items: flex-start;
+  width: 100%;
 }
 
-.ai-message--user {
+.ai-msg-row--user {
   justify-content: flex-end;
 }
 
 .ai-avatar {
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
-  border-radius: 14px;
-  color: #fff;
-  background: linear-gradient(135deg, #0f172a, #2563eb);
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
   font-size: 12px;
-  font-weight: 900;
+  flex-shrink: 0;
 }
 
-.ai-avatar--staff {
-  background: linear-gradient(135deg, #047857, #10b981);
+.ai-avatar--bot {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
 }
 
 .ai-avatar--user {
-  background: #0f172a;
+  background: #334155;
+  color: #ffffff;
 }
 
-.ai-message__content {
-  display: grid;
-  gap: 8px;
-  max-width: min(880px, 78%);
+.ai-msg-content-shell {
+  display: flex;
+  flex-direction: column;
+  max-width: 90%;
+  min-width: 0;
 }
 
-.ai-message--user .ai-message__content {
-  justify-items: end;
+.ai-msg-row--user .ai-msg-content-shell {
+  align-items: flex-end;
+}
+
+.ai-msg-sender-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  margin-bottom: 4px;
+  padding: 0 4px;
 }
 
 .ai-bubble {
-  padding: 15px 18px;
+  padding: 13px 18px;
+  border-radius: 16px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.ai-msg-row--bot .ai-bubble {
+  background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 18px 18px 18px 6px;
-  background: #fff;
   color: #1e293b;
-  line-height: 1.75;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  border-top-left-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
 }
 
-.ai-message--user .ai-bubble {
-  color: #fff;
-  border-color: transparent;
-  border-radius: 18px 18px 6px 18px;
-  background: linear-gradient(135deg, #0f172a, #2563eb);
+.ai-msg-row--user .ai-bubble {
+  background: #2563eb;
+  color: #ffffff;
+  border-top-right-radius: 4px;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
 }
 
-.ai-inline-handoff {
-  justify-self: start;
-  padding: 0 14px;
+/* THẺ CẤU HÌNH GỌN GÀNG */
+.ai-compact-build-card {
+  margin-top: 10px;
+  background: #ffffff;
+  border: 2px solid #bfdbfe;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.08);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
+.ai-build-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #eff6ff;
+  padding: 12px 16px;
+  border-bottom: 1px solid #dbeafe;
+}
+
+.ai-build-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 800;
+  color: #1d4ed8;
+  letter-spacing: 0.05em;
+}
+
+.ai-build-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.ai-build-total {
+  text-align: right;
+}
+
+.ai-build-total small {
+  display: block;
+  font-size: 10.5px;
+  color: #64748b;
+}
+
+.ai-build-total strong {
+  font-size: 17px;
+  color: #dc2626;
+  font-weight: 800;
+}
+
+.ai-build-components-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px;
+  background: #ffffff;
+}
+
+.ai-build-component-row {
+  display: grid;
+  grid-template-columns: 85px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  transition: all 0.15s ease;
+}
+
+.ai-build-component-row:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.ai-comp-type-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 6px;
+  font-size: 10px;
+  font-weight: 800;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  text-align: center;
+}
+
+.ai-comp-main-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ai-comp-full-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #1e293b;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.ai-comp-row-price {
+  font-size: 13px;
+  font-weight: 700;
+  color: #2563eb;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.ai-build-card-bottom {
+  padding: 10px 16px;
+  background: #f8fafc;
+  border-top: 1px solid #f1f5f9;
+}
+
+.ai-btn-apply-builder {
+  width: 100%;
+  padding: 11px 16px;
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.22);
+}
+
+.ai-btn-apply-builder:hover {
+  background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.3);
+}
+
+/* THẺ SẢN PHẨM */
 .ai-product-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.ai-product-card,
-.ai-build-card {
-  overflow: hidden;
-  border-radius: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .ai-product-card {
-  display: grid;
-  grid-template-columns: 145px minmax(0, 1fr);
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .ai-product-card__image {
   position: relative;
-  display: grid;
-  place-items: center;
-  min-height: 158px;
+  height: 100px;
   background: #f8fafc;
 }
 
@@ -1141,315 +1020,283 @@ const aiChatStyles = `
   width: 100%;
   height: 100%;
   object-fit: contain;
-  padding: 12px;
 }
 
 .ai-product-card__image span {
   position: absolute;
-  top: 10px;
-  left: 10px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  color: #047857;
-  background: #ecfdf5;
-  font-size: 12px;
-  font-weight: 900;
+  bottom: 4px;
+  right: 4px;
+  background: rgba(15, 23, 42, 0.75);
+  color: #fff;
+  font-size: 9px;
+  padding: 2px 5px;
+  border-radius: 4px;
 }
 
 .ai-product-card__body {
-  display: grid;
-  gap: 8px;
-  padding: 14px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
 }
 
 .ai-product-card__body small {
+  font-size: 9.5px;
   color: #64748b;
-  font-weight: 800;
 }
 
 .ai-product-card__body strong {
+  font-size: 11.5px;
   color: #0f172a;
-  line-height: 1.45;
+  line-height: 1.3;
+  margin: 3px 0 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .ai-product-card__body > span {
-  color: #2563eb;
-  font-size: 18px;
-  font-weight: 900;
+  font-size: 12px;
+  font-weight: 800;
+  color: #dc2626;
+  margin-top: auto;
 }
 
 .ai-product-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
 }
 
 .ai-product-actions a,
-.ai-product-actions button,
-.ai-build-card a {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 34px;
-  padding: 0 9px;
-  border: 1px solid #dbe4f0;
-  border-radius: 10px;
-  color: #0f172a;
-  background: #fff;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 900;
+.ai-product-actions button {
+  flex: 1;
+  text-align: center;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
   text-decoration: none;
   cursor: pointer;
-}
-
-.ai-product-actions button:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-}
-
-.ai-build-card {
-  padding: 14px;
-}
-
-.ai-card-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-
-.ai-card-head span {
-  color: #2563eb;
-  font-weight: 900;
-}
-
-.ai-build-list {
-  display: grid;
-  gap: 8px;
-}
-
-.ai-build-list .ai-build-item-row {
-  display: grid;
-  grid-template-columns: 80px 1fr auto auto;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: #f8fafc;
   border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #334155;
 }
 
-.ai-build-list span.ai-build-slot {
-  color: #2563eb;
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0.05em;
+.ai-product-actions a:hover,
+.ai-product-actions button:hover {
+  background: #f1f5f9;
 }
 
-.ai-build-list strong.ai-build-pname {
-  color: #0f172a;
-  font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ai-build-list small.ai-build-price {
-  color: #059669;
-  font-weight: 800;
-  font-size: 12.5px;
-}
-
-.ai-build-item-pick {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 5px 12px;
-  font-size: 11.5px;
-  font-weight: 800;
-  border-radius: 8px;
-  border: 1px solid #bfdbfe;
-  background: #eff6ff;
-  color: #1d4ed8;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.ai-build-item-pick:hover {
-  background: #2563eb;
-  color: #fff;
-  border-color: #2563eb;
-  transform: translateY(-1px);
-}
-
-.ai-build-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.ai-btn-builder {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 42px;
-  padding: 0 16px;
-  font-size: 13px;
-  font-weight: 800;
-  border-radius: 12px;
-  border: none;
-  background: linear-gradient(135deg, #0f172a, #1e3a8a);
-  color: #fff;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
-}
-
-.ai-btn-builder:hover {
-  filter: brightness(1.15);
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.25);
-}
-
-.ai-btn-cart {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 42px;
-  padding: 0 16px;
-  font-size: 13px;
-  font-weight: 800;
-  border-radius: 12px;
-  border: none;
-  background: linear-gradient(135deg, #10b981, #047857);
-  color: #fff;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
-}
-
-.ai-btn-cart:hover:not(:disabled) {
-  filter: brightness(1.1);
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.3);
-}
-
-.ai-btn-cart:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
+/* TYPING INDICATOR */
 .ai-typing {
-  display: flex;
-  gap: 7px;
-  padding: 14px 18px;
+  display: inline-flex;
+  gap: 5px;
+  padding: 12px 16px;
+  background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 20px;
-  background: #fff;
+  border-radius: 14px;
+  border-top-left-radius: 4px;
 }
 
 .ai-typing span {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
   background: #2563eb;
-  animation: ai-bounce 1.3s ease-in-out infinite;
+  animation: aiDotBounce 1.4s infinite ease-in-out both;
 }
 
-.ai-typing span:nth-child(2) { animation-delay: 0.16s; }
-.ai-typing span:nth-child(3) { animation-delay: 0.32s; }
+.ai-typing span:nth-child(1) { animation-delay: -0.32s; }
+.ai-typing span:nth-child(2) { animation-delay: -0.16s; }
+.ai-typing span:nth-child(3) { animation-delay: 0s; }
+.ai-typing span:nth-child(4) { animation-delay: 0.16s; }
 
-.ai-composer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 54px;
-  gap: 12px;
-  padding: 16px;
-  border-top: 1px solid #e2e8f0;
-  background: rgba(255,255,255,0.94);
+@keyframes aiDotBounce {
+  0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
+  40% { transform: scale(1); opacity: 1; }
 }
 
-.ai-resolved-session-notice {
-  grid-column: 1 / -1;
-  padding: 12px 14px;
-  border: 1px solid #bfdbfe;
-  border-radius: 16px;
-  background: #eff6ff;
-  color: #1d4ed8;
+.ai-status-message {
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  font-size: 12px;
+  text-align: center;
+}
+
+/* 3. KHUNG SOẠN THẢO TIN NHẮN (NẰM TRONG KHUNG CHAT, KHÔNG BỊ ÁP CỨNG ĐÁY MÀN HÌNH) */
+.ai-window-composer {
+  flex-shrink: 0;
+  background: #ffffff;
+  border-top: 1px solid #f1f5f9;
+  padding: 12px 20px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 20;
+}
+
+/* DẢI GỢI Ý NHANH NGAY TRÊN Ô NHẬP */
+.ai-composer-quick-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.ai-strip-label {
+  font-size: 11px;
   font-weight: 800;
-  line-height: 1.5;
+  color: #64748b;
+  flex-shrink: 0;
 }
 
-.ai-composer textarea {
-  width: 100%;
-  padding: 13px 15px;
-  border: 1px solid #dbe4f0;
-  border-radius: 16px;
+.ai-strip-scroll {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+.ai-strip-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.ai-strip-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  font-size: 11.5px;
+  font-weight: 600;
   background: #f8fafc;
-  color: #0f172a;
-  font: inherit;
-  resize: none;
-  outline: none;
-}
-
-.ai-composer button {
-  border: 0;
+  border: 1px solid #e2e8f0;
   border-radius: 16px;
-  color: #fff;
-  background: linear-gradient(135deg, #0f172a, #2563eb);
+  color: #334155;
   cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
 }
 
-.ai-composer button:disabled {
+.ai-strip-pill:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  transform: translateY(-1px);
+}
+
+/* KHUNG NHẬP LIỆU DẠNG CAPSULE */
+.ai-composer-capsule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f8fafc;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 6px 10px 6px 14px;
+  transition: all 0.2s ease;
+}
+
+.ai-composer-capsule:focus-within {
+  background: #ffffff;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.ai-composer-capsule textarea {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-family: inherit;
+  font-size: 13.5px;
+  color: #0f172a;
+  resize: none;
+  line-height: 1.45;
+  max-height: 80px;
+  padding: 4px 0;
+}
+
+.ai-composer-capsule textarea::placeholder {
   color: #94a3b8;
+}
+
+.ai-btn-send {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: none;
+  background: #2563eb;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
+}
+
+.ai-btn-send:hover:not(:disabled) {
+  background: #1d4ed8;
+  transform: scale(1.04);
+}
+
+.ai-btn-send:disabled {
   background: #e2e8f0;
+  color: #94a3b8;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
-@keyframes ai-bounce {
-  0%, 60%, 100% { transform: translateY(0); }
-  30% { transform: translateY(-7px); }
+/* HINTS PHÍA DƯỚI */
+.ai-composer-foot-hints {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #94a3b8;
+  padding: 0 4px;
 }
 
-@media (max-width: 1120px) {
-  .ai-action-bar {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+.ai-composer-foot-hints strong {
+  color: #64748b;
+}
+
+@media (max-width: 768px) {
+  .ai-window-header {
+    padding: 10px 14px;
   }
-
-  .ai-consult-shell,
-  .ai-consult-hero {
+  .ai-header-actions {
+    display: none;
+  }
+  .ai-window-feed {
+    padding: 14px 12px;
+  }
+  .ai-hero-grid {
     grid-template-columns: 1fr;
   }
-
-  .ai-consult-sidebar {
-    order: 2;
+  .ai-msg-content-shell {
+    max-width: 96%;
   }
-}
-
-@media (max-width: 760px) {
-  .ai-advisor-page {
-    padding-top: 14px;
+  .ai-build-component-row {
+    grid-template-columns: 72px minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 6px 8px;
   }
-
-  .ai-consult-hero {
-    padding: 22px;
+  .ai-comp-full-name {
+    font-size: 11.5px;
   }
-
-  .ai-action-bar,
-  .ai-product-grid,
-  .ai-product-card {
-    grid-template-columns: 1fr;
+  .ai-comp-row-price {
+    font-size: 12px;
   }
-
-  .ai-chat-panel {
-    height: 680px;
-    max-height: none;
-  }
-
-  .ai-message__content {
-    max-width: 100%;
+  .ai-composer-foot-hints {
+    display: none;
   }
 }
 `;
-

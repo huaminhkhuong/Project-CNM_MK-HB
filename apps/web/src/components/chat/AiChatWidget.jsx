@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useLocation } from "react-router-dom";
 import { httpClient } from "../../services/http";
 import "./AiChatWidget.css";
 
@@ -23,7 +23,11 @@ const formatCurrency = (v) => Number(v || 0).toLocaleString("vi-VN");
  * Tích hợp Form Nhu Cầu + Linh kiện có sẵn ở nhà + Auto-fill 1-Click sang PC Builder.
  */
 export function AiChatWidget() {
+  const location = useLocation();
   const navigate = useNavigate();
+
+  const isExcluded = location.pathname.includes("ai-chat") || location.pathname.includes("ai-advisor") || location.pathname.includes("pc-builder") || location.pathname.includes("pcbuilder");
+  if (isExcluded) return null;
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("form"); // "form" | "chat"
 

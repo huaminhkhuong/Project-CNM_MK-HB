@@ -25,6 +25,7 @@ const load = (importer) => {
 };
 
 // Admin Pages (Code Split)
+const AdminAiConfigPage = load(() => import("../pages/admin/AdminAiConfigPage").then((m) => ({ default: m.AdminAiConfigPage })));
 const AdminAttributesPage = load(() => import("../pages/admin/AdminAttributesPage").then((m) => ({ default: m.AdminAttributesPage })));
 const AdminCompatibilityRulesPage = load(() => import("../pages/admin/AdminCompatibilityRulesPage").then((m) => ({ default: m.AdminCompatibilityRulesPage })));
 const AdminDashboardPage = load(() => import("../pages/admin/AdminDashboardPage").then((m) => ({ default: m.AdminDashboardPage })));
@@ -132,6 +133,7 @@ export function AppRouter() {
       children: [
         { index: true, element: <Navigate to={routeConfig.admin.dashboard} replace /> },
         { path: routeConfig.admin.dashboard.replace(/^\/admin\//, ""), element: <AdminDashboardPage /> },
+        { path: routeConfig.admin.aiConfig.replace(/^\/admin\//, ""), element: <AdminAiConfigPage /> },
         { path: routeConfig.admin.system.replace(/^\/admin\//, ""), element: <AdminSystemPage /> },
         { path: routeConfig.admin.products.replace(/^\/admin\//, ""), element: <AdminProductsPage /> },
         { path: routeConfig.admin.attributes.replace(/^\/admin\//, ""), element: <AdminAttributesPage /> },
