@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { getCurrentProfile, login as loginRequest } from "../services/auth.service";
+import { getCurrentProfile, login as loginRequest, logout as logoutRequest } from "../services/auth.service";
 import { clearAuthState, getAuthState, setAuthState, subscribeAuth } from "../store/authStore";
 import { runCustomerOnboarding } from "../utils/customerOnboarding";
 
@@ -82,8 +82,8 @@ export function useAuth() {
   const loginAsDemo = useCallback(async () => {
     try {
       return await login({
-        email: "customer@pcmall.vn",
-        password: "password123"
+        email: import.meta.env.VITE_DEMO_EMAIL || "customer@cnm.local",
+        password: import.meta.env.VITE_DEMO_PASSWORD || "Customer@123"
       });
     } catch (_err) {
       // If default demo credentials don't exist on server, fallback to customer login path
@@ -93,8 +93,22 @@ export function useAuth() {
     }
   }, [login]);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    const currentState = getAuthState();
+    const refreshToken = currentState?.refreshToken;
+
+
+
     clearAuthState();
+
+    if (refreshToken) {
+      try {
+        await logoutRequest({ refreshToken });
+      } catch (_err) {
+        // Best-effort token revocation on backend
+      }
+    }
+
   }, []);
 
   return {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
+import axios from "axios";
 
 import { useAuth } from "../../hooks/useAuth";
 import { getCart } from "../../services/cart.service";

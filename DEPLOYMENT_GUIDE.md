@@ -18,7 +18,7 @@ Script sẽ tự động:
 
 ## 2. Khởi Chạy Bằng Docker Compose (Production / Staging Server)
 Dự án được đóng gói hoàn chỉnh bằng Docker với 4 dịch vụ container:
-- `cnm_mysql`: Database MySQL 8.0 (Port 3308).
+- `cnm_mysql`: Database MySQL 8.0 (Port 3307).
 - `cnm_phpmyadmin`: Trình quản lý DB phpMyAdmin (Port 8080).
 - `cnm_api`: Backend Server Node.js Express (Port 4000).
 - `cnm_web`: Frontend App React Vite (Port 5173).
@@ -45,7 +45,7 @@ docker-compose down
 | Biến Môi Trường | Mô Tả | Ví Dụ |
 |------------------|-------|-------|
 | `PORT` | Cổng dịch vụ API | `4000` |
-| `DATABASE_URL` | Chuỗi kết nối MySQL Database | `mysql://root:password@127.0.0.1:3308/cnm_mk_hb` |
+| `DATABASE_URL` | Chuỗi kết nối MySQL Database | `mysql://root:password@127.0.0.1:3307/cnm_mk_hb` |
 | `JWT_SECRET` | Khóa bí mật mã hóa Token đăng nhập | `your-secret-jwt-key` |
 | `LLM_PROVIDER` | Nhà cung cấp AI LLM (`gemini`, `groq`, `deepseek`, `openai`, `ollama`) | `gemini` |
 | `LLM_API_KEY` | Khóa API của nhà cung cấp LLM đã chọn | `AIzaSy... / sk-... / gsk_...` |

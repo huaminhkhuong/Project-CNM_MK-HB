@@ -4,6 +4,7 @@ import { env } from "./config/env";
 import { initSocketIO } from "./socket/socket.service";
 import { verifyEmailConnection } from "./services/email.service";
 import { startPaymentTimeoutWorker, stopPaymentTimeoutWorker } from "./workers/payment-timeout.worker";
+import { logger } from "./utils/logger";
 
 const app = createApp();
 const httpServer = createServer(app);
@@ -12,16 +13,16 @@ const httpServer = createServer(app);
 initSocketIO(httpServer, env.frontendUrl);
 
 httpServer.listen(env.port, () => {
-  console.log(`API running at http://localhost:${env.port}`);
-  console.log(`Socket.io ready at ws://localhost:${env.port}`);
+  logger.info(`API running at http://localhost:${env.port}`);
+  logger.info(`Socket.io ready at ws://localhost:${env.port}`);
   
   try {
     const { unifiedLlmService } = require("./modules/ai/unified-llm.service");
     const llmInfo = unifiedLlmService.getProviderInfo();
     if (llmInfo.hasApiKey) {
-      console.log(`[AI Advisor] Unified LLM Engine active: ${llmInfo.provider.toUpperCase()} (${llmInfo.model})`);
+      logger.info(`[AI Advisor] Unified LLM Engine active: ${llmInfo.provider.toUpperCase()} (${llmInfo.model})`);
     } else {
-      console.log(`[AI Advisor] Operating in 100% local Rule Engine & Database grounded mode (LLM_API_KEY empty).`);
+      logger.info(`[AI Advisor] Operating in 100% local Rule Engine & Database grounded mode (LLM_API_KEY empty).`);
     }
   } catch {}
 
@@ -32,17 +33,10 @@ httpServer.listen(env.port, () => {
   startPaymentTimeoutWorker();
 });
 
-process.on("SIGTERM", () => {
-  stopPaymentTimeoutWorker();
-});
-
-process.on("SIGINT", () => {
-  stopPaymentTimeoutWorker();
-});
-
 // Graceful shutdown handling
 function gracefulShutdown(signal: string) {
-  console.log(`\n[Server] Received ${signal}. Closing HTTP server and database pools...`);
+  stopPaymentTimeoutWorker();
+  logger.info(`[Server] Received ${signal}. Closing HTTP server and database pools...`);
   httpServer.close(async () => {
     try {
       const { prisma } = await import("./config/prisma");
@@ -52,18 +46,16 @@ function gracefulShutdown(signal: string) {
       const { closePool } = require("./config/database");
       await closePool();
     } catch {}
-    console.log("[Server] Graceful shutdown completed. Exiting.");
+    logger.info("[Server] Graceful shutdown completed. Exiting.");
     process.exit(0);
   });
 
   // Force exit after 10s if connections do not drain
   setTimeout(() => {
-    console.error("[Server] Forcefully shutting down due to timeout.");
+    logger.error(new Error("[Server] Forcefully shutting down due to timeout."));
     process.exit(1);
   }, 10000).unref();
 }
 
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-// Trigger reload with updated database config
-

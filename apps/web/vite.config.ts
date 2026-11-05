@@ -44,9 +44,6 @@ export default defineConfig({
             if (normalized.includes("socket.io-client")) {
               return "vendor-socket";
             }
-            if (normalized.includes("lucide-react")) {
-              return "vendor-icons";
-            }
             return "vendor";
           }
           if (normalized.includes("/src/pages/admin/")) {
