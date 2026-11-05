@@ -122,10 +122,20 @@ class PcBuilderService {
     return match ? Number(match[1]) : fallback;
   }
 
-  private specBag(specs: Array<{ key: string; value: string }> = []): Record<string, string> {
-    return specs.reduce<Record<string, string>>((accumulator, spec) => {
-      const key = this.normalizeText(spec.key);
-      if (key) accumulator[key] = String(spec.value || "");
+  private specBag(specs: any = []): Record<string, string> {
+    if (!specs) return {};
+    if (typeof specs === "object" && !Array.isArray(specs)) {
+      const bag: Record<string, string> = {};
+      for (const [k, v] of Object.entries(specs)) {
+        const normKey = this.normalizeText(k);
+        if (normKey) bag[normKey] = String(v || "");
+      }
+      return bag;
+    }
+    if (!Array.isArray(specs)) return {};
+    return specs.reduce<Record<string, string>>((accumulator, spec: any) => {
+      const key = this.normalizeText(spec?.key);
+      if (key) accumulator[key] = String(spec?.value || "");
       return accumulator;
     }, {});
   }
@@ -580,7 +590,7 @@ class PcBuilderService {
     const name = String(item?.name || "").toUpperCase();
     if (name.includes("AM5")) return "AM5";
     if (name.includes("AM4")) return "AM4";
-    if (name.includes("1851") || name.includes("ULTRA 7") || name.includes("ULTRA 9") || name.includes("ARROW LAKE")) return "LGA1851";
+    if (name.includes("1851") || name.includes("ULTRA 5") || name.includes("ULTRA 7") || name.includes("ULTRA 9") || name.includes("ARROW LAKE")) return "LGA1851";
     if (name.includes("1700") || name.includes("RAPTOR LAKE") || name.includes("ALDER LAKE")) return "LGA1700";
     if (name.includes("1200") || name.includes("COMET LAKE") || name.includes("ROCKET LAKE")) return "LGA1200";
     if (/I[3579]-?1[234]\d{3}/i.test(name)) return "LGA1700";
@@ -603,6 +613,46 @@ class PcBuilderService {
     if (name.includes("1700") || name.includes("Z790") || name.includes("B760") || name.includes("B660") || name.includes("H610") || name.includes("Z690")) return "LGA1700";
     if (name.includes("1200") || name.includes("H510") || name.includes("B560") || name.includes("Z590") || name.includes("H410") || name.includes("B460")) return "LGA1200";
     return "";
+  }
+
+  public getMainboardFormFactor(mb: any): string {
+    const spec = this.findSpec(mb?.specs || [], ["form_factor", "kích thước main", "chuẩn mainboard"]);
+    if (spec) return spec;
+    const name = String(mb?.name || mb?.productName || "").toUpperCase();
+    if (name.includes("ITX") || name.includes("MINI-ITX")) return "ITX";
+    if (name.includes("MICRO") || name.includes("MATX") || /\b[BZA]\d{3}M\b/i.test(name) || /\bM\s+/i.test(name) || name.includes("-M")) return "Micro-ATX";
+    return "ATX";
+  }
+
+  public getCaseFormFactor(cs: any): string {
+    const spec = this.findSpec(cs?.specs || [], ["form_factor", "form_factor_support", "hỗ trợ main", "hỗ trợ form factor"]);
+    if (spec) return spec;
+    const name = String(cs?.name || cs?.productName || "").toUpperCase();
+    if (name.includes("ITX") || name.includes("MINI-ITX")) return "ITX";
+    if (name.includes("MINI TOWER") || name.includes("MICRO") || name.includes("MATX")) return "Micro-ATX";
+    if (name.includes("EATX") || name.includes("E-ATX")) return "eATX";
+    return "ATX";
+  }
+
+  public isFormFactorCompatible(boardForm: string, caseForm: string): boolean {
+    const b = this.normalizeText(boardForm);
+    const c = this.normalizeText(caseForm);
+    if (!b || !c) return true;
+    if (c.includes("eatx")) {
+      return true; // eATX case fits eATX, ATX, mATX, ITX
+    }
+    if (c.includes("atx") && !c.includes("matx") && !c.includes("micro")) {
+      // Case ATX supports ATX, mATX, ITX
+      return true;
+    }
+    if (c.includes("matx") || c.includes("micro")) {
+      // Case mATX supports mATX, ITX, but NOT ATX
+      return !b.includes("atx") || b.includes("matx") || b.includes("micro");
+    }
+    if (c.includes("itx")) {
+      return b.includes("itx");
+    }
+    return true;
   }
 
 
@@ -1079,11 +1129,16 @@ class PcBuilderService {
     // 7. Pick Case
     if (!excluded.includes("case")) {
       const caseMax = Math.round(budget * (ratios.case || 0.05) * multiplier * 1.15);
+      const mbForm = selectedComponents.mainboard
+        ? this.getMainboardFormFactor(selectedComponents.mainboard)
+        : "ATX";
+
       const caseItem = pickBest(casePool, caseMax, (cs) => {
         if (options.caseStyle === "fish_tank") {
-          return /bể cá|panorama|lv12|kính|aqua/i.test(cs.name);
+          if (!/bể cá|panorama|lv12|kính|aqua/i.test(cs.name)) return false;
         }
-        return true;
+        const csForm = this.getCaseFormFactor(cs);
+        return this.isFormFactorCompatible(mbForm, csForm);
       });
       if (caseItem) {
         selectedComponents.case = caseItem;
@@ -1144,44 +1199,54 @@ class PcBuilderService {
       }
     }
 
-    // Budget Optimization Pass: If total sum exceeds target budget limit, swap flexible components with lower priced alternatives
+    // Strict Budget Optimization Pass: Ensure currentTotal <= targetCandidateBudget * 1.05
     const targetCandidateBudget = Math.round(budget * multiplier);
+    const maxAllowedBudget = Math.round(targetCandidateBudget * 1.05);
     let currentTotal = Object.values(selectedComponents).reduce((sum: number, item: any) => sum + (item.price || 0), 0);
 
-    if (currentTotal > targetCandidateBudget) {
-      const flexTypes = ["gpu", "cpu", "storage", "cooling", "psu", "ram", "case"];
-      for (const fType of flexTypes) {
-        if (currentTotal <= targetCandidateBudget) break;
-        const currentComp = selectedComponents[fType];
-        if (!currentComp) continue;
+    if (currentTotal > maxAllowedBudget) {
+      const flexTypes = ["cooling", "case", "storage", "psu", "ram", "gpu", "cpu"];
+      let improved = true;
+      let iterations = 0;
+      while (currentTotal > maxAllowedBudget && improved && iterations < 30) {
+        improved = false;
+        iterations++;
+        for (const fType of flexTypes) {
+          if (currentTotal <= maxAllowedBudget) break;
+          const currentComp = selectedComponents[fType];
+          if (!currentComp) continue;
 
-        let pool = fType === "gpu" ? gpuPool : fType === "cpu" ? cpuPool : fType === "storage" ? ssdPool : fType === "cooling" ? coolingPool : fType === "psu" ? psuPool : fType === "ram" ? ramPool : casePool;
-        
-        let validPool = pool.filter(p => p.price < currentComp.price && p.price > 0);
-        if (fType === "cpu") {
-          // Keep same socket if mainboard already picked
-          if (selectedComponents.mainboard) {
-            const mbSock = this.getMainboardSocket(selectedComponents.mainboard);
-            validPool = validPool.filter(p => this.getCpuSocket(p) === mbSock);
-          }
-        } else if (fType === "ram") {
-          validPool = validPool.filter(p => this.getRamType(p) === mbRamType);
-        } else if (fType === "psu") {
-          const minW = Math.max(500, Math.round((cpuTdp + gpuTdp + 120) * 1.25));
-          validPool = validPool.filter(p => this.getPsuWattage(p) >= minW);
-        }
-
-        if (validPool.length > 0) {
-          // Sort descending to find the closest cheaper component
-          const sortedCheaper = validPool.sort((a, b) => b.price - a.price);
-          const replacement = sortedCheaper[0];
-          currentTotal -= (currentComp.price - replacement.price);
-          selectedComponents[fType] = replacement;
+          let pool = fType === "gpu" ? gpuPool : fType === "cpu" ? cpuPool : fType === "storage" ? ssdPool : fType === "cooling" ? coolingPool : fType === "psu" ? psuPool : fType === "ram" ? ramPool : casePool;
+          
+          let validPool = pool.filter(p => p.price < currentComp.price && p.price > 0);
           if (fType === "cpu") {
-            cpuSocket = this.getCpuSocket(replacement);
-            cpuTdp = this.getCpuTdp(replacement);
-          } else if (fType === "gpu") {
-            gpuTdp = this.getGpuTdp(replacement);
+            // Keep same socket if mainboard already picked
+            if (selectedComponents.mainboard) {
+              const mbSock = this.getMainboardSocket(selectedComponents.mainboard);
+              validPool = validPool.filter(p => this.getCpuSocket(p) === mbSock);
+            }
+          } else if (fType === "ram") {
+            validPool = validPool.filter(p => this.getRamType(p) === mbRamType);
+          } else if (fType === "psu") {
+            const minW = Math.max(500, Math.round((cpuTdp + gpuTdp + 120) * 1.25));
+            validPool = validPool.filter(p => this.getPsuWattage(p) >= minW);
+          }
+
+          if (validPool.length > 0) {
+            // Sort descending to find the closest cheaper component
+            const sortedCheaper = validPool.sort((a, b) => b.price - a.price);
+            const replacement = sortedCheaper[0];
+            if (replacement && replacement.price < currentComp.price) {
+              currentTotal -= (currentComp.price - replacement.price);
+              selectedComponents[fType] = replacement;
+              if (fType === "cpu") {
+                cpuSocket = this.getCpuSocket(replacement);
+                cpuTdp = this.getCpuTdp(replacement);
+              } else if (fType === "gpu") {
+                gpuTdp = this.getGpuTdp(replacement);
+              }
+              improved = true;
+            }
           }
         }
       }
@@ -1236,9 +1301,19 @@ class PcBuilderService {
    * Generates 3 Candidate Builds (BEST_VALUE, BEST_PERFORMANCE, BUDGET_SAFE) and What-If Simulation
    */
   async suggestBuild(payload: any = {}): Promise<any> {
-    const budget = Number(payload.budget || payload.targetBudget || 0);
-    if (!budget || budget <= 0) {
-      throw createError("Vui lòng nhập ngân sách hợp lệ (lớn hơn 0đ)", 400);
+    const rawBudget = payload.budget ?? payload.targetBudget;
+    if (rawBudget === null || rawBudget === undefined || rawBudget === "" || isNaN(Number(rawBudget))) {
+      throw createError("Vui lòng nhập ngân sách hợp lệ (chữ số, lớn hơn 0đ)", 400);
+    }
+    const budget = Number(rawBudget);
+    if (budget <= 0) {
+      throw createError("Ngân sách phải lớn hơn 0đ", 400);
+    }
+    if (budget < 6000000) {
+      throw createError("Ngân sách tối thiểu để xây dựng cấu hình máy tính hoàn chỉnh là 6.000.000đ", 400);
+    }
+    if (budget > 250000000) {
+      throw createError("Ngân sách tối đa hỗ trợ tư vấn tự động là 250.000.000đ. Với cấu hình máy chủ/workstation đặc thù, vui lòng liên hệ PC Mall.", 400);
     }
 
     const useCase = String(payload.useCase || payload.purpose || "gaming").toLowerCase();
@@ -1419,6 +1494,7 @@ class PcBuilderService {
 
     return {
       targetBudget: budget,
+      totalPrice: bestValue.totalPrice,
       useCase,
       resolution,
       dynamicBottleneck,
@@ -1941,8 +2017,8 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
     const caseProduct = componentMap.case || { productName: "", specs: [] };
     const cooling = componentMap.cooling || { productName: "", specs: [] };
 
-    const cpuSocket = this.findSpec(cpu.specs, ["socket"]);
-    const boardSocket = this.findSpec(mainboard.specs, ["socket"]);
+    const cpuSocket = this.findSpec(cpu.specs, ["socket"]) || this.getCpuSocket({ name: cpu.productName, specs: Object.fromEntries((cpu.specs || []).map((s: any) => [s.key.toLowerCase(), s.value])) });
+    const boardSocket = this.findSpec(mainboard.specs, ["socket"]) || this.getMainboardSocket({ name: mainboard.productName, specs: Object.fromEntries((mainboard.specs || []).map((s: any) => [s.key.toLowerCase(), s.value])) });
     const ramType = this.getRamType({ name: ram.productName, specs: Object.fromEntries((ram.specs || []).map((s: any) => [s.key.toLowerCase(), s.value])) });
     const boardRam = this.getMainboardRamType({ name: mainboard.productName, specs: Object.fromEntries((mainboard.specs || []).map((s: any) => [s.key.toLowerCase(), s.value])) });
     const parseGpuTdp = (specs: any[], name: string): number => {
@@ -2001,27 +2077,12 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
     const caseCoolerClearance = this.parseNumber(this.findSpec(caseProduct.specs, ["cpu cooler clearance", "giới hạn chiều cao tản", "cooler clearance"]), 0);
     const ramSlots = this.parseNumber(this.findSpec(mainboard.specs, ["ram_slots", "khe ram", "ram slots"]), 4);
     const m2Slots = this.parseNumber(this.findSpec(mainboard.specs, ["m2_slots", "khe m2", "m.2 slots", "m2"]), 2);
-    const boardFormFactor = this.findSpec(mainboard.specs, ["form_factor", "kích thước main", "chuẩn mainboard"]);
-    const caseFormFactor = this.findSpec(caseProduct.specs, ["form_factor", "form_factor_support", "hỗ trợ main", "hỗ trợ form factor"]);
+    const boardFormFactor = this.getMainboardFormFactor(mainboard);
+    const caseFormFactor = this.getCaseFormFactor(caseProduct);
 
     // Helper kiểm tra tương thích Form Factor Mainboard vs Case
     const isFormFactorCompatible = (boardForm: string, caseForm: string): boolean => {
-      const b = this.normalizeText(boardForm);
-      const c = this.normalizeText(caseForm);
-      if (!b || !c) return true;
-      if (c.includes("atx") && !c.includes("matx") && !c.includes("micro")) {
-        // Case ATX hỗ trợ ATX, mATX, ITX
-        return true;
-      }
-      if (c.includes("matx") || c.includes("micro")) {
-        // Case mATX hỗ trợ mATX, ITX, KHÔNG hỗ trợ ATX
-        return !b.includes("atx") || b.includes("matx") || b.includes("micro");
-      }
-      if (c.includes("itx")) {
-        // Case ITX chỉ hỗ trợ ITX
-        return b.includes("itx");
-      }
-      return true;
+      return this.isFormFactorCompatible(boardForm, caseForm);
     };
 
     // Trích xuất số thanh RAM (ví dụ: "2x16GB" -> 2 sticks, kèm theo quantity nếu có)

@@ -4,6 +4,7 @@ import { useAuth } from "../hooks/useAuth";
 
 const ADMIN_NAV_ITEMS = [
   { to: "/admin/dashboard", label: "Tổng quan", icon: "📊" },
+  { to: "/admin/ai-config", label: "Quản trị AI & Lọc", icon: "🧠" },
   { to: "/admin/system", label: "Hệ thống", icon: "⚙️" },
   { to: "/admin/products", label: "Sản phẩm", icon: "🏷️" },
   { to: "/admin/attributes", label: "Thuộc tính", icon: "✨" },

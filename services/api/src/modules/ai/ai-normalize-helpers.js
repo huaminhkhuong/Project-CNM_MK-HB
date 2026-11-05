@@ -3,9 +3,18 @@ function normalizeVietnamese(value) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d");
+    .replace(/[đĐ]/g, "d")
+    .trim();
+}
+
+function cleanSearchText(value) {
+  return normalizeVietnamese(value)
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 module.exports = {
-  normalizeVietnamese
+  normalizeVietnamese,
+  cleanSearchText
 };
