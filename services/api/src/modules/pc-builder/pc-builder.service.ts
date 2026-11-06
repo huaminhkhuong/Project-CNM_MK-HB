@@ -1517,7 +1517,6 @@ class PcBuilderService {
         }
       },
       // Backward compatibility fields
-      totalPrice: bestValue.totalPrice,
       budgetUtilization: bestValue.budgetUtilization,
       components: bestValue.components,
       compatibilityReport: bestValue.compatibilityReport,

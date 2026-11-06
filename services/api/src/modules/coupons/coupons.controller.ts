@@ -27,7 +27,8 @@ export const getAvailableCoupons = asyncHandler(async (req: Request, res: Respon
  * Kiểm tra tính hợp lệ của mã giảm giá với giỏ hàng hiện tại
  */
 export const validateCoupon = asyncHandler(async (req: Request, res: Response) => {
-  const { code, items, totalAmount, shippingFee } = req.body || {};
+  const { code, items, totalAmount, orderAmount, shippingFee } = req.body || {};
+  const effectiveTotal = totalAmount !== undefined ? Number(totalAmount) : (orderAmount !== undefined ? Number(orderAmount) : undefined);
   const userId = req.user?.userId ? Number(req.user.userId) : null;
 
   if (!code) {
@@ -76,13 +77,16 @@ export const validateCoupon = asyncHandler(async (req: Request, res: Response) =
     code: String(code),
     userId: userId ? Number(userId) : null,
     items: cartItems,
-    totalAmount: totalAmount !== undefined ? Number(totalAmount) : undefined,
+    totalAmount: effectiveTotal,
     shippingFee: shippingFee !== undefined ? Number(shippingFee) : 0
   });
 
   res.status(200).json({
     success: true,
-    data: result
+    data: {
+      ...result,
+      code: result.coupon?.code || String(code)
+    }
   });
 });
 

@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
 import pcBuilderService from "../src/modules/pc-builder/pc-builder.service";
-const { pool } = require("../src/config/database");
+const { closePool } = require("../src/config/database");
 
 after(async () => {
-  setTimeout(() => {
-    try {
-      if (pool && typeof pool.end === "function") pool.end();
-    } catch (_) {}
-  }, 100);
+  try {
+    await closePool();
+  } catch (_) {}
 });
 
 describe("PC Builder Budget Variance & Boundary Tests", () => {

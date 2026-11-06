@@ -6,6 +6,8 @@ import { verifyEmailConnection } from "./services/email.service";
 import { startPaymentTimeoutWorker, stopPaymentTimeoutWorker } from "./workers/payment-timeout.worker";
 import { logger } from "./utils/logger";
 
+import { pcBuilderService } from "./modules/pc-builder/pc-builder.service";
+
 (global as any).pcBuilderService = pcBuilderService;
 
 const app = createApp();
