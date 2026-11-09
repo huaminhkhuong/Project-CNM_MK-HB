@@ -65,3 +65,10 @@ nginx/ssl/*.crt
 nginx/ssl/*.key
 !nginx/ssl/.gitkeep
 !nginx/ssl/README.md
+
+# Thesis / local office documentation files
+*.docx
+*.pdf
+*.xlsx
+KLTN_*
+TASK_*
