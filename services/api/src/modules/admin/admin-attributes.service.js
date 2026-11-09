@@ -114,6 +114,24 @@ async function deleteAttribute(attributeId) {
   const existing = await findAttributeById(parsedId);
   if (!existing) throw createError("Attribute not found", 404);
 
+  const ruleCount = await prisma.compatibilityRule
+    .count({
+      where: {
+        OR: [
+          { AttributeValue1: { attribute_id: parsedId } },
+          { AttributeValue2: { attribute_id: parsedId } }
+        ]
+      }
+    })
+    .catch(() => 0);
+
+  if (ruleCount > 0) {
+    throw createError(
+      "Không thể xóa nhóm thuộc tính đang được tham chiếu trong Luật tương thích (Compatibility Rules).",
+      409
+    );
+  }
+
   // Prisma transaction: delete sku_attributes referencing values, then values, then attribute
   await prisma.$transaction([
     prisma.skuAttribute.deleteMany({
@@ -167,6 +185,21 @@ async function deleteAttributeValue(attributeValueId) {
   const parsedId = toPositiveInteger(attributeValueId, "attributeValueId");
   const existing = await findAttributeValueById(parsedId);
   if (!existing) throw createError("Attribute value not found", 404);
+
+  const ruleCount = await prisma.compatibilityRule
+    .count({
+      where: {
+        OR: [{ attribute_value_1: parsedId }, { attribute_value_2: parsedId }]
+      }
+    })
+    .catch(() => 0);
+
+  if (ruleCount > 0) {
+    throw createError(
+      "Không thể xóa giá trị thuộc tính đang được sử dụng trong Luật tương thích (Compatibility Rules).",
+      409
+    );
+  }
 
   await prisma.$transaction([
     prisma.skuAttribute.deleteMany({ where: { attribute_value_id: parsedId } }),

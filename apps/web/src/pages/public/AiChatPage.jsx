@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
-import { clearAiChatHistory, getAiChatHistory, sendAiChat } from "../../services/ai.service";
+import { clearAiChatHistory, getAiChatHistory, sendAiChat, sendAiFeedback } from "../../services/ai.service";
+import {
+  createChatSession,
+  getChatSession,
+  handoffChatSession,
+  sendChatMessage
+} from "../../services/chat.service";
 import { useAuth } from "../../hooks/useAuth";
+import { useSocket } from "../../hooks/useSocket";
 import { routeConfig } from "../../routes/routeConfig";
 import { addStoredCompareId, buildCompareUrl } from "../../utils/compare";
 import { resolveProductImage } from "../../utils/productImage";
@@ -106,6 +113,7 @@ function getBuildComponents(build) {
 
 export function AiChatPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user, isAuthenticated } = useAuth();
 
   const [aiMessages, setAiMessages] = useState(() => {
@@ -125,12 +133,35 @@ export function AiChatPage() {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+  const [activeModel, setActiveModel] = useState("Gemini 3.5 Flash Lite Grounded");
+
+  // Live Chat Handoff với Nhân viên Bán hàng (Sales Staff)
+  const { joinRoom, leaveRoom, on } = useSocket();
+  const [chatMode, setChatMode] = useState("ai"); // "ai" | "human"
+  const [liveSession, setLiveSession] = useState(null);
+  const [handoffLoading, setHandoffLoading] = useState(false);
+  const [feedbackMap, setFeedbackMap] = useState({});
+
+  async function handleFeedback(messageId, rating, messageContent) {
+    if (feedbackMap[messageId]) return;
+    setFeedbackMap((prev) => ({ ...prev, [messageId]: rating }));
+    try {
+      await sendAiFeedback({
+        query: "AI Consultation Message",
+        response: messageContent,
+        rating,
+        category: "AI_CHAT_PAGE"
+      });
+    } catch {
+      // Graceful fallback
+    }
+  }
 
   const chatMessagesRef = useRef(null);
   const textareaRef = useRef(null);
 
   const customerAvatarLabel = useMemo(() => getAvatarLabel(user, "KH"), [user]);
-  const canSend = Boolean(question.trim()) && !loading;
+  const canSend = Boolean(question.trim()) && !loading && !handoffLoading;
 
   useEffect(() => {
     setGuestAiChatMessages(aiMessages);
@@ -179,9 +210,115 @@ export function AiChatPage() {
       });
     }, 60);
     return () => clearTimeout(timer);
-  }, [aiMessages, loading]);
+  }, [aiMessages, liveSession?.messages, chatMode, loading]);
+
+  // Kết nối Socket.io & Polling cho phiên Live Chat với Nhân viên Bán hàng
+  useEffect(() => {
+    if (chatMode !== "human" || !liveSession?.sessionId) return;
+
+    const sessionId = liveSession.sessionId;
+    joinRoom("join_chat", sessionId);
+
+    on("chat:new_message", (msg) => {
+      setLiveSession((prev) => {
+        if (!prev || prev.sessionId !== sessionId) return prev;
+        const exists = (prev.messages || []).some((m) => String(m.id) === String(msg.id));
+        if (exists) return prev;
+        return { ...prev, messages: [...(prev.messages || []), msg] };
+      });
+    });
+
+    on("chat:session_updated", (updated) => {
+      setLiveSession(updated);
+    });
+
+    on("chat:session_closed", (closed) => {
+      setLiveSession(closed);
+      setStatusMessage("Phiên tư vấn trực tiếp với nhân viên đã kết thúc.");
+    });
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await getChatSession(sessionId);
+        const data = normalizeApiData(res);
+        if (data?.sessionId) {
+          setLiveSession(data);
+        }
+      } catch (_err) {}
+    }, 5000);
+
+    return () => {
+      leaveRoom("leave_chat", sessionId);
+      clearInterval(pollInterval);
+    };
+  }, [chatMode, liveSession?.sessionId, joinRoom, leaveRoom, on]);
+
+  async function handleStartHumanHandoff() {
+    if (handoffLoading) return;
+    setHandoffLoading(true);
+    setStatusMessage("");
+    try {
+      const savedSessionId = localStorage.getItem("pcmall_live_chat_session_id");
+      const aiHistoryPayload = aiMessages.slice(-8).map((m) => ({
+        role: m.role,
+        content: m.content
+      }));
+      let sessionData = null;
+
+      if (savedSessionId) {
+        try {
+          const existingRes = await getChatSession(savedSessionId);
+          const existing = normalizeApiData(existingRes);
+          if (existing?.sessionId && !["closed", "resolved"].includes(existing.status)) {
+            const handoffRes = await handoffChatSession(savedSessionId, {
+              aiHistory: aiHistoryPayload
+            });
+            sessionData = normalizeApiData(handoffRes);
+          }
+        } catch (_e) {
+          localStorage.removeItem("pcmall_live_chat_session_id");
+        }
+      }
+
+      if (!sessionData) {
+        const createdRes = await createChatSession({
+          customerName: user?.fullName || user?.email || "Khách hàng PC Mall",
+          conversationType: "SALES_CONSULTATION",
+          initialMessage: question.trim() || "Xin chào, tôi cần nhân viên tư vấn trực tiếp về cấu hình PC & sản phẩm.",
+          aiHistory: aiHistoryPayload
+        });
+        sessionData = normalizeApiData(createdRes);
+        if (question.trim()) setQuestion("");
+      }
+
+      if (sessionData?.sessionId) {
+        localStorage.setItem("pcmall_live_chat_session_id", sessionData.sessionId);
+        setLiveSession(sessionData);
+        setChatMode("human");
+      }
+    } catch (_err) {
+      setStatusMessage("Không thể kết nối hàng đợi nhân viên lúc này. Vui lòng thử lại sau ít giây.");
+    } finally {
+      setHandoffLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (searchParams.get("mode") === "human" && chatMode !== "human") {
+      setSearchParams({}, { replace: true });
+      handleStartHumanHandoff();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   async function handleClearChatHistory() {
+    if (chatMode === "human") {
+      localStorage.removeItem("pcmall_live_chat_session_id");
+      setLiveSession(null);
+      setChatMode("ai");
+      setStatusMessage("");
+      return;
+    }
     if (isAuthenticated) {
       try {
         await clearAiChatHistory();
@@ -196,6 +333,33 @@ export function AiChatPage() {
   async function submitQuestion(queryText) {
     const trimmedQuestion = String(queryText || "").trim();
     if (!trimmedQuestion || loading) return;
+
+    if (chatMode === "human" && liveSession?.sessionId) {
+      setQuestion("");
+      try {
+        setLoading(true);
+        setStatusMessage("");
+        const msgRes = await sendChatMessage(liveSession.sessionId, {
+          sender: "customer",
+          text: trimmedQuestion
+        });
+        const newMsg = normalizeApiData(msgRes);
+        if (newMsg?.id) {
+          setLiveSession((prev) => {
+            if (!prev) return prev;
+            const exists = (prev.messages || []).some((m) => String(m.id) === String(newMsg.id));
+            return exists ? prev : { ...prev, messages: [...(prev.messages || []), newMsg] };
+          });
+        }
+        textareaRef.current?.focus();
+      } catch (_err) {
+        setStatusMessage("Không gửi được tin nhắn tới nhân viên. Phiên có thể đã đóng.");
+        setQuestion(trimmedQuestion);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
 
     const userMessage = createMessage("user", trimmedQuestion);
     setQuestion("");
@@ -216,6 +380,7 @@ export function AiChatPage() {
         }
       });
       const data = normalizeApiData(response);
+      if (data.model) setActiveModel(data.model);
       const reply =
         String(data.reply || "").trim() ||
         "Hiện mình chưa tìm thấy thông tin phù hợp trong danh mục. Bạn có thể hỏi cụ thể hơn về tầm giá hoặc tên linh kiện nhé!";
@@ -287,20 +452,57 @@ export function AiChatPage() {
       <header className="ai-window-header">
         <div className="ai-header-left">
           <div className="ai-header-avatar">
-            <span className="ai-avatar-icon">🤖</span>
+            <span className="ai-avatar-icon">{chatMode === "human" ? "🎧" : "🤖"}</span>
             <span className="ai-online-dot" />
           </div>
           <div className="ai-header-meta">
             <div className="ai-title-row">
-              <h1 className="ai-title">Khung Tư Vấn Trợ Lý AI</h1>
-              <span className="ai-pill-status">● Trực Tuyến 24/7</span>
-              <span className="ai-pill-model">Gemini 1.5 Flash Grounded</span>
+              <h1 className="ai-title">
+                {chatMode === "human" ? "Tư Vấn Trực Tiếp Cùng Nhân Viên Sale" : "Khung Tư Vấn Trợ Lý AI"}
+              </h1>
+              <span className="ai-pill-status">
+                {chatMode === "human"
+                  ? liveSession?.staffName
+                    ? `● Đang hỗ trợ: ${liveSession.staffName}`
+                    : "⏳ Đang chờ nhân viên nhận phiên"
+                  : "● Trực Tuyến 24/7"}
+              </span>
+              <span className="ai-pill-model">
+                {chatMode === "human" ? "Live Sales Support" : activeModel}
+              </span>
             </div>
-            <p className="ai-subtitle">Tư vấn cấu hình phần cứng • Dữ liệu kho & giá thật PC Mall</p>
+            <p className="ai-subtitle">
+              {chatMode === "human"
+                ? "Trao đổi trực tiếp với Chuyên viên Tư vấn Bán hàng PC Mall theo thời gian thực"
+                : "Tư vấn cấu hình phần cứng • Dữ liệu kho & giá thật PC Mall"}
+            </p>
           </div>
         </div>
 
         <div className="ai-header-actions">
+          {chatMode === "ai" ? (
+            <button
+              type="button"
+              className="ai-btn-nav ai-btn-nav--builder"
+              onClick={handleStartHumanHandoff}
+              disabled={handoffLoading}
+              title="Chuyển giao ngữ cảnh sang nhắn tin trực tiếp với Nhân viên Bán hàng"
+            >
+              <span>🎧</span> {handoffLoading ? "Đang kết nối..." : "Gặp Nhân Viên Sale"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="ai-btn-nav ai-btn-nav--builder"
+              onClick={() => setChatMode("ai")}
+              title="Quay lại khung tư vấn AI"
+            >
+              <span>🤖</span> Quay lại Chat AI
+            </button>
+          )}
+          <Link to={routeConfig.public.ticketCreate} className="ai-btn-nav" title="Gửi phiếu yêu cầu hỗ trợ kỹ thuật / bảo hành cho Kỹ thuật viên">
+            <span>🛠️</span> Hỗ Trợ Kỹ Thuật
+          </Link>
           <Link to={routeConfig.public.pcBuilder} className="ai-btn-nav ai-btn-nav--builder" title="Mở không gian lắp ráp">
             <span>🚀</span> PC Builder
           </Link>
@@ -313,6 +515,120 @@ export function AiChatPage() {
       {/* 2. Thân Khung Chat: Danh sách tin nhắn cuộn nội bộ mượt mà */}
       <main className="ai-window-feed" ref={chatMessagesRef}>
         <div className="ai-feed-inner">
+          {chatMode === "human" ? (
+            <>
+              {(liveSession?.messages || []).map((msg) => {
+                const isCustomer = msg.sender === "customer";
+                const isSystem = msg.sender === "system";
+
+                if (isSystem) {
+                  // Rút gọn tin nhắn briefing hệ thống dài cho khách dễ nhìn
+                  const isBriefing = String(msg.text || "").includes("TÓM TẮT NGỮ CẢNH") || String(msg.text || "").length > 260;
+                  return (
+                    <div
+                      key={msg.id}
+                      style={{
+                        alignSelf: "center",
+                        background: "#eff6ff",
+                        border: "1px solid #bfdbfe",
+                        color: "#1e40af",
+                        fontSize: "12px",
+                        padding: "8px 14px",
+                        borderRadius: "12px",
+                        maxWidth: "85%",
+                        textAlign: "center"
+                      }}
+                    >
+                      {isBriefing
+                        ? "📋 Hệ thống đã tự động chuyển tóm tắt lịch sử tư vấn AI & cấu hình PC của bạn cho Nhân viên Bán hàng."
+                        : msg.text}
+                    </div>
+                  );
+                }
+
+                return (
+                  <article key={msg.id} className={`ai-msg-row ${isCustomer ? "ai-msg-row--user" : "ai-msg-row--bot"}`}>
+                    {!isCustomer ? (
+                      <div className="ai-avatar ai-avatar--bot" style={{ background: "linear-gradient(135deg, #059669, #047857)" }}>
+                        <span>NV</span>
+                      </div>
+                    ) : null}
+
+                    <div className="ai-msg-content-shell">
+                      <div className="ai-msg-sender-label">
+                        {isCustomer ? "Bạn" : liveSession?.staffName || "Nhân viên Tư vấn PC Mall"}
+                      </div>
+                      <div className="ai-bubble" dangerouslySetInnerHTML={{ __html: renderContent(msg.text) }} />
+
+                      {msg.buildData?.productSuggestion ? (
+                        <div
+                          style={{
+                            marginTop: "8px",
+                            padding: "10px 14px",
+                            background: "#f8fafc",
+                            border: "1px solid #cbd5e1",
+                            borderRadius: "12px",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: "12px"
+                          }}
+                        >
+                          <div>
+                            <small style={{ color: "#64748b", display: "block", fontSize: "11px" }}>💡 Sản phẩm đề xuất từ nhân viên</small>
+                            <strong style={{ color: "#0f172a", fontSize: "13px" }}>{msg.buildData.productSuggestion.title}</strong>
+                          </div>
+                          {msg.buildData.productSuggestion.url ? (
+                            <a
+                              href={msg.buildData.productSuggestion.url}
+                              className="ai-btn-nav ai-btn-nav--builder"
+                              style={{ textDecoration: "none" }}
+                            >
+                              Xem ngay →
+                            </a>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {msg.buildData?.components ? (
+                        <div className="ai-compact-build-card">
+                          <div className="ai-build-card-top">
+                            <div>
+                              <span className="ai-build-badge">🧩 CẤU HÌNH NHÂN VIÊN ĐỀ XUẤT</span>
+                              <div className="ai-build-title">Dàn máy được chuyên viên tư vấn thiết kế cho bạn</div>
+                            </div>
+                          </div>
+                          <div className="ai-build-components-list">
+                            {getBuildComponents(msg.buildData).map((item) => (
+                              <div key={`${item.componentType}-${item.skuId || item.name}`} className="ai-build-component-row">
+                                <span className="ai-comp-type-badge">{(item.componentType || "").toUpperCase()}</span>
+                                <div className="ai-comp-main-info">
+                                  <span className="ai-comp-full-name">{item.name}</span>
+                                </div>
+                                <span className="ai-comp-row-price">{formatCurrency(item.price)}đ</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="ai-build-card-bottom">
+                            <button
+                              type="button"
+                              className="ai-btn-apply-builder"
+                              onClick={() => handleApplyBuildToBuilder(msg.buildData)}
+                            >
+                              🚀 Áp Dụng Cấu Hình Này Vào Không Gian Lắp Ráp →
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {isCustomer ? <div className="ai-avatar ai-avatar--user">{customerAvatarLabel}</div> : null}
+                  </article>
+                );
+              })}
+            </>
+          ) : (
+            <>
           {aiMessages.length === 0 ? (
             <div className="ai-empty-hero">
               <div className="ai-hero-badge">⚡ CHUYÊN GIA TƯ VẤN PHẦN CỨNG THỜI GIAN THỰC</div>
@@ -423,12 +739,61 @@ export function AiChatPage() {
                       ))}
                     </div>
                   ) : null}
+
+                  {/* AI Response Feedback Thumb Buttons */}
+                  {!isUser && (
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px", fontSize: "11px", color: "#64748b" }}>
+                      <span>Tư vấn có hữu ích?</span>
+                      {feedbackMap[message.id] ? (
+                        <span style={{ color: "#059669", fontWeight: "700" }}>
+                          {feedbackMap[message.id] === 1 ? "👍 Cảm ơn bạn đã hài lòng!" : "👎 Đã ghi nhận góp ý của bạn!"}
+                        </span>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleFeedback(message.id, 1, message.content)}
+                            title="Hữu ích"
+                            style={{
+                              background: "none",
+                              border: "1px solid #e2e8f0",
+                              borderRadius: "6px",
+                              padding: "2px 6px",
+                              cursor: "pointer",
+                              fontSize: "12px",
+                              transition: "all 0.2s"
+                            }}
+                          >
+                            👍
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleFeedback(message.id, -1, message.content)}
+                            title="Chưa hài lòng"
+                            style={{
+                              background: "none",
+                              border: "1px solid #e2e8f0",
+                              borderRadius: "6px",
+                              padding: "2px 6px",
+                              cursor: "pointer",
+                              fontSize: "12px",
+                              transition: "all 0.2s"
+                            }}
+                          >
+                            👎
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {isUser ? <div className="ai-avatar ai-avatar--user">{customerAvatarLabel}</div> : null}
               </article>
             );
           })}
+            </>
+          )}
 
           {loading ? (
             <article className="ai-msg-row ai-msg-row--bot">

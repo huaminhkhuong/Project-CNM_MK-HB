@@ -414,11 +414,13 @@ function buildAdviceInput(buildSnapshot, payload = {}) {
   return inputParts.join("\n\n");
 }
 
-async function createResponsesRequest(instructions, userInput) {
+async function createResponsesRequest(instructions, userInput, options = {}) {
   const { unifiedLlmService } = require("./unified-llm.service");
   const res = await unifiedLlmService.generateText({
     prompt: userInput,
-    systemInstruction: instructions
+    systemInstruction: instructions,
+    temperature: options.temperature,
+    maxTokens: options.maxTokens
   });
 
   if (res.isBlocked) {
@@ -1639,10 +1641,19 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
 
   // Lấy cấu hình Prompt và Quy tắc từ Quản trị AI
   const promptConfig = aiRuleService.getPromptByScope("GENERAL_CHAT");
-  const effectiveSystemPrompt = promptConfig?.systemPrompt || PC_MALL_SALES_SYSTEM_PROMPT;
+  const baseSystemPrompt = promptConfig?.systemPrompt || PC_MALL_SALES_SYSTEM_PROMPT;
+  const llmGenOptions = {
+    temperature: promptConfig?.temperature !== undefined ? Number(promptConfig.temperature) : undefined,
+    maxTokens: promptConfig?.maxTokens !== undefined ? Number(promptConfig.maxTokens) : undefined
+  };
 
   // TẦNG 1: Đánh giá bằng Bộ Lọc & Quy Tắc Quản Trị (0ms, 0$ token)
   const ruleEvaluation = aiRuleService.evaluateInput("GENERAL_CHAT", message, payload);
+  const injectedInstructions = Array.isArray(ruleEvaluation.promptInjections) && ruleEvaluation.promptInjections.length > 0
+    ? `\n\n[CHỈ THỊ BỔ SUNG TỪ BỘ QUY TẮC QUẢN TRỊ]:\n${ruleEvaluation.promptInjections.join("\n")}`
+    : "";
+  const effectiveSystemPrompt = `${baseSystemPrompt}${injectedInstructions}`;
+
   if (ruleEvaluation.handled) {
     if (ruleEvaluation.action === "DIRECT_REPLY") {
       return {
@@ -1811,7 +1822,7 @@ Yêu cầu trả lời:
 - Nếu kho PC Mall có các linh kiện liên quan ở trên, hãy gợi ý một cách tự nhiên như lựa chọn sẵn hàng tại cửa hàng kèm mức giá tham khảo.
 - Tuyệt đối không chỉ liệt kê danh sách mã sản phẩm thô sơ mà không có giải thích kỹ thuật. Định dạng Markdown rõ ràng, chuyên nghiệp.`;
 
-      const llmRes = await createResponsesRequest(promptToLlm, message);
+      const llmRes = await createResponsesRequest(promptToLlm, message, llmGenOptions);
       if (llmRes && llmRes.output_text) {
         llmReply = llmRes.output_text;
       }
@@ -1820,7 +1831,25 @@ Yêu cầu trả lời:
     }
 
     if (!llmReply) {
-      llmReply = `Đối với câu hỏi "${message}": Hệ thống ghi nhận các thế hệ phần cứng mới nhất hiện nay đều sở hữu nhiều cải tiến vượt bậc về tiến trình và hiệu năng. Bạn có thể tham khảo thêm các sản phẩm sẵn có tại PC Mall bên dưới để chọn linh kiện phù hợp nhất.`;
+      const normTech = normalizeVietnamese(message);
+      const stockSummary = topMatched.length > 0
+        ? `\n\n**📦 Linh kiện tiêu biểu sẵn hàng tại PC Mall:**\n` + topMatched.map(formatProductLine).join("\n")
+        : "";
+      if (/\b(intel|core|ultra)\b/i.test(normTech)) {
+        llmReply = [
+          "🚀 **Vi xử lý Intel tối tân & mạnh nhất hiện nay:**",
+          "- **Thế hệ mới nhất (Arrow Lake - Socket LGA 1851):** Dòng **Intel Core Ultra 200S** (Core Ultra 9 285K, Core Ultra 7 265K/270K, Core Ultra 5 245K) tích hợp NPU xử lý AI chuyên dụng, tối ưu hiệu suất/điện năng và hỗ trợ RAM DDR5 tốc độ cao.",
+          "- **Thế hệ Raptor Lake Refresh (Socket LGA 1700):** Dòng **Intel Core i9-14900K / i7-14700K / i5-14600K** vẫn cực kỳ phổ biến nhờ xung nhịp đơn nhân lên tới 5.8 - 6.0 GHz và tương thích cả bo mạch chủ B760/Z790."
+        ].join("\n") + stockSummary;
+      } else if (/\b(amd|ryzen)\b/i.test(normTech)) {
+        llmReply = [
+          "💎 **Vi xử lý AMD Ryzen hiện đại & mạnh nhất hiện nay (Socket AM5):**",
+          "- **Kiến trúc Zen 5 (Ryzen 9000 Series):** **Ryzen 9 9950X / 9900X**, **Ryzen 7 9800X3D / 9700X**, **Ryzen 5 9600X** dẫn đầu về IPC, mát mẻ và tiết kiệm điện năng.",
+          "- **Vua Gaming 3D V-Cache:** Dòng **Ryzen 7 7800X3D & 9800X3D** sở hữu bộ nhớ đệm L3 khổng lồ (96MB), mang lại mức FPS cao nhất thế giới cho các tựa game eSports & AAA."
+        ].join("\n") + stockSummary;
+      } else {
+        llmReply = `Đối với câu hỏi **"${message}"**: Hệ thống ghi nhận các thế hệ phần cứng mới nhất hiện nay đều sở hữu nhiều cải tiến vượt bậc về tiến trình và hiệu năng.${stockSummary}`;
+      }
     }
 
     response.reply = llmReply;
@@ -1865,7 +1894,7 @@ Yêu cầu trả lời:
 - QUY TẮC TRUNG THỰC: Không tự bịa đặt sản phẩm hoặc giá cả không có thật. Nếu kho chưa có mã sản phẩm khách hỏi, hãy giải thích công nghệ và gợi ý linh kiện thay thế đang có sẵn trong kho.
 - Định dạng Markdown rõ ràng, bullet points, bảng biểu hoặc in đậm điểm cốt lõi.`;
 
-      const llmRes = await createResponsesRequest(promptToLlm, message);
+      const llmRes = await createResponsesRequest(promptToLlm, message, llmGenOptions);
       if (llmRes && llmRes.output_text) {
         response.reply = llmRes.output_text;
         response.products = buildProductCardPayload(topMatched.slice(0, 2));
@@ -1875,7 +1904,10 @@ Yêu cầu trả lời:
       console.warn("[AI Service] LLM general_knowledge error, fallback to local:", err.message);
     }
 
-    response.reply = generalKnowledgeReply(message);
+    const stockLines = topMatched.length > 0
+      ? `\n\n**📦 Sản phẩm thực tế sẵn hàng tại PC Mall:**\n` + topMatched.slice(0, 2).map(formatProductLine).join("\n")
+      : "";
+    response.reply = `${generalKnowledgeReply(message)}${stockLines}`;
     response.products = buildProductCardPayload(topMatched.slice(0, 2));
     return response;
   }
@@ -1973,7 +2005,7 @@ Hãy viết phần tư vấn chuyên sâu, súc tích (khoảng 2-3 đoạn ng�
 3. Hướng dẫn khách hàng bấm nút "Áp Dụng Cấu Hình Này Vào PC Builder" ngay bên dưới để mở toàn quyền lắp ráp và kiểm tra tương thích.
 Không cần in lại danh sách gạch đầu dòng tất cả linh kiện vì hệ thống đã tự động hiển thị Bảng Cấu Hình trực quan bên dưới.`;
 
-      const llmRes = await createResponsesRequest(promptToLlm, message);
+      const llmRes = await createResponsesRequest(promptToLlm, message, llmGenOptions);
       if (llmRes && llmRes.output_text) {
         buildIntro = llmRes.output_text;
       }
@@ -2039,7 +2071,11 @@ Yêu cầu trả lời:
 
   // 5. SO SÁNH ĐỐI ĐẦU LINH KIỆN
   if (intent === "comparison") {
-    const sides = message.split(/\b(?:vs|và|va|với|voi)\b/i).map(s => normalizeVietnamese(s).trim()).filter(Boolean);
+    // Tách 2 vế so sánh trên chuỗi đã bỏ dấu (\b của JS regex không nhận ký tự có dấu như "và")
+    const sides = normalizeVietnamese(message)
+      .split(/\s+(?:vs\.?|va|voi|hay la|hay|hoac|or|so voi)\s+/i)
+      .map(s => s.trim())
+      .filter(Boolean);
     let matchedProducts = [];
 
     if (sides.length >= 2) {
@@ -2073,15 +2109,29 @@ Yêu cầu trả lời:
         .filter((t) => t.length >= 2 && !ignoreTokens.includes(t));
 
       if (tokens.length > 0) {
-        matchedProducts = products
+        const scored = products
           .map(p => {
             const pNorm = normalizeVietnamese(p.name);
             const score = tokens.reduce((acc, t) => acc + (pNorm.includes(t) ? (/\d/.test(t) ? 4 : 1) : 0), 0);
-            return { product: p, score };
+            const modelKey = tokens.filter(t => /\d/.test(t) && pNorm.includes(t)).join("|");
+            return { product: p, score, modelKey };
           })
           .filter(x => x.score > 0)
-          .sort((a, b) => b.score - a.score)
-          .map(x => x.product);
+          .sort((a, b) => b.score - a.score);
+
+        // Ưu tiên đa dạng: không trả về 2 sản phẩm cùng một model (vd: 2 card RTX 4060 khi khách hỏi 4060 vs 4070)
+        const diverse = [];
+        const usedKeys = new Set(matchedProducts.map(p => {
+          const pNorm = normalizeVietnamese(p.name);
+          return tokens.filter(t => /\d/.test(t) && pNorm.includes(t)).join("|");
+        }));
+        for (const x of scored) {
+          if (matchedProducts.some(m => m.id === x.product.id)) continue;
+          if (x.modelKey && usedKeys.has(x.modelKey)) continue;
+          diverse.push(x.product);
+          usedKeys.add(x.modelKey);
+        }
+        matchedProducts = [...matchedProducts, ...diverse];
       }
     }
 
@@ -2108,7 +2158,7 @@ Yêu cầu trả lời:
 - Đưa ra lời khuyên cụ thể theo từng nhóm nhu cầu (gaming, làm việc, ngân sách tối ưu).
 - Nếu có sản phẩm liên quan trong kho PC Mall ở trên, liên hệ trực tiếp với giá bán và tình trạng sẵn hàng. Không bịa đặt giá.`;
 
-      const llmRes = await createResponsesRequest(promptToLlm, message);
+      const llmRes = await createResponsesRequest(promptToLlm, message, llmGenOptions);
       if (llmRes && llmRes.output_text) {
         llmReply = llmRes.output_text;
       }
@@ -2118,12 +2168,22 @@ Yêu cầu trả lời:
 
     if (!llmReply) {
       const comparisonItems = top.map((p, idx) => {
-        return `${idx + 1}. **${p.name}** - Giá: **${Number(p.price).toLocaleString("vi-VN")}đ** (Còn ${p.stock} sản phẩm)`;
+        return `${idx + 1}. **${p.name}** — Giá niêm yết: **${Number(p.price).toLocaleString("vi-VN")}đ** (Còn ${p.stock} sản phẩm)`;
       });
+      const normComp = normalizeVietnamese(message);
+      const extraTechnicalCompare = (normComp.includes("4060") && normComp.includes("4070"))
+        ? [
+            "",
+            "**📊 Phân tích kỹ thuật đối đầu (RTX 4060 vs RTX 4070):**",
+            "- **Hiệu năng & Độ phân giải:** **RTX 4060 (8GB VRAM)** tối ưu cho màn hình **1080p High/Ultra**, trong khi **RTX 4070 (12GB GDDR6X)** mạnh hơn khoảng **35–45%** và gánh mượt màn hình **2K (1440p) Max Settings**.",
+            "- **Điện năng & Nguồn (PSU):** RTX 4060 rất tiết kiệm điện (TDP ~115W, chỉ cần nguồn 550W), còn RTX 4070 (TDP ~200W) khuyến nghị nguồn từ **650W 80 Plus** trở lên."
+          ]
+        : [];
       llmReply = [
         "🔍 **So Sánh Linh Kiện Dựa Trên Dữ Liệu Thực Tế PC Mall:**",
         "",
         ...comparisonItems,
+        ...extraTechnicalCompare,
         "",
         "⚖️ **Lời khuyên:** Bạn có thể bấm nút **So sánh** trên từng card sản phẩm bên dưới để xem đối chiếu chi tiết thông số kỹ thuật!"
       ].join("\n");

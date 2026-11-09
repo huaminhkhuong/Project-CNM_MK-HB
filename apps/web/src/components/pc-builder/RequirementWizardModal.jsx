@@ -1324,12 +1324,12 @@ export function RequirementWizardModal({
                         <span style={{ fontSize: "13.5px", fontWeight: "800", color: "#1e40af" }}>HƯỚNG 2: AI TƯ VẤN</span>
                       </div>
                       <span style={{ fontSize: "10px", fontWeight: "700", padding: "2px 7px", borderRadius: "5px", backgroundColor: "#2563eb", color: "#ffffff" }}>
-                        Gemini 2.5 LLM
+                        Gemini 3.5 LLM
                       </span>
                     </div>
 
                     <div style={{ fontSize: "12px", color: "#334155", marginBottom: "10px", lineHeight: "1.45" }}>
-                      Mô hình Gemini 2.5 tiếp nhận toàn bộ tiêu chí kỹ thuật ở trên, đồng thời cung cấp thêm ô nhập bên dưới để bạn bổ sung các yêu cầu riêng biệt theo ngôn ngữ tự nhiên.
+                      Mô hình Gemini 3.5 tiếp nhận toàn bộ tiêu chí kỹ thuật ở trên, đồng thời cung cấp thêm ô nhập bên dưới để bạn bổ sung các yêu cầu riêng biệt theo ngôn ngữ tự nhiên.
                     </div>
 
                     {/* Ô NHẬP THÊM RIÊNG BIỆT DÀNH CHO AI */}

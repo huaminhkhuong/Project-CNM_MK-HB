@@ -93,7 +93,8 @@ export const streamAiSuggestBuild = async (req: Request, res: Response) => {
   try {
     // TẦNG 1: Kiểm tra quy tắc lọc đầu vào BUILDER_SUGGEST
     const { aiRuleService } = require("../ai/ai-rule.service");
-    const evalResult = aiRuleService.evaluateInput("BUILDER_SUGGEST", "", { budget: req.body?.budget });
+    const userCustomPrompt = String(req.body?.customPrompt || req.body?.rawPrompt || req.body?.promptText || "");
+    const evalResult = aiRuleService.evaluateInput("BUILDER_SUGGEST", userCustomPrompt, { budget: req.body?.budget });
     if (evalResult.handled && evalResult.action === "BLOCK") {
       sendEvent({
         type: "error",
@@ -103,8 +104,12 @@ export const streamAiSuggestBuild = async (req: Request, res: Response) => {
       return;
     }
 
+    const rulePromptInjection = Array.isArray(evalResult.promptInjections)
+      ? evalResult.promptInjections.join("\n")
+      : (evalResult.promptInjection || "");
+
     await pcBuilderService.streamAiSuggestBuild(
-      req.body || {},
+      { ...(req.body || {}), rulePromptInjection },
       (chunk: string) => sendEvent({ type: "chunk", text: chunk }),
       sendEvent
     );
@@ -126,8 +131,15 @@ export const streamAiAuditBuild = async (req: Request, res: Response) => {
   };
 
   try {
+    const { aiRuleService } = require("../ai/ai-rule.service");
+    const auditContextText = JSON.stringify(req.body?.buildItems || []);
+    const evalResult = aiRuleService.evaluateInput("BUILDER_AUDIT_CHAT", auditContextText, req.body || {});
+    const rulePromptInjection = Array.isArray(evalResult.promptInjections)
+      ? evalResult.promptInjections.join("\n")
+      : (evalResult.promptInjection || "");
+
     await pcBuilderService.streamAiAuditBuild(
-      req.body || {},
+      { ...(req.body || {}), rulePromptInjection },
       (chunk: string) => sendEvent({ type: "chunk", text: chunk }),
       sendEvent
     );
@@ -149,17 +161,22 @@ export const streamAiChatBuild = async (req: Request, res: Response) => {
   };
 
   try {
-    // TẦNG 1: Kiểm tra quy tắc lọc đầu vào BUILDER_AUDIT_CHAT
+    // TẦNG 1: Kiểm tra quy tắc lọc đầu vào BUILDER_AUDIT_CHAT (kèm fallback FAQ / Guardrail từ GENERAL_CHAT)
     const { aiRuleService } = require("../ai/ai-rule.service");
-    const evalResult = aiRuleService.evaluateInput("BUILDER_AUDIT_CHAT", req.body?.userMessage || "", req.body || {});
+    let evalResult = aiRuleService.evaluateInput("BUILDER_AUDIT_CHAT", req.body?.userMessage || "", req.body || {});
+    if (!evalResult.handled) {
+      const generalEval = aiRuleService.evaluateInput("GENERAL_CHAT", req.body?.userMessage || "", req.body || {});
+      if (generalEval.handled) {
+        evalResult = generalEval;
+      }
+    }
     if (evalResult.handled && evalResult.action === "DIRECT_REPLY") {
+      sendEvent({ type: "chunk", text: evalResult.reply });
       sendEvent({
         type: "done",
-        result: {
-          reply: evalResult.reply,
-          replacements: [],
-          model: "system-local-faq"
-        }
+        reply: evalResult.reply,
+        replacements: [],
+        model: "system-local-faq"
       });
       res.end();
       return;
@@ -173,8 +190,12 @@ export const streamAiChatBuild = async (req: Request, res: Response) => {
       return;
     }
 
+    const rulePromptInjection = Array.isArray(evalResult.promptInjections)
+      ? evalResult.promptInjections.join("\n")
+      : (evalResult.promptInjection || "");
+
     await pcBuilderService.streamAiChatBuild(
-      req.body || {},
+      { ...(req.body || {}), rulePromptInjection },
       (chunk: string) => sendEvent({ type: "chunk", text: chunk }),
       sendEvent
     );

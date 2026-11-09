@@ -342,6 +342,21 @@ class AiRuleService {
         };
         this.saveStore();
       }
+      // Đồng bộ cấu hình từ store sang UnifiedLlmService ngay khi khởi động
+      try {
+        const { unifiedLlmService } = require("./unified-llm.service");
+        const sysCfg = this.store.systemConfig || {};
+        const syncPayload = {
+          provider: sysCfg.provider || "gemini",
+          model: sysCfg.model || "gemini-3.5-flash-lite",
+          temperature: Number(sysCfg.temperature ?? 0.35),
+          maxTokens: Number(sysCfg.maxTokens || 2048)
+        };
+        if (this.store.apiKey) {
+          syncPayload.apiKey = this.store.apiKey;
+        }
+        unifiedLlmService.configure(syncPayload);
+      } catch (_syncErr) {}
     } catch (err) {
       console.warn("[AiRuleService] Failed to load store from disk, using defaults:", err.message);
       this.store = {
@@ -591,6 +606,7 @@ class AiRuleService {
     const rules = this.getAllRules({ scope }).filter((r) => r.isActive);
 
     const promptInjections = [];
+    const matchedInjectRules = [];
 
     for (const rule of rules) {
       let isMatch = false;
@@ -684,15 +700,19 @@ class AiRuleService {
         // Nếu là SYSTEM_INJECT -> Thu thập chỉ thị để ghép vào prompt cho LLM
         if (rule.action === "SYSTEM_INJECT" && rule.promptInjection) {
           promptInjections.push(rule.promptInjection);
+          matchedInjectRules.push({ id: rule.id, name: rule.name });
         }
       }
     }
 
     return {
       handled: false,
-      action: "PASS_THROUGH",
+      action: matchedInjectRules.length > 0 ? "SYSTEM_INJECT" : "PASS_THROUGH",
+      ruleId: matchedInjectRules.map((r) => r.id).join(", ") || undefined,
+      ruleName: matchedInjectRules.map((r) => r.name).join(" + ") || undefined,
+      matchedRules: matchedInjectRules,
       promptInjections,
-      model: "llm-ready"
+      model: this.store?.systemConfig?.model || "gemini-1.5-flash"
     };
   }
 }

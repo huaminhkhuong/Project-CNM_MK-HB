@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
-import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 
+import { NotificationBell } from "../components/notifications/NotificationBell";
 import { useAuth } from "../hooks/useAuth";
+import { useSocket } from "../hooks/useSocket";
 import { getTicketStats } from "../services/ticket.service";
 
 const TECH_NAV_ITEMS = [
@@ -25,30 +27,52 @@ function getStatsData(response) {
 
 export function TechLayout() {
   const location = useLocation();
-  const { authState, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+  const { authState, isAuthenticated, logout } = useAuth();
+  const { joinRoom, on } = useSocket();
   const [queueCount, setQueueCount] = useState(0);
   const role = String(authState?.user?.role || "").toUpperCase();
   const techName = authState?.user?.fullName || authState?.user?.email || "Nhân viên kỹ thuật";
   const roleLabel = ROLE_LABELS[role] || role || "Kỹ thuật";
   const canAccess = ["ADMIN", "TECH_STAFF", "TECHNICIAN"].includes(role);
 
+  const loadStats = useCallback(async () => {
+    try {
+      const response = await getTicketStats();
+      const stats = getStatsData(response);
+      setQueueCount(Number(stats?.unassigned || stats?.waiting || 0));
+    } catch {
+      setQueueCount(0);
+    }
+  }, []);
+
   useEffect(() => {
     if (!canAccess) return undefined;
-
-    async function loadStats() {
-      try {
-        const response = await getTicketStats();
-        const stats = getStatsData(response);
-        setQueueCount(Number(stats?.unassigned || stats?.waiting || 0));
-      } catch {
-        setQueueCount(0);
-      }
-    }
 
     loadStats();
     const interval = setInterval(loadStats, 15000);
     return () => clearInterval(interval);
-  }, [canAccess]);
+  }, [canAccess, loadStats]);
+
+  useEffect(() => {
+    if (!canAccess) return undefined;
+    joinRoom("join_tech_queue");
+    const unsubNew = on("tickets:new_ticket", () => loadStats());
+    const unsubUpdate = on("tickets:queue_updated", () => loadStats());
+    return () => {
+      if (typeof unsubNew === "function") unsubNew();
+      if (typeof unsubUpdate === "function") unsubUpdate();
+    };
+  }, [canAccess, joinRoom, on, loadStats]);
+
+  async function handleLogout() {
+    try {
+      await logout();
+      navigate("/login", { replace: true });
+    } catch {
+      navigate("/login", { replace: true });
+    }
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
@@ -99,6 +123,7 @@ export function TechLayout() {
           </nav>
 
           <div className="tech-account">
+            <NotificationBell />
             <div>
               <div className="tech-account__name">{techName}</div>
               <div className="tech-account__role">{roleLabel}</div>
@@ -111,6 +136,20 @@ export function TechLayout() {
             <Link className="tech-account__link" to="/">
               Cửa hàng
             </Link>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="tech-account__link"
+              style={{
+                cursor: "pointer",
+                background: "#fef2f2",
+                color: "#b91c1c",
+                border: "1px solid #fecaca",
+                fontWeight: 800
+              }}
+            >
+              Đăng xuất
+            </button>
           </div>
         </div>
       </header>

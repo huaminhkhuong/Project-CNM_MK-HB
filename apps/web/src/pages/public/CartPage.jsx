@@ -5,6 +5,8 @@ import axios from "axios";
 import { useAuth } from "../../hooks/useAuth";
 import { httpClient } from "../../services/http";
 import { getCart, removeCartItem, updateCartItem } from "../../services/cart.service";
+import { getAvailableCoupons } from "../../services/coupon.service";
+import { resolveProductImage } from "../../utils/productImage";
 
 function getErrorMessage(error, fallbackMessage) {
   if (axios.isAxiosError(error)) {
@@ -41,6 +43,7 @@ export function CartPage() {
 
   // Coupon Voucher States
   const [couponInput, setCouponInput] = useState("");
+  const [availableCoupons, setAvailableCoupons] = useState([]);
   const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
   const [couponMessage, setCouponMessage] = useState(null);
@@ -48,25 +51,57 @@ export function CartPage() {
   const items = useMemo(() => cart?.items || [], [cart]);
   const totalAmount = Number(cart?.totalAmount || 0);
 
-  async function handleApplyCoupon() {
-    if (!couponInput.trim()) return;
+  async function validateCouponForCart(codeToValidate, targetCart = cart, silent = false) {
+    const cleanCode = String(codeToValidate || "").trim();
+    if (!cleanCode) return;
+    const cartItems = Array.isArray(targetCart?.items) ? targetCart.items : [];
+    const cartTotal = Number(targetCart?.totalAmount || 0);
+    if (cartItems.length === 0 || cartTotal <= 0) {
+      setAppliedCoupon(null);
+      if (!silent) setCouponMessage(null);
+      return;
+    }
+
     try {
-      setIsApplyingCoupon(true);
-      setCouponMessage(null);
+      if (!silent) {
+        setIsApplyingCoupon(true);
+        setCouponMessage(null);
+      }
       const res = await httpClient.post("/coupons/validate", {
-        code: couponInput.trim(),
-        orderAmount: totalAmount
+        code: cleanCode,
+        totalAmount: cartTotal,
+        orderAmount: cartTotal,
+        items: cartItems.map((item) => ({
+          productId: Number(item.product?.id || item.productId || 0),
+          categoryId: Number(item.product?.category?.id || item.product?.category_id || item.categoryId || 0),
+          unitPrice: Number(item.unitPrice || item.price || 0),
+          quantity: Number(item.quantity || 1),
+          lineTotal: Number(item.lineTotal || Number(item.unitPrice || 0) * Number(item.quantity || 1))
+        }))
       });
       if (res.data?.success && res.data?.data) {
-        setAppliedCoupon(res.data.data);
-        setCouponMessage({ type: "success", text: `Đã áp dụng mã: ${res.data.data.description}` });
+        const data = res.data.data;
+        setCouponInput(data.code || cleanCode.toUpperCase());
+        setAppliedCoupon(data);
+        setCouponMessage({
+          type: "success",
+          text: `Đã áp dụng mã ${data.code || cleanCode.toUpperCase()}: Giảm ${formatCurrency(data.discountAmount)} đ`
+        });
       }
     } catch (err) {
       const msg = err.response?.data?.message || err.message || "Mã giảm giá không hợp lệ";
+      setAppliedCoupon(null);
       setCouponMessage({ type: "error", text: msg });
     } finally {
-      setIsApplyingCoupon(false);
+      if (!silent) {
+        setIsApplyingCoupon(false);
+      }
     }
+  }
+
+  async function handleApplyCoupon(codeOverride) {
+    const code = typeof codeOverride === "string" ? codeOverride : couponInput;
+    await validateCouponForCart(code, cart, false);
   }
 
   function handleRemoveCoupon() {
@@ -76,17 +111,17 @@ export function CartPage() {
   }
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      setLoading(false);
-      return;
-    }
-
-    async function loadCart() {
+    async function loadCartAndCoupons() {
       try {
         setLoading(true);
         setErrorMessage("");
-        const response = await getCart();
-        setCart(normalizeCartResponse(response));
+        const [cartResponse, couponsResponse] = await Promise.all([
+          getCart(),
+          getAvailableCoupons().catch(() => ({ data: [] }))
+        ]);
+        setCart(normalizeCartResponse(cartResponse));
+        const couponsList = couponsResponse?.data || couponsResponse || [];
+        setAvailableCoupons(Array.isArray(couponsList) ? couponsList : []);
       } catch (error) {
         setErrorMessage(getErrorMessage(error, "Không thể tải giỏ hàng"));
       } finally {
@@ -94,7 +129,7 @@ export function CartPage() {
       }
     }
 
-    loadCart();
+    loadCartAndCoupons();
   }, [isAuthenticated]);
 
   async function handleUpdateQuantity(itemId, nextQuantity) {
@@ -106,7 +141,11 @@ export function CartPage() {
       setProcessingItemId(String(itemId));
       setErrorMessage("");
       const response = await updateCartItem(itemId, { quantity: nextQuantity });
-      setCart(normalizeCartResponse(response));
+      const nextCart = normalizeCartResponse(response);
+      setCart(nextCart);
+      if (appliedCoupon?.code) {
+        await validateCouponForCart(appliedCoupon.code, nextCart, true);
+      }
     } catch (error) {
       setErrorMessage(getErrorMessage(error, "Không thể cập nhật số lượng"));
     } finally {
@@ -119,25 +158,16 @@ export function CartPage() {
       setProcessingItemId(String(itemId));
       setErrorMessage("");
       const response = await removeCartItem(itemId);
-      setCart(normalizeCartResponse(response));
+      const nextCart = normalizeCartResponse(response);
+      setCart(nextCart);
+      if (appliedCoupon?.code) {
+        await validateCouponForCart(appliedCoupon.code, nextCart, true);
+      }
     } catch (error) {
       setErrorMessage(getErrorMessage(error, "Không thể xóa sản phẩm khỏi giỏ hàng"));
     } finally {
       setProcessingItemId("");
     }
-  }
-
-  if (!isAuthenticated) {
-    return (
-      <div style={{ minHeight: "60vh", display: "grid", placeItems: "center" }}>
-        <div style={{ ...SECTION_STYLE, textAlign: 'center', maxWidth: 500 }}>
-          <div style={{ fontSize: 64, marginBottom: 24, padding: "20px", display: "inline-block", background: "#f1f5f9", borderRadius: "50%" }}>🔒</div>
-          <h2 style={{ fontSize: 28, fontWeight: 900, marginBottom: 16 }}>Truy cập bị hạn chế</h2>
-          <p style={{ color: "#64748b", margin: "0 0 32px", fontSize: 16 }}>Bạn cần đăng nhập để xem giỏ hàng và tiếp tục hành trình mua sắm các linh kiện PC cao cấp.</p>
-          <Link to="/login" state={{ from: { pathname: "/cart" } }} style={{ display: "inline-block", padding: "14px 32px", borderRadius: 16, background: "var(--market-primary)", color: "#fff", textDecoration: "none", fontWeight: 800 }}>Đăng nhập ngay</Link>
-        </div>
-      </div>
-    );
   }
 
   if (loading) {
@@ -165,6 +195,13 @@ export function CartPage() {
         <p style={{ color: "#64748b", fontSize: 17, fontWeight: 600 }}>Thiết kế bộ PC mơ ước, thanh toán linh hoạt.</p>
       </div>
 
+      {!isAuthenticated && items.length > 0 && (
+        <div style={{ marginBottom: 24, padding: "14px 20px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 18, color: "#1e40af", fontWeight: 700, fontSize: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span>💡 Bạn đang xem Giỏ hàng Khách. Khi đăng nhập, các linh kiện này sẽ tự động đồng bộ vào tài khoản của bạn.</span>
+          <Link to="/login" state={{ from: { pathname: "/cart" } }} style={{ color: "#1d4ed8", fontWeight: 900, textDecoration: "underline" }}>Đăng nhập ngay</Link>
+        </div>
+      )}
+
       {errorMessage && (
         <div style={{ marginBottom: 32, padding: '16px 24px', background: 'rgba(239, 68, 68, 0.08)', borderRadius: 20, color: '#b91c1c', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>⚠️ {errorMessage}</span>
@@ -185,8 +222,11 @@ export function CartPage() {
           <div style={{ display: "grid", gap: 20 }}>
             {items.map((item) => {
               const isProcessing = processingItemId === String(item.id);
-              // Use camelCase imageUrl from both product (newly updated) and variant
-              const imgSrc = item.product?.imageUrl || item.variant?.imageUrl;
+              const imgSrc = resolveProductImage({
+                image_url: item.product?.imageUrl || item.variant?.imageUrl,
+                category_name: item.product?.category?.name,
+                name: item.product?.name
+              });
 
               return (
                 <article
@@ -319,7 +359,7 @@ export function CartPage() {
                     ) : (
                       <button
                         type="button"
-                        onClick={handleApplyCoupon}
+                        onClick={() => handleApplyCoupon()}
                         disabled={isApplyingCoupon || !couponInput.trim()}
                         style={{
                           padding: '10px 16px',
@@ -336,6 +376,31 @@ export function CartPage() {
                       </button>
                     )}
                   </div>
+                  {availableCoupons.length > 0 && !appliedCoupon && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                      {availableCoupons.slice(0, 4).map((c) => (
+                        <button
+                          key={c.id || c.code}
+                          type="button"
+                          onClick={() => handleApplyCoupon(c.code)}
+                          disabled={isApplyingCoupon}
+                          title={c.description || c.name}
+                          style={{
+                            padding: "4px 10px",
+                            borderRadius: 999,
+                            border: "1px dashed #3b82f6",
+                            background: "#eff6ff",
+                            color: "#1d4ed8",
+                            fontSize: 11,
+                            fontWeight: 800,
+                            cursor: "pointer"
+                          }}
+                        >
+                          🎟️ {c.code}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {couponMessage && (
                     <div style={{ fontSize: 12, marginTop: 6, fontWeight: 700, color: couponMessage.type === 'success' ? '#16a34a' : '#dc2626' }}>
                       {couponMessage.text}
@@ -355,7 +420,7 @@ export function CartPage() {
                   <span style={{ fontWeight: 900, fontSize: 18, color: "#0f172a" }}>Tổng cộng</span>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: 28, fontWeight: 950, color: 'var(--market-primary)' }}>
-                      {formatCurrency(appliedCoupon ? appliedCoupon.finalAmount : totalAmount)} đ
+                      {formatCurrency(Math.max(0, totalAmount - Number(appliedCoupon?.discountAmount || 0)))} đ
                     </div>
                     <div style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600, marginTop: 4 }}>(Đã tính thuế VAT)</div>
                   </div>
@@ -365,7 +430,13 @@ export function CartPage() {
               <div style={{ display: 'grid', gap: 16 }}>
                 <button
                   type="button"
-                  onClick={() => navigate("/checkout", { state: { appliedCoupon } })}
+                  onClick={() => {
+                    if (!isAuthenticated) {
+                      navigate("/login", { state: { from: { pathname: "/checkout", state: { appliedCoupon } } } });
+                      return;
+                    }
+                    navigate("/checkout", { state: { appliedCoupon } });
+                  }}
                   style={{ 
                     height: 64, fontSize: 18, borderRadius: 20, border: "none", 
                     background: "linear-gradient(135deg, var(--market-primary), #1e40af)", 
@@ -375,7 +446,7 @@ export function CartPage() {
                   onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 15px 30px rgba(32, 120, 202, 0.3)"; }}
                   onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 10px 25px rgba(32, 120, 202, 0.2)"; }}
                 >
-                  XÁC NHẬN THANH TOÁN
+                  {isAuthenticated ? "XÁC NHẬN THANH TOÁN" : "ĐĂNG NHẬP ĐỂ THANH TOÁN"}
                 </button>
                 <Link 
                   to="/products"

@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   AdminAlerts,
@@ -14,6 +14,7 @@ import {
   useAdminToast
 } from "../../components/admin/AdminUi";
 import { getAdminSystemOverview, updateAdminSystemSettings } from "../../services/admin-system.service";
+import { invalidateStoreInfoCache } from "../../services/store-info.service";
 import { formatAdminDateTime, formatAdminNumber, getAdminEnvelopeData, getAdminErrorMessage } from "../../utils/adminUi";
 
 const FIELD_LABELS = {
@@ -22,7 +23,13 @@ const FIELD_LABELS = {
   support_phone: "Số điện thoại hỗ trợ",
   online_payment_mode: "Thanh toán online",
   shipping_mode: "Vận chuyển",
-  maintenance_mode: "Bảo trì"
+  maintenance_mode: "Bảo trì",
+  bank_name: "Tên ngân hàng nhận chuyển khoản",
+  bank_account_number: "Số tài khoản ngân hàng",
+  bank_account_holder: "Tên chủ tài khoản",
+  store_hotline: "Hotline tổng đài tư vấn",
+  store_tax_id: "Mã số thuế doanh nghiệp",
+  store_address: "Địa chỉ trụ sở / Showroom chính"
 };
 
 const SELECT_OPTIONS = {
@@ -59,7 +66,13 @@ export function AdminSystemPage() {
     support_phone: "",
     online_payment_mode: "sandbox",
     shipping_mode: "mock",
-    maintenance_mode: "off"
+    maintenance_mode: "off",
+    bank_name: "",
+    bank_account_number: "",
+    bank_account_holder: "",
+    store_hotline: "",
+    store_tax_id: "",
+    store_address: ""
   });
 
   useAdminToast(successMessage, () => setSuccessMessage(""));
@@ -99,6 +112,7 @@ export function AdminSystemPage() {
       setErrorMessage("");
       setSuccessMessage("");
       const response = await updateAdminSystemSettings(formState);
+      invalidateStoreInfoCache();
       const payload = getAdminEnvelopeData(response, null);
       setOverview((prev) => ({ ...prev, settings: payload }));
       setSuccessMessage("Đã cập nhật cấu hình hệ thống.");

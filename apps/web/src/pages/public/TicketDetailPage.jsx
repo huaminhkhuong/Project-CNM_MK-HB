@@ -4,6 +4,7 @@ import axios from "axios";
 
 import { addTicketMessage, getTicketDetail } from "../../services/ticket.service";
 import { useAuth } from "../../hooks/useAuth";
+import { useSocket } from "../../hooks/useSocket";
 import { routeConfig } from "../../routes/routeConfig";
 import {
   extractAttachmentMentions,
@@ -143,6 +144,7 @@ function TicketAttachmentList({ attachments = [] }) {
 export function TicketDetailPage() {
   const { ticketId } = useParams();
   const { authState, isAuthenticated } = useAuth();
+  const { joinRoom, leaveRoom, on } = useSocket();
   const [ticket, setTicket] = useState(null);
   const [replyMessage, setReplyMessage] = useState("");
   const [attachments, setAttachments] = useState([]);
@@ -216,6 +218,29 @@ export function TicketDetailPage() {
       document.removeEventListener("visibilitychange", syncLatest);
     };
   }, [isAuthenticated, loadTicket, submitting, ticketId]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !ticketId) return undefined;
+
+    joinRoom("join_ticket", ticketId);
+
+    const unsubNewMsg = on("ticket:new_message", (payload) => {
+      if (String(payload?.ticketId) !== String(ticketId)) return;
+      loadTicket({ silent: true });
+    });
+
+    const unsubStatusChanged = on("ticket:status_changed", (updatedTicket) => {
+      if (String(updatedTicket?.id) === String(ticketId)) {
+        loadTicket({ silent: true });
+      }
+    });
+
+    return () => {
+      if (typeof unsubNewMsg === "function") unsubNewMsg();
+      if (typeof unsubStatusChanged === "function") unsubStatusChanged();
+      leaveRoom("leave_ticket", ticketId);
+    };
+  }, [isAuthenticated, joinRoom, leaveRoom, loadTicket, on, ticketId]);
 
   if (!isAuthenticated) {
     return <Navigate to={routeConfig.public.login} replace />;

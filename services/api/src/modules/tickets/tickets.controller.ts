@@ -182,10 +182,17 @@ export const patchTicket = asyncHandler(async (req: Request, res: Response) => {
     assigned_to_id: payload.assignedToId
   });
 
-  // 🔔 Real-time: Thông báo trạng thái thay đổi cho client trong room ticket
-  emitToTicketRoom(req.params.id, "ticket:status_changed", updated);
+  // 🔔 Real-time: Thông báo trạng thái thay đổi cho client trong room ticket (ẩn ghi chú INTERNAL với khách hàng)
+  emitToTicketRoom(
+    req.params.id,
+    "ticket:status_changed",
+    filterTicketForViewer(updated, { userId: (ticket as any).user_id, role: ROLES.CUSTOMER })
+  );
   // 🔔 Real-time: Cập nhật danh sách cho kỹ thuật viên
-  emitToTechQueue("tickets:queue_updated", { ticketId: req.params.id, status: payload.status });
+  emitToTechQueue("tickets:queue_updated", {
+    ticketId: Number(req.params.id),
+    status: payload.status || (updated as any)?.status
+  });
 
   // 🔔 Gửi thông báo in-app cho người tạo ticket khi có thay đổi trạng thái
   const ticketCreatorId = (ticket as any).userId || (ticket as any).user_id;
@@ -220,22 +227,45 @@ export const postTicketMessage = asyncHandler(async (req: Request, res: Response
   }
 
   const payload = addTicketMessageSchema.parse(req.body);
-  const visibility = canManageTicketRole(req.user.role) && payload.visibility === "INTERNAL" ? "INTERNAL" : "PUBLIC";
-  const updated = await createTicketMessage({
+  const isStaff = canManageTicketRole(req.user.role);
+  const visibility = isStaff && payload.visibility === "INTERNAL" ? "INTERNAL" : "PUBLIC";
+  let updated = await createTicketMessage({
     ticketId: req.params.id,
     userId: req.user.userId,
     message: payload.message,
     visibility
   });
 
+  // Tự động chuyển trạng thái hợp lý khi có phản hồi mới
+  const currentStatus = String((ticket as any).status || "OPEN").toUpperCase();
+  if (!isStaff && currentStatus === "RESOLVED") {
+    // Khách hàng phản hồi lại khi ticket đang RESOLVED -> mở lại IN_PROGRESS để kỹ thuật viên xử lý tiếp
+    updated = await updateTicket(req.params.id, { status: "IN_PROGRESS" });
+    emitToTicketRoom(req.params.id, "ticket:status_changed", filterTicketForViewer(updated, { userId: (ticket as any).user_id, role: ROLES.CUSTOMER }));
+  } else if (isStaff && visibility === "PUBLIC" && currentStatus === "OPEN") {
+    // Kỹ thuật viên phản hồi công khai lần đầu trên ticket OPEN -> tự động chuyển sang IN_PROGRESS (và nhận phụ trách nếu chưa có)
+    const patchData: { status: "IN_PROGRESS"; assigned_to_id?: number } = { status: "IN_PROGRESS" };
+    if (!(ticket as any).assigned_to_id && (isTechRole(req.user.role) || String(req.user.role || "").toUpperCase() === ROLES.ADMIN)) {
+      patchData.assigned_to_id = Number(req.user.userId);
+    }
+    updated = await updateTicket(req.params.id, patchData);
+    emitToTicketRoom(req.params.id, "ticket:status_changed", filterTicketForViewer(updated, { userId: (ticket as any).user_id, role: ROLES.CUSTOMER }));
+  }
+
   const filtered = filterTicketForViewer(updated, req.user);
 
-  // 🔔 Real-time: Tin nhắn mới trong ticket - đẩy đến tất cả clients đang xem ticket này
-  emitToTicketRoom(req.params.id, "ticket:new_message", {
-    ticketId: req.params.id,
-    message: payload.message,
-    visibility,
-    userId: req.user.userId
+  // 🔔 Real-time: Tin nhắn mới trong ticket - không phát nội dung ghi chú INTERNAL xuống room chung của khách
+  if (visibility === "PUBLIC") {
+    emitToTicketRoom(req.params.id, "ticket:new_message", {
+      ticketId: Number(req.params.id),
+      message: payload.message,
+      visibility,
+      userId: req.user.userId
+    });
+  }
+  emitToTechQueue("tickets:queue_updated", {
+    ticketId: Number(req.params.id),
+    status: (updated as any)?.status || currentStatus
   });
 
   // 🔔 Gửi thông báo in-app cho người tạo ticket khi kỹ thuật viên trả lời công khai

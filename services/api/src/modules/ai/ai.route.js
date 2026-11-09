@@ -12,6 +12,11 @@ router.get("/history", verifyToken, controller.getHistory);
 router.delete("/history", verifyToken, controller.clearHistory);
 router.post("/builds/:buildId/advice", verifyToken, controller.getBuildAdvice);
 
+// AI User Feedback & Quality Monitoring (Loop Learning)
+router.post("/feedback", optionalAuthenticate, controller.submitFeedback);
+router.get("/feedback/stats", verifyToken, requireRole(ROLES.ADMIN), controller.getFeedbackStats);
+router.get("/cache/stats", verifyToken, requireRole(ROLES.ADMIN), controller.getCacheStats);
+
 // Admin AI Management: Rules, Filters & Prompt Customization
 router.get("/admin/rules", verifyToken, requireRole(ROLES.ADMIN), ruleController.getRules);
 router.get("/admin/rules/:id", verifyToken, requireRole(ROLES.ADMIN), ruleController.getRule);

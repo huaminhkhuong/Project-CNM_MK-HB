@@ -5,12 +5,19 @@ const { checkDatabaseHealth } = require("../../services/test-connection.service"
 const { getRecentAuditLogs } = require("../../services/audit-log.service");
 
 const DEFAULT_SETTINGS = [
-  { key: "store_name", value: "CNM PC Store", description: "Ten hien thi cua he thong" },
-  { key: "support_email", value: "support@example.com", description: "Email ho tro khach hang" },
-  { key: "support_phone", value: "0900000000", description: "So dien thoai ho tro" },
-  { key: "online_payment_mode", value: "sandbox", description: "Che do thanh toan online: sandbox/live" },
-  { key: "shipping_mode", value: "mock", description: "Che do van chuyen: mock/live" },
-  { key: "maintenance_mode", value: "off", description: "Bat/tat che do bao tri" }
+  { key: "store_name", value: "PC Mall", description: "Tên hiển thị của hệ thống" },
+  { key: "support_email", value: "support@pcmall.vn", description: "Email hỗ trợ khách hàng" },
+  { key: "support_phone", value: "0900000000", description: "Số điện thoại hỗ trợ" },
+  { key: "online_payment_mode", value: "sandbox", description: "Chế độ thanh toán online: sandbox/live" },
+  { key: "shipping_mode", value: "mock", description: "Chế độ vận chuyển: mock/live" },
+  { key: "maintenance_mode", value: "off", description: "Bật/tắt chế độ bảo trì" },
+  // Cấu hình linh hoạt Tài khoản ngân hàng & Thông tin Doanh nghiệp
+  { key: "bank_name", value: "Techcombank", description: "Tên ngân hàng nhận chuyển khoản" },
+  { key: "bank_account_number", value: "8686868991", description: "Số tài khoản ngân hàng nhận thanh toán" },
+  { key: "bank_account_holder", value: "HỨA MINH KHƯƠNG", description: "Tên chủ tài khoản ngân hàng" },
+  { key: "store_hotline", value: "1900 8888", description: "Hotline tổng đài tư vấn" },
+  { key: "store_tax_id", value: "0316888999", description: "Mã số thuế doanh nghiệp" },
+  { key: "store_address", value: "123 Nguyễn Thị Minh Khai, Q.1, TP. Hồ Chí Minh", description: "Địa chỉ trụ sở / Showroom chính" }
 ];
 
 const ALLOWED_KEYS = new Set(DEFAULT_SETTINGS.map((item) => item.key));
@@ -152,29 +159,56 @@ async function countOrdersByPaymentStatus(statuses) {
   return Number(rows[0]?.total || 0);
 }
 
+async function countWhereIfExists(tableName, whereSql = "1=1", params = []) {
+  if (!(await tableExists(tableName))) {
+    return 0;
+  }
+
+  const rows = await query(`SELECT COUNT(*) AS total FROM ${tableName} WHERE ${whereSql}`, params).catch(() => []);
+  return Number(rows[0]?.total || 0);
+}
+
 async function getSystemOverview() {
   const [
     dbHealth,
     users,
     products,
+    skus,
+    attributes,
+    compatibilityRules,
     orders,
     tickets,
+    warranties,
     payments,
     shipments,
     pendingPaymentApprovals,
     bankTransferOrders,
+    lowStockSkus,
+    pendingOrders,
+    unassignedTickets,
+    pendingTickets,
+    pendingWarranties,
     settings,
     auditLogs
   ] = await Promise.all([
     checkDatabaseHealth(),
     countIfExists("users"),
     countIfExists("products"),
+    countIfExists("product_skus"),
+    countIfExists("attributes"),
+    countIfExists("compatibility_rules"),
     countIfExists("orders"),
     countIfExists("tickets"),
+    countIfExists("warranties"),
     countIfExists("payments"),
     countIfExists("shipments"),
     countOrdersByPaymentStatus(["AWAITING_ADMIN_CONFIRMATION", "PENDING_VERIFICATION"]),
     countOrdersByPaymentStatus(["PENDING_GATEWAY", "AWAITING_ADMIN_CONFIRMATION", "PENDING_VERIFICATION", "PAID", "REJECTED"]),
+    countWhereIfExists("product_skus", "stock <= 5 AND (status IS NULL OR status = 'ACTIVE')"),
+    countWhereIfExists("orders", "status IN ('PENDING', 'PROCESSING')"),
+    countWhereIfExists("tickets", "assigned_to IS NULL AND status IN ('OPEN', 'IN_PROGRESS', 'WAITING_CUSTOMER')"),
+    countWhereIfExists("tickets", "status IN ('OPEN', 'IN_PROGRESS', 'WAITING_CUSTOMER')"),
+    countWhereIfExists("warranties", "status IN ('SUBMITTED', 'UNDER_REVIEW', 'RECEIVED', 'PROCESSING')"),
     getSettings(),
     getRecentAuditLogs(12)
   ]);
@@ -193,20 +227,55 @@ async function getSystemOverview() {
     metrics: {
       users,
       products,
+      skus,
+      attributes,
+      compatibilityRules,
       orders,
       tickets,
+      warranties,
       payments,
       shipments,
       pendingPaymentApprovals,
-      bankTransferOrders
+      bankTransferOrders,
+      lowStockSkus,
+      pendingOrders,
+      unassignedTickets,
+      pendingTickets,
+      pendingWarranties
     },
     settings,
     auditLogs
   };
 }
 
+/**
+ * Lấy thông tin cấu hình cửa hàng & tài khoản ngân hàng công khai
+ * (Dùng cho khách hàng xem trên giao diện thanh toán & hóa đơn)
+ */
+async function getPublicStoreInfo() {
+  const settings = await getSettings().catch(() => getDefaultSettings());
+  const map = {};
+  for (const s of settings) {
+    map[s.key] = s.value;
+  }
+
+  return {
+    storeName: map.store_name || "PC Mall",
+    supportEmail: map.support_email || "support@pcmall.vn",
+    supportPhone: map.support_phone || map.store_hotline || "1900 8888",
+    storeAddress: map.store_address || "123 Nguyễn Thị Minh Khai, Q.1, TP. Hồ Chí Minh",
+    storeTaxId: map.store_tax_id || "0316888999",
+    storeHotline: map.store_hotline || "1900 8888",
+    bankName: map.bank_name || "Techcombank",
+    bankAccountNumber: map.bank_account_number || "8686868991",
+    bankAccountHolder: map.bank_account_holder || "HỨA MINH KHƯƠNG",
+    transferNotePrefix: "DH"
+  };
+}
+
 module.exports = {
   getSettings,
   updateSettings,
-  getSystemOverview
+  getSystemOverview,
+  getPublicStoreInfo
 };

@@ -16,7 +16,8 @@ export const DEFAULT_ADMIN_MODULES = [
     title: "SKU & tồn kho",
     desc: "Phiên bản, giá bán, ảnh và tồn kho.",
     icon: "SKU",
-    metricKey: "products",
+    metricKey: "skus",
+    fallbackKey: "products",
     accent: "violet",
     status: "Đồng bộ"
   },
@@ -25,7 +26,8 @@ export const DEFAULT_ADMIN_MODULES = [
     title: "Thuộc tính",
     desc: "Socket, RAM, chipset và bộ lọc linh kiện.",
     icon: "AT",
-    metricKey: "products",
+    metricKey: "attributes",
+    fallbackKey: "products",
     accent: "indigo",
     status: "Sẵn sàng"
   },
@@ -43,7 +45,8 @@ export const DEFAULT_ADMIN_MODULES = [
     title: "Luật tương thích",
     desc: "Rule kiểm tra cấu hình PC Builder.",
     icon: "CP",
-    metricKey: "products",
+    metricKey: "compatibilityRules",
+    fallbackKey: "products",
     accent: "purple",
     status: "Kỹ thuật"
   },
@@ -66,7 +69,7 @@ export const DEFAULT_ADMIN_MODULES = [
     status: "Vận hành"
   },
   {
-    to: "/admin/dashboard",
+    to: "/tech/tickets",
     title: "Ticket kỹ thuật",
     desc: "Chỉ số giám sát ticket; xử lý chi tiết thuộc workspace kỹ thuật.",
     icon: "TK",
@@ -79,7 +82,8 @@ export const DEFAULT_ADMIN_MODULES = [
     title: "Duyệt bảo hành",
     desc: "Hồ sơ bảo hành và tiến trình kỹ thuật.",
     icon: "WR",
-    metricKey: "tickets",
+    metricKey: "warranties",
+    fallbackKey: "tickets",
     accent: "rose",
     status: "Bảo hành"
   }
@@ -98,7 +102,10 @@ export function AdminModuleGrid({ modules = DEFAULT_ADMIN_MODULES, metrics = {},
 
       <div className="admin-command-module-grid">
         {modules.map((module) => {
-          const metric = module.metricKey === "auditLogs" ? auditLogs.length : metrics[module.metricKey];
+          const metric =
+            module.metricKey === "auditLogs"
+              ? auditLogs.length
+              : metrics[module.metricKey] ?? (module.fallbackKey ? metrics[module.fallbackKey] : 0);
 
           return (
             <article key={module.to} className="admin-command-module">

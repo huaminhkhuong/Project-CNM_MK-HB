@@ -141,7 +141,7 @@ function assertWarrantyOwnership(req: Request, warranty: any) {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return;
   if (!warranty || Number(warranty.user_id) !== userId) {
-    throw new AppError("Báº¡n khÃ´ng cÃ³ quyá»n truy cáº­p báº£o hÃ nh nÃ y", 403);
+    throw new AppError('Bạn không có quyền truy cập bảo hành này', 403);
   }
 }
 
@@ -382,6 +382,7 @@ async function getWarrantyRequestsBase(whereSql: string, params: any[]) {
         w.expires_at AS warrantyExpiresAt,
         oi.name_snapshot AS orderItemProductName,
         oi.sku_snapshot AS orderItemSku,
+        COALESCE(oi.unit_price, ps.price, 0) AS price,
         ps.image_url AS productImage,
         c.name AS categoryName,
         u.email AS accountEmail,
@@ -540,6 +541,7 @@ async function getWarrantyRequestsBase(whereSql: string, params: any[]) {
     updatedAt: row.updatedAt,
     warrantyCode: row.warrantyCode,
     warrantyExpiresAt: row.warrantyExpiresAt,
+    price: Number(row.price || 0),
     imageUrl: row.productImage || null,
     categoryName: row.categoryName || null,
     attachments: attachmentMap.get(row.id) || [],
@@ -623,7 +625,7 @@ export const getMyWarranties = asyncHandler(async (req: Request, res: Response) 
 export const activateWarranty = asyncHandler(async (req: Request, res: Response) => {
   const userId = getUserIdFromRequest(req);
   const { orderItemId, note } = req.body;
-  if (!orderItemId) throw new AppError("Thiáº¿u orderItemId", 400);
+  if (!orderItemId) throw new AppError("Thiếu orderItemId", 400);
 
   const id = typeof orderItemId === "string" ? parseInt(orderItemId, 10) : orderItemId;
   const orderItem = await prisma.orderItem.findUnique({
@@ -643,7 +645,7 @@ export const activateWarranty = asyncHandler(async (req: Request, res: Response)
   });
 
   if (!orderItem || orderItem.Order.user_id !== userId || orderItem.Order.status !== "DELIVERED") {
-    throw new AppError("Sáº£n pháº©m khÃ´ng há»£p lá»‡ Ä‘á»ƒ kÃ­ch hoáº¡t báº£o hÃ nh", 400);
+    throw new AppError("Sản phẩm không hợp lệ để kích hoạt bảo hành", 400);
   }
 
   const existing = await prisma.warrantyItem.findFirst({ where: { order_item_id: id } });
@@ -765,7 +767,7 @@ export const submitWarrantyRequest = asyncHandler(async (req: Request, res: Resp
   const extraNote = String(req.body?.extraNote || req.body?.additionalNote || "").trim() || null;
 
   if (!issueDescription) {
-    throw new AppError("Vui lÃ²ng mÃ´ táº£ lá»—i cáº§n báº£o hÃ nh", 400);
+    throw new AppError("Vui lòng mô tả lỗi cần bảo hành", 400);
   }
 
   let warrantyId: number | null = req.body?.warrantyId ? Number(req.body.warrantyId) : null;
@@ -815,13 +817,13 @@ export const submitWarrantyRequest = asyncHandler(async (req: Request, res: Resp
   }
 
   if (!warranty) {
-    throw new AppError("KhÃ´ng tÃ¬m tháº¥y sáº£n pháº©m báº£o hÃ nh phÃ¹ há»£p", 404);
+    throw new AppError("Không tìm thấy sản phẩm bảo hành phù hợp", 404);
   }
 
   assertWarrantyOwnership(req, warranty);
 
   if (!isWarrantyRequestable(warranty)) {
-    throw new AppError("Sáº£n pháº©m Ä‘Ã£ háº¿t háº¡n hoáº·c khÃ´ng cÃ²n hiá»‡u lá»±c báº£o hÃ nh", 400);
+    throw new AppError("Sản phẩm đã hết hạn hoặc không còn hiệu lực bảo hành", 400);
   }
 
   const openRequests = await queryRows<{ id: number; status: string }>(
@@ -837,7 +839,7 @@ export const submitWarrantyRequest = asyncHandler(async (req: Request, res: Resp
   );
 
   if (openRequests.length > 0) {
-    throw new AppError("Sáº£n pháº©m nÃ y Ä‘Ã£ cÃ³ yÃªu cáº§u báº£o hÃ nh Ä‘ang Ä‘Æ°á»£c xá»­ lÃ½", 409);
+    throw new AppError("Sản phẩm này đã có yêu cầu bảo hành đang được xử lý", 409);
   }
 
   const userId = getAuthenticatedUserId(req) || warranty.user_id || null;
@@ -845,7 +847,7 @@ export const submitWarrantyRequest = asyncHandler(async (req: Request, res: Resp
   const customerPhone = String(req.body?.customerPhone || req.body?.phone || warranty?.User?.phone || "").trim() || null;
   const customerEmail = String(req.body?.customerEmail || req.body?.email || warranty?.User?.email || "").trim() || null;
   const productName = String(warranty?.OrderItem?.name_snapshot || req.body?.productName || "").trim() || null;
-  const serialNumber = String(warranty?.OrderItem?.sku_snapshot || req.body?.serialNumber || lookupValue || "").trim() || null;
+  const serialNumber = String(warranty?.serial_number || req.body?.serialNumber || warranty?.OrderItem?.sku_snapshot || lookupValue || "").trim() || null;
   const orderId = warranty?.order_id || (req.body?.orderId ? Number(req.body.orderId) : null);
 
   await execute(
@@ -872,8 +874,8 @@ export const submitWarrantyRequest = asyncHandler(async (req: Request, res: Resp
   const requestId = Number(insertedRow[0]?.id || 0);
 
   await attachFilesToRequest(requestId, files, "CUSTOMER");
-  await addRequestEvent(requestId, "RECEIVED", issueDescription, "CUSTOMER", customerName || "KhÃ¡ch hÃ ng");
-  await createWarrantyNotification(userId, requestId, "YÃªu cáº§u báº£o hÃ nh Ä‘Ã£ Ä‘Æ°á»£c tiáº¿p nháº­n", `YÃªu cáº§u báº£o hÃ nh cho ${productName || "sáº£n pháº©m"} Ä‘Ã£ Ä‘Æ°á»£c ghi nháº­n.`);
+  await addRequestEvent(requestId, "RECEIVED", issueDescription, "CUSTOMER", customerName || "Khách hàng");
+  await createWarrantyNotification(userId, requestId, "Yêu cầu bảo hành đã được tiếp nhận", `Yêu cầu bảo hành cho ${productName || "sản phẩm"} đã được ghi nhận.`);
 
   const requests = await getWarrantyRequestsBase("wr.id = ?", [requestId]);
   res.status(201).json({
@@ -933,25 +935,31 @@ export const getAdminWarrantyRequests = asyncHandler(async (req: Request, res: R
 
 export const updateAdminWarrantyRequest = asyncHandler(async (req: Request, res: Response) => {
   const requestId = Number(req.params.requestId);
-  if (!requestId) throw new AppError("Thiáº¿u requestId", 400);
+  if (!requestId) throw new AppError("Thiếu requestId", 400);
 
   const status = req.body?.status ? normalizeRequestStatus(req.body.status) : "";
   const note = String(req.body?.note || req.body?.technicianNote || "").trim() || null;
-  const actorName = String(req.user?.email || "tech@pcmall.local");
+  let actorName = String(req.user?.email || "Kỹ thuật viên PC Mall");
+  if (req.user?.userId) {
+    const actorRows = await queryRows<{ full_name?: string }>("SELECT full_name FROM users WHERE id = ? LIMIT 1", Number(req.user.userId));
+    if (actorRows[0]?.full_name) {
+      actorName = actorRows[0].full_name;
+    }
+  }
   const actorRole = String(req.user?.role || "TECH_STAFF");
   const files = (((req as Request & { files?: UploadedWarrantyFile[] }).files) || []) as UploadedWarrantyFile[];
 
   const existing = await getWarrantyRequestsBase("wr.id = ?", [requestId]);
   const current = existing[0];
-  if (!current) throw new AppError("KhÃ´ng tÃ¬m tháº¥y yÃªu cáº§u báº£o hÃ nh", 404);
+  if (!current) throw new AppError("Không tìm thấy yêu cầu bảo hành", 404);
 
   const nextStatus = status || current.status;
-  const emailMock = `Mock email sent to ${current.customerEmail || current.customerPhone || "customer"}: ${REQUEST_STATUS_LABELS[nextStatus]} - ${note || "YÃªu cáº§u cá»§a báº¡n Ä‘ang Ä‘Æ°á»£c cáº­p nháº­t."}`;
+  const emailMock = `Đã gửi thông báo tới ${current.customerEmail || current.customerPhone || "khách hàng"}: [${REQUEST_STATUS_LABELS[nextStatus]}] ${note || current.lastStaffNote || "Hồ sơ bảo hành của bạn đang được xử lý."}`;
 
   await execute(
     `
       UPDATE warranty_requests
-      SET status = ?, last_staff_note = ?, last_email_mock = ?
+      SET status = ?, last_staff_note = COALESCE(?, last_staff_note), last_email_mock = ?
       WHERE id = ?
     `,
     nextStatus,
@@ -964,7 +972,7 @@ export const updateAdminWarrantyRequest = asyncHandler(async (req: Request, res:
     await addRequestEvent(requestId, nextStatus, note, actorRole, actorName);
   }
   await attachFilesToRequest(requestId, files, "STAFF");
-  await createWarrantyNotification(current.userId || null, requestId, "Cáº­p nháº­t báº£o hÃ nh", `${current.productName}: ${REQUEST_STATUS_LABELS[nextStatus]}`);
+  await createWarrantyNotification(current.userId || null, requestId, "Cập nhật bảo hành", `${current.productName}: ${REQUEST_STATUS_LABELS[nextStatus]}`);
 
   const updated = await getWarrantyRequestsBase("wr.id = ?", [requestId]);
 

@@ -1,6 +1,7 @@
 const { env } = require("../../config/env");
 const { getDbPool, query } = require("../../config/database");
 const { createError, toNonNegativeNumber, toPositiveInteger } = require("../../utils/service-helpers");
+const { pickColumn } = require("../../utils/schema-helpers");
 const { ROLES, hasAnyRole } = require("../../utils/role-helpers");
 const { createWarrantyRecordsForDeliveredOrder } = require("../warranties/warranty-sync.service");
 const { publishOrderEvent } = require("../../services/order-events");
@@ -170,6 +171,16 @@ async function updateOrderStatus(actor, orderId, statusOrPayload) {
     // Atomically restore inventory when transitioning to CANCELED from an active status
     if (nextStatus === "CANCELED" && currentStatus !== "CANCELED") {
       await restoreOrderInventory(connection, config, parsedOrderId);
+
+      // Release any assigned serial numbers so they can be assigned to future orders
+      await connection.execute(
+        `DELETE FROM order_item_serials WHERE order_id = ?`,
+        [parsedOrderId]
+      ).catch(() => {});
+      await connection.execute(
+        `UPDATE ${config.orderItems.table} SET serial_numbers = NULL WHERE ${config.orderItems.orderId} = ?`,
+        [parsedOrderId]
+      ).catch(() => {});
 
       // Restore coupon usage if order had a coupon
       if (config.orders.couponId && existingOrder.couponId) {

@@ -4,10 +4,14 @@ import axios from "axios";
 
 import { useAuth } from "../../hooks/useAuth";
 import { getCart } from "../../services/cart.service";
+import { refreshCart } from "../../store/cartStore";
 import { createOrder, createVnpayUrl } from "../../services/order.service";
+import { getAvailableCoupons, validateCoupon } from "../../services/coupon.service";
 import { getMyAddresses, createMyAddress, updateCurrentProfile, updateMyAddress, deleteMyAddress } from "../../services/auth.service";
-import { BANK_ACCOUNT_CONFIG, generateTransferNote } from "../../config/bank-account";
+import { BANK_ACCOUNT_CONFIG, generateTransferNote, generateVietQrUrl } from "../../config/bank-account";
+import { getPublicStoreInfo } from "../../services/store-info.service";
 import { routeConfig } from "../../routes/routeConfig";
+import { resolveProductImage } from "../../utils/productImage";
 
 const ICON_SIZE = 18;
 
@@ -201,6 +205,10 @@ export function CheckoutPage() {
   const { isAuthenticated, authState, refreshProfile } = useAuth();
   const [currentUser, setCurrentUser] = useState(authState?.user);
   const [appliedCoupon, setAppliedCoupon] = useState(() => location.state?.appliedCoupon || null);
+  const [availableCoupons, setAvailableCoupons] = useState([]);
+  const [couponInput, setCouponInput] = useState(() => location.state?.appliedCoupon?.code || "");
+  const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
+  const [couponMessage, setCouponMessage] = useState(null);
 
   // States
   const [cart, setCart] = useState(null);
@@ -225,6 +233,22 @@ export function CheckoutPage() {
   
   // Custom toast notification state
   const [toast, setToast] = useState({ type: "", message: "" });
+  const [storeInfo, setStoreInfo] = useState({
+    bankName: BANK_ACCOUNT_CONFIG.bankName,
+    bankAccountNumber: BANK_ACCOUNT_CONFIG.accountNumber,
+    bankAccountHolder: BANK_ACCOUNT_CONFIG.accountHolder,
+    transferNotePrefix: BANK_ACCOUNT_CONFIG.transferNote
+  });
+
+  useEffect(() => {
+    let mounted = true;
+    getPublicStoreInfo().then((info) => {
+      if (mounted && info) {
+        setStoreInfo(info);
+      }
+    }).catch(() => {});
+    return () => { mounted = false; };
+  }, []);
 
   // Step 1 inline phone editing state
   const [phoneInput, setPhoneInput] = useState(() => getUserPhone(authState?.user));
@@ -340,8 +364,13 @@ export function CheckoutPage() {
     async function initCheckout() {
       try {
         setLoading(true);
-        const addrRes = await getMyAddresses();
+        const [addrRes, couponsRes] = await Promise.all([
+          getMyAddresses(),
+          getAvailableCoupons().catch(() => ({ data: [] }))
+        ]);
         const addrData = addrRes?.data || addrRes;
+        const couponsList = couponsRes?.data || couponsRes || [];
+        setAvailableCoupons(Array.isArray(couponsList) ? couponsList : []);
 
         if (directCheckoutDraft?.items?.length) {
           setCart({
@@ -360,15 +389,24 @@ export function CheckoutPage() {
         setAddresses(addrData || []);
         
         // Auto-select address if not set or invalid
+        let resolvedAddrId = "";
         if (addrData && addrData.length > 0) {
           const storedAddrId = localStorage.getItem(STORAGE_KEYS.addressId);
           const isValidStored = addrData.some(a => String(a.id) === storedAddrId);
-          if (isValidStored) {
-            setFormValues(prev => ({ ...prev, addressId: storedAddrId }));
-          } else {
-            setFormValues(prev => ({ ...prev, addressId: String(addrData[0].id) }));
-          }
+          resolvedAddrId = isValidStored ? String(storedAddrId) : String(addrData[0].id);
+          setFormValues(prev => ({ ...prev, addressId: resolvedAddrId }));
         }
+
+        // Clamp restored activeStep so user does not skip required steps
+        setActiveStep((prevStep) => {
+          const userPhone = getUserPhone(authState?.user) || String(phoneInput || "").trim();
+          if (!userPhone) return 1;
+          if (!resolvedAddrId) return Math.min(prevStep, 2);
+          if (!VALID_PAYMENT_METHODS.includes(localStorage.getItem(STORAGE_KEYS.paymentMethod) || formValues.paymentMethod)) {
+            return Math.min(prevStep, 3);
+          }
+          return prevStep;
+        });
       } catch (error) {
         setErrorMessage("Không thể tải thông tin thanh toán");
       } finally {
@@ -382,6 +420,49 @@ export function CheckoutPage() {
   // Phone validation
   function validatePhone(phone) {
     return /^(0|\+84)(\d{9,10})$/.test(String(phone).replace(/\s/g, ""));
+  }
+
+  async function handleApplyCoupon(codeOverride) {
+    const codeToValidate = typeof codeOverride === "string" ? codeOverride : couponInput;
+    if (!String(codeToValidate || "").trim()) return;
+    try {
+      setIsApplyingCoupon(true);
+      setCouponMessage(null);
+      const res = await validateCoupon({
+        code: String(codeToValidate).trim(),
+        totalAmount,
+        orderAmount: totalAmount,
+        shippingFee,
+        items: items.map((item) => ({
+          productId: Number(item.productId || item.product?.id || 0),
+          categoryId: Number(item.product?.category?.id || item.product?.category_id || item.categoryId || 0),
+          unitPrice: Number(item.unitPrice || item.price || 0),
+          quantity: Number(item.quantity || 1),
+          lineTotal: Number(item.lineTotal || Number(item.unitPrice || 0) * Number(item.quantity || 1))
+        }))
+      });
+      const data = res?.data || res;
+      if (data) {
+        setCouponInput(data.code || String(codeToValidate).trim().toUpperCase());
+        setAppliedCoupon(data);
+        setCouponMessage({
+          type: "success",
+          text: `Đã áp dụng ${data.code || String(codeToValidate).toUpperCase()}: -${formatCurrency(data.discountAmount)} đ`
+        });
+      }
+    } catch (err) {
+      const msg = err?.response?.data?.message || err?.message || "Mã giảm giá không hợp lệ";
+      setAppliedCoupon(null);
+      setCouponMessage({ type: "error", text: msg });
+    } finally {
+      setIsApplyingCoupon(false);
+    }
+  }
+
+  function handleRemoveCoupon() {
+    setAppliedCoupon(null);
+    setCouponInput("");
+    setCouponMessage(null);
   }
 
   // Handle step 1 profile update
@@ -625,6 +706,9 @@ export function CheckoutPage() {
       });
 
       const order = response?.data?.data || response?.data || response;
+
+      // Refresh global cart badge so MainHeader reflects cleared cart immediately
+      await refreshCart().catch(() => {});
 
       // Clear local checkout storage on success
       localStorage.removeItem(STORAGE_KEYS.step);
@@ -1555,22 +1639,22 @@ export function CheckoutPage() {
                         <div style={{ display: "grid", gap: 10 }}>
                           <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
                             <span style={{ color: "#64748b", fontWeight: 700, fontSize: "13px" }}>Ngân hàng:</span>
-                            <span style={{ fontWeight: 800, color: "#1e293b", fontSize: "13px" }}>{BANK_ACCOUNT_CONFIG.bankName}</span>
+                            <span style={{ fontWeight: 800, color: "#1e293b", fontSize: "13px" }}>{storeInfo.bankName || BANK_ACCOUNT_CONFIG.bankName}</span>
                           </div>
                           <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
                             <span style={{ color: "#64748b", fontWeight: 700, fontSize: "13px" }}>Số tài khoản:</span>
-                            <span style={{ fontWeight: 800, color: "var(--market-primary)", fontSize: "15px" }}>{BANK_ACCOUNT_CONFIG.accountNumber}</span>
+                            <span style={{ fontWeight: 800, color: "var(--market-primary)", fontSize: "15px" }}>{storeInfo.bankAccountNumber || BANK_ACCOUNT_CONFIG.accountNumber}</span>
                           </div>
                           <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
                             <span style={{ color: "#64748b", fontWeight: 700, fontSize: "13px" }}>Chủ tài khoản:</span>
-                            <span style={{ fontWeight: 800, color: "#1e293b", fontSize: "13px" }}>{BANK_ACCOUNT_CONFIG.accountHolder}</span>
+                            <span style={{ fontWeight: 800, color: "#1e293b", fontSize: "13px" }}>{storeInfo.bankAccountHolder || BANK_ACCOUNT_CONFIG.accountHolder}</span>
                           </div>
                           <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
                             <span style={{ color: "#64748b", fontWeight: 700, fontSize: "13px" }}>Số tiền chuyển:</span>
                             <span style={{ fontWeight: 900, color: "var(--market-primary)", fontSize: "15px" }}>{formatCurrency(finalAmount)} đ</span>
                           </div>
                           <div style={{ padding: "12px", background: "#fffbeb", borderRadius: 12, border: "1px solid #fef3c7", fontSize: "12.5px", fontWeight: 700, color: "#b45309" }}>
-                            💡 Cú pháp: {generateTransferNote(currentUser?.phone || "SĐT của bạn")}
+                            💡 Cú pháp: {generateTransferNote(currentUser?.phone || "SĐT của bạn", storeInfo.transferNotePrefix)}
                           </div>
                         </div>
                       </div>
@@ -1578,17 +1662,18 @@ export function CheckoutPage() {
                         <div style={{ background: "#fff", padding: 12, borderRadius: 16, border: "1px solid #e2e8f0", textAlign: "center" }}>
                           <div style={{ width: 130, height: 130, background: "#f8fafc", margin: "0 auto", display: "grid", placeItems: "center", borderRadius: 10, border: "1px dashed #cbd5e1", overflow: "hidden" }}>
                             <img
-                              src={BANK_ACCOUNT_CONFIG.qrCodeImage}
+                              src={generateVietQrUrl({
+                                bankName: storeInfo.bankName || BANK_ACCOUNT_CONFIG.bankName,
+                                accountNumber: storeInfo.bankAccountNumber || BANK_ACCOUNT_CONFIG.accountNumber,
+                                accountHolder: storeInfo.bankAccountHolder || BANK_ACCOUNT_CONFIG.accountHolder,
+                                amount: finalAmount,
+                                memo: generateTransferNote(currentUser?.phone || "", storeInfo.transferNotePrefix)
+                              })}
                               alt="QR Code"
                               style={{ width: "100%", height: "100%", objectFit: "contain" }}
                               onError={(e) => {
-                                e.currentTarget.style.display = "none";
-                                e.currentTarget.parentElement.innerHTML = `
-                                  <div style="text-align: center">
-                                    <div style="font-size: 40px; margin-bottom: 4px">📱</div>
-                                    <div style="font-size: 10px; font-weight: 800; color: #64748b">QR CODE</div>
-                                  </div>
-                                `;
+                                e.currentTarget.onerror = null;
+                                e.currentTarget.src = BANK_ACCOUNT_CONFIG.qrCodeImage;
                               }}
                             />
                           </div>
@@ -1714,11 +1799,15 @@ export function CheckoutPage() {
                     {items.map(item => (
                         <div key={item.id} className="sidebar-product-item">
                             <div style={{ width: 64, height: 64, borderRadius: 12, background: "#f8fafc", overflow: "hidden", flexShrink: 0, border: "1.5px solid #f1f5f9", display: "grid", placeItems: "center" }}>
-                                {item.product?.imageUrl || item.variant?.imageUrl ? (
-                                    <img src={item.product?.imageUrl || item.variant?.imageUrl} alt="" style={{ width: "85%", height: "85%", objectFit: "contain" }} />
-                                ) : (
-                                    <span style={{ fontSize: 24, opacity: 0.2 }}>📦</span>
-                                )}
+                                <img
+                                    src={resolveProductImage({
+                                        image_url: item.product?.imageUrl || item.variant?.imageUrl,
+                                        category_name: item.product?.category?.name,
+                                        name: item.product?.name
+                                    })}
+                                    alt={item.product?.name || ""}
+                                    style={{ width: "85%", height: "85%", objectFit: "contain" }}
+                                />
                             </div>
                             <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", minWidth: 0 }}>
                                 <div style={{ fontSize: 14, fontWeight: 850, color: "#1e293b", marginBottom: 4, lineHeight: 1.3, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>{item.product?.name}</div>
@@ -1729,6 +1818,98 @@ export function CheckoutPage() {
                             </div>
                         </div>
                     ))}
+                </div>
+
+                {/* Inline Voucher / Coupon Input for Direct Checkout & Cart Checkout */}
+                <div style={{ marginBottom: 18, paddingBottom: 16, borderBottom: "1px solid #f1f5f9" }}>
+                    <label style={{ display: "block", fontSize: 12, fontWeight: 800, color: "#475569", marginBottom: 8 }}>
+                        🏷️ Mã giảm giá / Voucher
+                    </label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                        <input
+                            type="text"
+                            placeholder="Nhập mã giảm giá..."
+                            value={couponInput}
+                            onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                            disabled={isApplyingCoupon || Boolean(appliedCoupon)}
+                            style={{
+                                flex: 1,
+                                padding: "9px 12px",
+                                borderRadius: 10,
+                                border: "1px solid #cbd5e1",
+                                fontSize: 13,
+                                fontWeight: 700,
+                                textTransform: "uppercase",
+                                outline: "none"
+                            }}
+                        />
+                        {appliedCoupon ? (
+                            <button
+                                type="button"
+                                onClick={handleRemoveCoupon}
+                                style={{
+                                    padding: "9px 12px",
+                                    borderRadius: 10,
+                                    border: "none",
+                                    background: "#fee2e2",
+                                    color: "#dc2626",
+                                    fontWeight: 800,
+                                    fontSize: 12,
+                                    cursor: "pointer"
+                                }}
+                            >
+                                Gỡ mã
+                            </button>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={() => handleApplyCoupon()}
+                                disabled={isApplyingCoupon || !couponInput.trim()}
+                                style={{
+                                    padding: "9px 14px",
+                                    borderRadius: 10,
+                                    border: "none",
+                                    background: isApplyingCoupon ? "#94a3b8" : "var(--market-primary)",
+                                    color: "#fff",
+                                    fontWeight: 800,
+                                    fontSize: 12,
+                                    cursor: isApplyingCoupon ? "not-allowed" : "pointer"
+                                }}
+                            >
+                                {isApplyingCoupon ? "..." : "Áp dụng"}
+                            </button>
+                        )}
+                    </div>
+                    {availableCoupons.length > 0 && !appliedCoupon && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                            {availableCoupons.slice(0, 3).map((c) => (
+                                <button
+                                    key={c.id || c.code}
+                                    type="button"
+                                    onClick={() => handleApplyCoupon(c.code)}
+                                    disabled={isApplyingCoupon}
+                                    title={c.description || c.name}
+                                    style={{
+                                        padding: "3px 8px",
+                                        borderRadius: 999,
+                                        border: "1px dashed #3b82f6",
+                                        background: "#eff6ff",
+                                        color: "#1d4ed8",
+                                        fontSize: 11,
+                                        fontWeight: 800,
+                                        cursor: "pointer"
+                                    }}
+                                >
+                                    🎟️ {c.code}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                    {couponMessage && (
+                        <div style={{ fontSize: 12, marginTop: 6, fontWeight: 700, color: couponMessage.type === "success" ? "#16a34a" : "#dc2626" }}>
+                            {couponMessage.text}
+                        </div>
+                    )}
                 </div>
 
                 <div style={{ display: "grid", gap: 12 }}>

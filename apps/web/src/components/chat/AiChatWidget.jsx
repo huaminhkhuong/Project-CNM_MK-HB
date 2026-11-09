@@ -128,7 +128,8 @@ export function AiChatWidget() {
       budget: Number(budget),
       resolution,
       ownedList,
-      ownedNotes
+      ownedNotes,
+      isFormSubmit: true
     });
   }
 
@@ -161,7 +162,6 @@ export function AiChatWidget() {
 
     const activeCriteria = extraCriteria || {
       purpose,
-      budget: Number(budget),
       resolution,
       ownedList: [
         ...(ownedRam ? ["RAM"] : []),
@@ -169,7 +169,8 @@ export function AiChatWidget() {
         ...(ownedGpu ? ["GPU/Card màn hình"] : []),
         ...(ownedCase ? ["Vỏ Case"] : [])
       ],
-      ownedNotes
+      ownedNotes,
+      isFormSubmit: false
     };
 
     try {
@@ -563,6 +564,26 @@ export function AiChatWidget() {
           {activeTab === "chat" && (
             <div className="ai-chat-footer">
               <div className="ai-prompt-chips">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsOpen(false);
+                    navigate("/ai-chat?mode=human");
+                  }}
+                  style={{ background: "#ecfdf5", borderColor: "#6ee7b7", color: "#047857", fontWeight: 700 }}
+                >
+                  🎧 Gặp Nhân Viên Sale
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsOpen(false);
+                    navigate("/tickets/new");
+                  }}
+                  style={{ background: "#eff6ff", borderColor: "#93c5fd", color: "#1d4ed8", fontWeight: 700 }}
+                >
+                  🛠️ Hỗ Trợ Kỹ Thuật
+                </button>
                 <button
                   type="button"
                   onClick={() => sendUserMessage("RAM 3200 cắm mainboard 2666 có cháy không bạn?")}

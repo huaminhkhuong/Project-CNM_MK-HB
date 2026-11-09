@@ -452,6 +452,7 @@ class PcBuilderService {
     const compatibilityCheckPayload = {
       components: items.map((item) => ({
         componentType: item.componentType,
+        quantity: item.quantity,
         variantId: item.variant.id
       }))
     };
@@ -493,7 +494,8 @@ class PcBuilderService {
     for (const item of sourceItems) {
       await this.upsertBuildItem(userId, newBuild.id, {
         productVariantId: item.variant.id,
-        componentType: item.componentType
+        componentType: item.componentType,
+        quantity: item.quantity
       });
     }
 
@@ -2671,7 +2673,10 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
       formatPoolSection("cooling", "8. Cooling (Tản nhiệt)")
     ].join("\n\n");
 
-    const systemInstruction = `Bạn là Trưởng ban Kiến trúc Phần cứng & Thẩm định Hệ thống (Senior PC Hardware Architect) tại PC Mall với hơn 15 năm kinh nghiệm thực chiến.
+    const { aiRuleService } = require("../ai/ai-rule.service");
+    const suggestPromptCfg = aiRuleService.getPromptByScope("BUILDER_SUGGEST");
+
+    const systemInstruction = suggestPromptCfg?.systemPrompt || `Bạn là Trưởng ban Kiến trúc Phần cứng & Thẩm định Hệ thống (Senior PC Hardware Architect) tại PC Mall với hơn 15 năm kinh nghiệm thực chiến.
 Phong cách làm việc: CỰC KỲ NGHIÊM KHẮC, KHÁCH QUAN, HOÀN TOÀN KHÔNG THIÊN VỊ BẤT KỲ THƯƠNG HIỆU NÀO (Zero Vendor Bias). Bạn đề cao tính cân bằng nghẽn cổ chai (Bottleneck), hiệu quả chi phí trên hiệu năng thực tế (P/P), và độ an toàn điện năng tuyệt đối.`;
 
     const promptText = `Khách hàng cần xây dựng dàn PC với thông số sau:
@@ -2684,6 +2689,8 @@ KHO HÀNG PC MALL ĐÃ LỌC SẴN POOL 32 LINH KIỆN ỨNG VIÊN PHÙ HỢP NH
 ${candidatePoolText}
 
 NHIỆM VỤ CỦA BẠN:
+0. PHẢN HỒI YÊU CẦU BỔ SUNG CỦA KHÁCH HÀNG:
+   - Nếu khách hàng có câu hỏi hoặc yêu cầu bổ sung riêng biệt (như thắc mắc tính toán "1+1=", câu hỏi ngoài lề hoặc yêu cầu sở thích linh kiện cá nhân), hãy trực tiếp giải đáp rõ ràng, thân thiện ngay ở 1-2 câu đầu tiên trước khi đánh giá linh kiện.
 1. ĐÁNH GIÁ NGHIÊM KHẮC & KHÔNG THIÊN VỊ:
    - Trong mỗi danh mục 4 ứng viên, hãy chọn ra DUY NHẤT 1 linh kiện tối ưu nhất cho tổng thể bộ máy.
    - Trình bày ngắn gọn, sắc sảo (1 gạch đầu dòng lý do chọn, 1-2 gạch đầu dòng lý do loại 3 món còn lại). Không viết lan man.
@@ -2708,11 +2715,12 @@ NHIỆM VỤ CỦA BẠN:
     "cooling": <skuId số nguyên>
   },
   "overallVerdict": "<Nhận xét tổng kết súc tích về cấu hình>",
+  "componentReasons": { "cpu": "<Lý do chọn>", "gpu": "<Lý do chọn>", "mainboard": "<Lý do chọn>", "ram": "<Lý do chọn>", "storage": "<Lý do chọn>", "psu": "<Lý do chọn>", "case": "<Lý do chọn>", "cooling": "<Lý do chọn>" },
   "compatibilityScore": <Điểm số tương thích từ 90 đến 100>,
   "bottleneckPercent": <Ước lượng tỷ lệ nghẽn cổ chai ví dụ 3.5>
 }
 \`\`\`
-Bắt đầu bài phân tích kỹ thuật của bạn:`;
+${payload.rulePromptInjection ? `\nCHỈ THỊ BỔ SUNG TỪ HỆ THỐNG: ${payload.rulePromptInjection}\n` : ""}Bắt đầu bài phân tích kỹ thuật của bạn:`;
 
     // 3. Gọi Unified LLM Streaming
     let accumulatedAdvice = "";
@@ -2721,8 +2729,8 @@ Bắt đầu bài phân tích kỹ thuật của bạn:`;
       const llmResult = await unifiedLlmService.generateStreamText({
         prompt: promptText,
         systemInstruction,
-        temperature: 0.5,
-        maxTokens: 4000,
+        temperature: suggestPromptCfg?.temperature ?? 0.5,
+        maxTokens: suggestPromptCfg?.maxTokens ?? 4000,
         skipGuardrail: true
       }, (chunk: string) => {
         accumulatedAdvice += chunk;
@@ -2735,13 +2743,27 @@ Bắt đầu bài phân tích kỹ thuật của bạn:`;
       }
     } catch (err: any) {
       console.warn("Lỗi gọi LLM Streaming trong suggest build:", err);
-      const fallbackChunk = `\n⚙️ Đang kích hoạt Heuristic Knowledge Engine phòng Lab...\n`;
-      accumulatedAdvice += fallbackChunk;
-      onChunk(fallbackChunk);
     }
 
-    // 4. Bóc tách JSON selectedSkuIds từ bài viết của AI
+    // 4. Bóc tách JSON selectedSkuIds từ bài viết của AI (hoặc dùng Heuristic Fallback nếu Offline)
     let selectedSkuIds: Record<string, number> = {};
+    let componentReasons: Record<string, string> = {};
+    let fallbackCandidates: any = null;
+    if (!accumulatedAdvice.trim()) {
+      try {
+        const fallbackSuggest = await this.suggestBuild({ ...payload, budget, useCase, resolution, customPrompt, engineType: "ai" });
+        fallbackCandidates = fallbackSuggest?.candidates || null;
+        if (fallbackSuggest?.aiAdvice) {
+          accumulatedAdvice = fallbackSuggest.aiAdvice;
+          onChunk(accumulatedAdvice);
+        }
+        const fallbackComps = fallbackSuggest?.candidates?.bestValue?.components || {};
+        for (const [k, v] of Object.entries(fallbackComps) as [string, any][]) {
+          if (v?.variantId || v?.id) selectedSkuIds[k] = Number(v.variantId || v.id);
+          if (v?.explanation) componentReasons[k] = String(v.explanation);
+        }
+      } catch (_fbErr) {}
+    }
     let compatibilityScore = 96;
     let bottleneckPercent = 4.0;
     let overallVerdict = "Cấu hình cân bằng tối ưu hiệu năng/giá thành được thẩm định nghiêm ngặt.";
@@ -2754,6 +2776,7 @@ Bắt đầu bài phân tích kỹ thuật của bạn:`;
         if (parsed.compatibilityScore) compatibilityScore = Number(parsed.compatibilityScore);
         if (parsed.bottleneckPercent !== undefined) bottleneckPercent = Number(parsed.bottleneckPercent);
         if (parsed.overallVerdict) overallVerdict = String(parsed.overallVerdict);
+        if (parsed.componentReasons && typeof parsed.componentReasons === "object") componentReasons = { ...componentReasons, ...parsed.componentReasons };
       }
     } catch (_parseErr) {
       console.warn("Không parse được JSON từ AI output, fallback sang lựa chọn đầu tiên trong pool:", _parseErr);
@@ -2783,7 +2806,8 @@ Bắt đầu bài phân tích kỹ thuật của bạn:`;
           price: chosenItem.price,
           imageUrl: chosenItem.imageUrl,
           specs: chosenItem.specs,
-          stock: chosenItem.stock
+          stock: chosenItem.stock,
+          explanation: componentReasons[cat] || chosenItem.explanation || `Tối ưu hiệu năng/giá thành cho ${cat.toUpperCase()} (${Number(chosenItem.price || 0).toLocaleString("vi-VN")}đ).`
         };
       }
     }
@@ -2802,15 +2826,40 @@ Bắt đầu bài phân tích kỹ thuật của bạn:`;
       selectedComponents.mainboard
     );
 
+    // Nếu LLM ở chế độ Offline / chưa trả về bài phân tích chữ, tự động sinh báo cáo kỹ thuật chi tiết và stream về UI
+    if (!accumulatedAdvice.trim()) {
+      const compLines = Object.entries(selectedComponents).map(([cat, item]: [string, any]) => {
+        const label = cat.toUpperCase();
+        return `- **${label} — ${item.name}** (${Number(item.price || 0).toLocaleString("vi-VN")}đ): ${item.explanation}`;
+      });
+      const offlineAdvice = [
+        `### 🏛️ Báo Cáo Thẩm Định & Tuyển Chọn Từ Pool 32 Linh Kiện (${useCase.toUpperCase()} - ${resolution.toUpperCase()})`,
+        customPrompt ? `\n> **Ghi chú yêu cầu riêng của bạn:** *"${customPrompt}"* — Hệ thống đã ưu tiên lọc theo tiêu chí này trong kho linh kiện sẵn hàng.\n` : "",
+        `Sau khi đối chiếu 32 ứng viên sáng giá nhất trong tầm ngân sách **${budget.toLocaleString("vi-VN")}đ**, hệ thống Kiến trúc Phần cứng PC Mall đã chọn lọc 8 linh kiện tối ưu nhất đảm bảo tương thích 100% vật lý và điện năng:`,
+        "",
+        ...compLines,
+        "",
+        `### 📊 Đánh Giá Kỹ Thuật Tổng Thể`,
+        `- **Cân bằng CPU & GPU:** Tỷ lệ nghẽn cổ chai ước tính ở độ phân giải **${resolution.toUpperCase()}** chỉ khoảng **${(dynamicBottleneck as any)?.bottleneckPercentage || bottleneckPercent}%** (${(dynamicBottleneck as any)?.message || "Hoạt động đồng bộ hiệu suất cao"}).`,
+        `- **Kiến trúc Bộ nhớ & Bo mạch chủ:** ${ramArchitecture ? `${ramArchitecture.totalCapacityGb}GB — ${ramArchitecture.channelConfig}. ${ramArchitecture.advantageNote || ""}`.trim() : "Tương thích hoàn toàn giữa Socket CPU, Mainboard và chuẩn bộ nhớ RAM."}`,
+        `- **Tổng chi phí thực tế:** **${totalPrice.toLocaleString("vi-VN")}đ** (Đạt **${budgetUtilization}%** ngân sách mục tiêu).`
+      ].filter(Boolean).join("\n");
+
+      accumulatedAdvice = offlineAdvice;
+      onChunk(accumulatedAdvice);
+    }
+
     // Gửi Event hoàn tất (type: "done") kèm dữ liệu cấu trúc
     sendEvent({
       type: "done",
-      provider: "Google Gemini (gemini-3.5-flash-lite)",
+      provider: `Google Gemini (${process.env.LLM_MODEL || process.env.GEMINI_MODEL || "gemini-1.5-flash"})`,
       advice: accumulatedAdvice,
       selectedComponents,
+      candidates: fallbackCandidates,
       totalPrice,
       budgetUtilization,
       compatibilityScore,
+      overallVerdict,
       bottleneckPercent: (dynamicBottleneck as any)?.bottleneckPercentage || (dynamicBottleneck as any)?.bottleneckPercent || bottleneckPercent,
       dynamicBottleneck,
       ramArchitecture,
@@ -2987,7 +3036,10 @@ Bắt đầu bài phân tích kỹ thuật của bạn:`;
       return `- [${type}] ${name} | Giá: ${price} ${specsStr ? `(${specsStr})` : ""}`;
     }).join("\n");
 
-    const systemInstruction = `Bạn là Trưởng ban Giám định Kỹ thuật Phần cứng (Senior PC Hardware Inspection Auditor) tại PC Mall.
+    const { aiRuleService } = require("../ai/ai-rule.service");
+    const auditPromptCfg = aiRuleService.getPromptByScope("BUILDER_AUDIT_CHAT");
+
+    const systemInstruction = auditPromptCfg?.systemPrompt || `Bạn là Trưởng ban Giám định Kỹ thuật Phần cứng (Senior PC Hardware Inspection Auditor) tại PC Mall.
 Nhiệm vụ của bạn: Kiểm tra, thẩm định một cách CỰC KỲ NGHIÊM KHẮC, KHÁCH QUAN, KHÔNG THIÊN VỊ cấu hình do khách hàng xây dựng.
 Đánh giá 5 trụ cột kỹ thuật:
 1. Độ cân bằng CPU - GPU (Nghẽn cổ chai Bottleneck ở độ phân giải ${resolution.toUpperCase()}).
@@ -3038,7 +3090,7 @@ YÊU CẦU GIÁM ĐỊNH:
 }
 \`\`\`
 Nếu cấu hình hoàn hảo không có lỗi gì cần thay, "issues" có thể là mảng rỗng [].
-Bắt đầu bài thẩm định kỹ thuật:`;
+${payload.rulePromptInjection ? `\nCHỈ THỊ BỔ SUNG TỪ HỆ THỐNG: ${payload.rulePromptInjection}\n` : ""}Bắt đầu bài thẩm định kỹ thuật:`;
 
     let accumulatedReport = "";
     try {
@@ -3046,8 +3098,8 @@ Bắt đầu bài thẩm định kỹ thuật:`;
       const llmResult = await unifiedLlmService.generateStreamText({
         prompt: promptText,
         systemInstruction,
-        temperature: 0.6,
-        maxTokens: 2500,
+        temperature: auditPromptCfg?.temperature ?? 0.6,
+        maxTokens: auditPromptCfg?.maxTokens ?? 2500,
         skipGuardrail: true
       }, (chunk: string) => {
         accumulatedReport += chunk;
@@ -3060,12 +3112,9 @@ Bắt đầu bài thẩm định kỹ thuật:`;
       }
     } catch (err: any) {
       console.warn("Lỗi gọi LLM Streaming trong audit build:", err);
-      const fallbackChunk = `\n⚙️ Đang kích hoạt Heuristic Auditor phòng Lab...\n`;
-      accumulatedReport += fallbackChunk;
-      onChunk(fallbackChunk);
     }
 
-    let auditScore = 85;
+    let auditScore = 88;
     let status = "GOOD";
     let summary = "Cấu hình tương thích cơ bản và sẵn sàng hoạt động.";
     let bottleneckPercent = 5.0;
@@ -3085,6 +3134,137 @@ Bắt đầu bài thẩm định kỹ thuật:`;
       console.warn("Không parse được JSON audit issues:", _parseErr);
     }
 
+    // Nếu LLM Offline hoặc không trả về bài phân tích: kích hoạt Heuristic Hardware Auditor dựa trên activeItems thật
+    if (!accumulatedReport.trim()) {
+      const byType: Record<string, any> = {};
+      for (const item of activeItems) {
+        const t = String(item.componentType || item.type || "").toLowerCase();
+        if (t) byType[t] = item;
+      }
+
+      const cpuItem = byType.cpu;
+      const gpuItem = byType.gpu;
+      const ramItem = byType.ram;
+      const psuItem = byType.psu;
+      const mbItem = byType.mainboard;
+
+      const dynamicBn = this.calculateDynamicBottleneck(cpuItem, gpuItem, resolution) as any;
+      bottleneckPercent = Number(dynamicBn?.bottleneckPercentage || dynamicBn?.bottleneckPercent || 4.5);
+
+      const coreCats = ["cpu", "mainboard", "ram", "gpu", "storage", "psu", "case", "cooling"];
+      const missingCats = coreCats.filter(c => !byType[c]);
+
+      if (cpuItem && gpuItem) {
+        const cpuPrice = Number(cpuItem.price || 0);
+        const gpuPrice = Number(gpuItem.price || 0);
+        if (gpuPrice > cpuPrice * 3.2 && cpuPrice < 3500000) {
+          issues.push({
+            componentType: "cpu",
+            severity: "high",
+            currentName: cpuItem.productName || cpuItem.name,
+            problem: `CPU hiện tại hơi yếu so với sức mạnh của VGA ${gpuItem.productName || gpuItem.name}, dễ gây nghẽn cổ chai ở độ phân giải ${resolution.toUpperCase()}.`,
+            targetCriteria: {
+              category: "cpu",
+              socket: mbItem?.specs?.socket || cpuItem?.specs?.socket || "",
+              priceMin: Math.max(3500000, Math.round(cpuPrice * 1.2)),
+              priceMax: Math.max(8500000, Math.round(gpuPrice * 0.75)),
+              keywords: ["i5", "ryzen 5", "i7", "ryzen 7"],
+              advice: "Nâng cấp lên CPU 6-8 nhân đời mới hơn để giải phóng 100% băng thông cho VGA."
+            }
+          });
+          auditScore -= 14;
+        }
+      }
+
+      if (ramItem) {
+        const ramName = String(ramItem.productName || ramItem.name || "").toLowerCase();
+        const isSingle8Gb = ramName.includes("8gb") && !ramName.includes("16gb") && !ramName.includes("2x8");
+        const isSingleStick = !ramName.includes("2x") && !ramName.includes("kit");
+        if (isSingle8Gb || isSingleStick) {
+          issues.push({
+            componentType: "ram",
+            severity: isSingle8Gb ? "high" : "medium",
+            currentName: ramItem.productName || ramItem.name,
+            problem: isSingle8Gb
+              ? "Dung lượng RAM 8GB đơn kênh là quá thấp cho tựa game/ứng dụng hiện đại, gây giật khung hình (stutter) và tụt 15-20% FPS."
+              : "RAM đang có dấu hiệu chạy Single Channel (1 thanh đơn). Khuyến nghị dùng Kit 2 thanh (Dual Channel) để nhân đôi băng thông bộ nhớ.",
+            targetCriteria: {
+              category: "ram",
+              priceMin: 1100000,
+              priceMax: 4500000,
+              keywords: ["16gb", "32gb", "2x"],
+              advice: "Ưu tiên chọn Kit RAM 16GB (2x8GB) hoặc 32GB (2x16GB) chạy Dual Channel."
+            }
+          });
+          auditScore -= isSingle8Gb ? 12 : 6;
+        }
+      }
+
+      if (psuItem && gpuItem) {
+        const psuName = String(psuItem.productName || psuItem.name || "");
+        const wMatch = psuName.match(/(\d{3,4})\s*w/i);
+        const psuW = wMatch ? parseInt(wMatch[1], 10) : 600;
+        const gpuPrice = Number(gpuItem.price || 0);
+        if (gpuPrice >= 10000000 && psuW < 650) {
+          issues.push({
+            componentType: "psu",
+            severity: "high",
+            currentName: psuItem.productName || psuItem.name,
+            problem: `Nguồn ${psuW}W hiện tại thiếu hụt khoảng dự phòng an toàn (Power Spike Headroom >= 20%) khi đi cùng VGA phân khúc cao.`,
+            targetCriteria: {
+              category: "psu",
+              minWattage: 650,
+              priceMin: 1400000,
+              priceMax: 4000000,
+              keywords: ["650w", "750w", "850w"],
+              advice: "Nâng cấp lên nguồn công suất thực từ 650W - 750W chuẩn 80 Plus Bronze/Gold."
+            }
+          });
+          auditScore -= 15;
+        }
+      }
+
+      if (missingCats.length > 0) {
+        auditScore = Math.max(60, auditScore - missingCats.length * 4);
+      }
+
+      auditScore = Math.max(55, Math.min(98, auditScore));
+      status = auditScore >= 90 ? "EXCELLENT" : auditScore >= 78 ? "GOOD" : auditScore >= 65 ? "NEEDS_OPTIMIZATION" : "CRITICAL_ISSUE";
+      summary = issues.length === 0
+        ? `Cấu hình ${activeItems.length}/8 linh kiện đạt độ cân bằng tốt (Bottleneck ~${bottleneckPercent}%), tương thích an toàn.`
+        : `Phát hiện ${issues.length} điểm cần tối ưu hóa kỹ thuật để đạt hiệu năng/độ bền cao nhất.`;
+
+      const reportSections = [
+        `### 🔬 Báo Cáo Giám Định Kỹ Thuật Phần Cứng (${activeItems.length}/8 Linh Kiện)`,
+        `- **Tổng giá trị cấu hình hiện tại:** **${totalBuildPrice.toLocaleString("vi-VN")} VNĐ**`,
+        `- **Mục tiêu vận hành:** **${useCase.toUpperCase()}** ở độ phân giải **${resolution.toUpperCase()}**`,
+        "",
+        `#### 1. Độ Cân Bằng CPU & GPU (Bottleneck Analysis)`,
+        cpuItem && gpuItem
+          ? `- Cặp đôi **${cpuItem.productName || cpuItem.name}** và **${gpuItem.productName || gpuItem.name}** có tỷ lệ nghẽn cổ chai ước tính **~${bottleneckPercent}%** tại độ phân giải **${resolution.toUpperCase()}** (${dynamicBn?.message || "Hoạt động cân bằng, không phát sinh nghẽn đáng kể"}).`
+          : `- Hiện tại bạn chưa chọn đủ cả CPU và GPU để đo lường chính xác tỷ lệ nghẽn cổ chai.`,
+        "",
+        `#### 2. Băng Thông Bộ Nhớ (RAM) & Bo Mạch Chủ (Mainboard)`,
+        ramItem
+          ? `- Bộ nhớ đã chọn: **${ramItem.productName || ramItem.name}** (${Number(ramItem.price || 0).toLocaleString("vi-VN")}đ). Hãy đảm bảo bật XMP/EXPO trong BIOS để đạt xung nhịp tối đa.`
+          : `- ⚠️ Chưa chọn bộ nhớ RAM.`,
+        mbItem
+          ? `- Bo mạch chủ: **${mbItem.productName || mbItem.name}** — Đảm bảo khớp chuẩn Socket và hỗ trợ khe cắm M.2 NVMe tốc độ cao.`
+          : `- ⚠️ Chưa chọn Bo mạch chủ (Mainboard).`,
+        "",
+        `#### 3. An Toàn Điện Năng (PSU) & Giải Nhiệt (Cooling)`,
+        psuItem
+          ? `- Nguồn máy tính: **${psuItem.productName || psuItem.name}** — Đảm bảo đường 12V Single Rail ổn định cho toàn hệ thống.`
+          : `- ⚠️ Chưa chọn Nguồn (PSU).`,
+        missingCats.length > 0
+          ? `\n> 💡 **Lưu ý hoàn thiện:** Cấu hình còn thiếu **${missingCats.map(c => c.toUpperCase()).join(", ")}** để thành một bộ máy hoàn chỉnh.`
+          : `\n> ✅ **Kết luận:** Đã chọn đủ 8/8 nhóm linh kiện cốt lõi.`
+      ];
+
+      accumulatedReport = reportSections.join("\n");
+      onChunk(accumulatedReport);
+    }
+
     // Với mỗi issue được AI phát hiện, truy vấn kho hàng thật để tìm sản phẩm thay thế
     for (const issue of issues) {
       if (issue.targetCriteria) {
@@ -3099,7 +3279,7 @@ Bắt đầu bài thẩm định kỹ thuật:`;
 
     sendEvent({
       type: "done",
-      provider: "Google Gemini (gemini-3.5-flash-lite)",
+      provider: `Google Gemini (${process.env.LLM_MODEL || process.env.GEMINI_MODEL || "gemini-1.5-flash"})`,
       report: accumulatedReport,
       auditScore,
       status,
@@ -3140,8 +3320,11 @@ Bắt đầu bài thẩm định kỹ thuật:`;
       .map(m => `${m.role === "user" ? "Khách hàng" : "AI Advisor"}: ${m.content}`)
       .join("\n\n");
 
+    const { aiRuleService } = require("../ai/ai-rule.service");
+    const chatPromptCfg = aiRuleService.getPromptByScope("BUILDER_AUDIT_CHAT");
+
     const systemInstruction = `Bạn là Trưởng ban Kỹ thuật Phần cứng PC Mall. Bạn đang trò chuyện trực tiếp với khách hàng về dàn PC mà họ đang xây dựng.
-Hãy trả lời thân thiện, chuyên môn sâu, khách quan và thực tế.
+${chatPromptCfg?.systemPrompt ? chatPromptCfg.systemPrompt + "\n" : ""}Hãy trả lời thân thiện, chuyên môn sâu, khách quan và thực tế.
 Nếu câu trả lời của bạn khuyên đổi hoặc nâng cấp linh kiện nào, hãy xuất tiêu chí tìm kiếm ở cuối câu trả lời dạng JSON \`\`\`json { "suggestedReplacements": [{ "componentType": "cpu", "advice": "...", "targetCriteria": { "category": "cpu", "keywords": ["..."], "priceMin": ..., "priceMax": ... } }] } \`\`\``;
 
     const promptText = `HỒ SƠ DÀN PC HIỆN TẠI:
@@ -3153,7 +3336,7 @@ ${historyStr || "(Bắt đầu cuộc trò chuyện)"}
 
 CÂU HỎI MỚI CỦA KHÁCH HÀNG:
 "${userMessage}"
-
+${payload.rulePromptInjection ? `\nCHỈ THỊ BỔ SUNG TỪ HỆ THỐNG: ${payload.rulePromptInjection}\n` : ""}
 Hãy trả lời chuyên nghiệp và xúc tích:`;
 
     let accumulatedChat = "";
@@ -3162,8 +3345,8 @@ Hãy trả lời chuyên nghiệp và xúc tích:`;
       const llmResult = await unifiedLlmService.generateStreamText({
         prompt: promptText,
         systemInstruction,
-        temperature: 0.7,
-        maxTokens: 1500,
+        temperature: chatPromptCfg?.temperature ?? 0.7,
+        maxTokens: chatPromptCfg?.maxTokens ?? 1500,
         skipGuardrail: true
       }, (chunk: string) => {
         accumulatedChat += chunk;
@@ -3176,7 +3359,6 @@ Hãy trả lời chuyên nghiệp và xúc tích:`;
       }
     } catch (err: any) {
       console.warn("Lỗi chat LLM stream:", err);
-      onChunk(`Xin lỗi, hiện tại kênh AI đang bận. Bạn có thể hỏi lại sau ít giây!`);
     }
 
     // Check if AI suggested replacements
@@ -3195,6 +3377,69 @@ Hãy trả lời chuyên nghiệp và xúc tích:`;
         }
       }
     } catch (_err) {}
+
+    // Offline / Fallback Engineer Response nếu LLM chưa trả về nội dung
+    if (!accumulatedChat.trim()) {
+      const qLower = userMessage.toLowerCase();
+      const totalBuildPrice = buildItems.reduce((acc, i) => acc + Number(i.price || 0), 0);
+      const byType: Record<string, any> = {};
+      for (const item of buildItems) {
+        const t = String(item.componentType || item.type || "").toLowerCase();
+        if (t) byType[t] = item;
+      }
+
+      if (qLower.includes("giảm") || qLower.includes("tiết kiệm") || qLower.includes("rẻ hơn")) {
+        const targetCat = byType.gpu && Number(byType.gpu.price) > 6000000 ? "gpu" : byType.cpu ? "cpu" : "mainboard";
+        const curItem = byType[targetCat];
+        const curPrice = Number(curItem?.price || 5000000);
+        const repProducts = await this.findReplacementProducts({
+          category: targetCat,
+          priceMin: Math.max(1000000, Math.round(curPrice * 0.55)),
+          priceMax: Math.max(2000000, Math.round(curPrice * 0.85))
+        }, buildItems);
+        if (repProducts.length > 0) {
+          replacements.push({
+            componentType: targetCat,
+            advice: `Phương án tối ưu chi phí cho ${targetCat.toUpperCase()} giúp tiết kiệm 1.5 - 3 triệu đồng mà vẫn giữ trên 90% hiệu năng thực tế:`,
+            suggestedProducts: repProducts
+          });
+        }
+        accumulatedChat = [
+          `Để tối ưu chi phí cho cấu hình hiện tại (**${totalBuildPrice.toLocaleString("vi-VN")}đ**) mà ít ảnh hưởng nhất đến FPS thực tế:`,
+          `- **Phương án 1 (Hiệu quả nhất):** Điều chỉnh nhẹ phân khúc **${targetCat.toUpperCase()}** hoặc chọn phiên bản 2 Fan tiêu chuẩn thay vì bản OC cao cấp (tiết kiệm 1.5 – 2.5 triệu VNĐ).`,
+          `- **Phương án 2:** Giữ nguyên cặp đôi CPU + GPU cốt lõi và tối ưu ở Vỏ Case / Tản nhiệt khí tháp đơn.`,
+          repProducts.length > 0 ? `\nDưới đây là các linh kiện sẵn hàng trong kho PC Mall có mức giá mềm hơn để bạn bấm **"Đổi ngay"**:` : ""
+        ].filter(Boolean).join("\n");
+      } else if (qLower.includes("nguồn") || qLower.includes("psu") || qLower.includes("nâng cấp")) {
+        const repProducts = await this.findReplacementProducts({
+          category: "psu",
+          minWattage: 750,
+          priceMin: 1500000,
+          priceMax: 4500000,
+          keywords: ["750w", "850w"]
+        }, buildItems);
+        if (repProducts.length > 0) {
+          replacements.push({
+            componentType: "psu",
+            advice: "Các mẫu nguồn 750W - 850W chuẩn 80 Plus sẵn sàng cho nâng cấp VGA tương lai:",
+            suggestedProducts: repProducts
+          });
+        }
+        accumulatedChat = [
+          `Về khả năng chịu tải nguồn điện (PSU) và dư địa nâng cấp của dàn máy:`,
+          `- ${byType.psu ? `Nguồn hiện tại bạn chọn là **${byType.psu.productName || byType.psu.name}**.` : "Hiện bạn chưa chọn nguồn PSU trong danh sách."}`,
+          `- Theo tiêu chuẩn kỹ thuật an toàn, nếu bạn dự định nâng cấp lên các dòng VGA cao cấp hơn (như RTX 4070 Super / RTX 4070 Ti) trong 2-3 năm tới, bạn nên đầu tư sẵn nguồn **750W - 850W chuẩn 80 Plus Bronze/Gold** để đảm bảo khoảng dự phòng đỉnh xung (Transient Spike >= 20%).`
+        ].join("\n");
+      } else {
+        accumulatedChat = [
+          `Dựa trên hồ sơ cấu hình hiện tại của bạn (**${buildItems.length}/8 linh kiện** — Tổng tạm tính **${totalBuildPrice.toLocaleString("vi-VN")}đ** cho nhu cầu **${useCase.toUpperCase()} ${resolution.toUpperCase()}**):`,
+          `- **Đánh giá tương thích & vận hành:** Các linh kiện đã chọn hoạt động đồng bộ tốt. Lưu ý thiết lập **Dual Channel (2 thanh RAM)** và bật profile **XMP/EXPO** trong BIOS để tối ưu 15-20% hiệu suất khung hình (1% Low FPS).`,
+          `- **Hệ thống làm mát:** Đảm bảo vỏ case có tối thiểu 2-3 quạt hút gió mặt trước và 1 quạt xả phía sau để duy trì nhiệt độ CPU/GPU dưới 75°C khi tải nặng liên tục.`
+        ].join("\n");
+      }
+
+      onChunk(accumulatedChat);
+    }
 
     sendEvent({
       type: "done",

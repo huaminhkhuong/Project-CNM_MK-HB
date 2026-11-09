@@ -23,7 +23,7 @@ if (typeof window !== "undefined") {
     refreshCart();
   });
   window.addEventListener("storage", (e) => {
-    if (e.key === "cnm_guest_cart_v1" || e.key === "cnm_auth_state") {
+    if (e.key === "cnm_guest_cart" || e.key === "cnm_guest_cart_v1" || e.key === "cnm_auth_state") {
       refreshCart();
     }
   });

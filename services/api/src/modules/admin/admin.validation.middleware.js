@@ -271,7 +271,20 @@ function validateAssignSkuAttributes(req, res, next) {
 }
 
 function validateSystemSettings(req, res, next) {
-  const allowedKeys = ["store_name", "support_email", "support_phone", "online_payment_mode", "shipping_mode", "maintenance_mode"];
+  const allowedKeys = [
+    "store_name",
+    "support_email",
+    "support_phone",
+    "online_payment_mode",
+    "shipping_mode",
+    "maintenance_mode",
+    "bank_name",
+    "bank_account_number",
+    "bank_account_holder",
+    "store_hotline",
+    "store_tax_id",
+    "store_address"
+  ];
   const body = req.body || {};
   const hasAnyField = allowedKeys.some((key) => Object.prototype.hasOwnProperty.call(body, key));
 

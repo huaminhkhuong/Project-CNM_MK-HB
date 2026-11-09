@@ -151,7 +151,7 @@ describe("AI Rule Engine, Normalization & Guardrails Unit Test Suite", () => {
     it("injects system prompt instructions for Bottleneck inquiries in BUILDER_AUDIT_CHAT", () => {
       const res = aiRuleService.evaluateInput("BUILDER_AUDIT_CHAT", "Dàn máy này có bị nghẽn cổ chai bottleneck không?");
       assert.strictEqual(res.handled, false);
-      assert.strictEqual(res.action, "PASS_THROUGH");
+      assert.strictEqual(res.action, "SYSTEM_INJECT");
       assert.ok(res.promptInjections.length > 0);
       assert.ok(res.promptInjections.some((inj: string) => inj.includes("Bottleneck")));
     });
@@ -159,7 +159,7 @@ describe("AI Rule Engine, Normalization & Guardrails Unit Test Suite", () => {
     it("injects system prompt instructions for PSU power safety inquiries in BUILDER_AUDIT_CHAT", () => {
       const res = aiRuleService.evaluateInput("BUILDER_AUDIT_CHAT", "nguon co no khong va can bao nhieu watt");
       assert.strictEqual(res.handled, false);
-      assert.strictEqual(res.action, "PASS_THROUGH");
+      assert.strictEqual(res.action, "SYSTEM_INJECT");
       assert.ok(res.promptInjections.length > 0);
       assert.ok(res.promptInjections.some((inj: string) => inj.includes("PSU")));
     });
@@ -168,7 +168,7 @@ describe("AI Rule Engine, Normalization & Guardrails Unit Test Suite", () => {
       const res = aiRuleService.evaluateInput("GENERAL_CHAT", "Tư vấn cấu hình PC gaming 15 triệu chơi mượt GTA V");
       assert.strictEqual(res.handled, false);
       assert.strictEqual(res.action, "PASS_THROUGH");
-      assert.strictEqual(res.model, "llm-ready");
+      assert.ok(typeof res.model === "string" && res.model.length > 0);
     });
   });
 

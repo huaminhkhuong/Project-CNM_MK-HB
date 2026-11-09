@@ -65,6 +65,24 @@ async function getCustomerByUserId(userId: number | null | undefined) {
   return normalizeCustomer(user);
 }
 
+function parseItemSerialNumbers(item: any): string[] {
+  if (Array.isArray(item?.OrderItemSerial) && item.OrderItemSerial.length > 0) {
+    return item.OrderItemSerial.map((s: any) => s?.serial_number).filter(Boolean);
+  }
+  if (Array.isArray(item?.serialNumbers)) {
+    return item.serialNumbers.filter(Boolean);
+  }
+  if (typeof item?.serial_numbers === "string" && item.serial_numbers.trim()) {
+    try {
+      const parsed = JSON.parse(item.serial_numbers);
+      if (Array.isArray(parsed)) return parsed.filter(Boolean);
+    } catch {
+      return item.serial_numbers.split(",").map((s: string) => s.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
 export async function normalizeOrderRecord<T extends Record<string, any> | null>(order: T) {
   if (!order) {
     return order;
@@ -76,9 +94,16 @@ export async function normalizeOrderRecord<T extends Record<string, any> | null>
     : null;
   const customer = await getCustomerByUserId(rest.user_id);
   const paymentProof = await getPaymentProof(rest.id);
+  const normalizedItems = Array.isArray(rest.OrderItem)
+    ? rest.OrderItem.map((item: any) => ({
+        ...item,
+        serialNumbers: parseItemSerialNumbers(item)
+      }))
+    : rest.OrderItem;
 
   return {
     ...rest,
+    ...(normalizedItems ? { OrderItem: normalizedItems } : {}),
     payment_proof: paymentProof,
     paymentProof,
     shipment: normalizeShipment(latestShipment),
@@ -97,7 +122,11 @@ export function getOrdersByUser(userId: string) {
       },
       OrderItem: {
         include: {
-          ProductSku: true
+          ProductSku: true,
+          OrderItemSerial: {
+            select: { id: true, serial_number: true, status: true },
+            orderBy: { id: "asc" }
+          }
         }
       }
     },
@@ -115,7 +144,11 @@ export function getOrderById(orderId: string | number) {
       },
       OrderItem: {
         include: {
-          ProductSku: true
+          ProductSku: true,
+          OrderItemSerial: {
+            select: { id: true, serial_number: true, status: true },
+            orderBy: { id: "asc" }
+          }
         }
       }
     }
@@ -131,7 +164,11 @@ export function listOrders() {
       },
       OrderItem: {
         include: {
-          ProductSku: true
+          ProductSku: true,
+          OrderItemSerial: {
+            select: { id: true, serial_number: true, status: true },
+            orderBy: { id: "asc" }
+          }
         }
       }
     },

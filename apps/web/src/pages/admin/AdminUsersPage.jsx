@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   AdminAlerts,
@@ -11,7 +11,8 @@ import {
   AdminTableWrap,
   useAdminToast
 } from "../../components/admin/AdminUi";
-import { changeAdminUserStatus, getAdminUsers } from "../../services/admin-users.service";
+import { useAuth } from "../../hooks/useAuth";
+import { changeAdminUserRole, changeAdminUserStatus, getAdminUsers } from "../../services/admin-users.service";
 import {
   formatAdminDateTime,
   getAdminErrorMessage,
@@ -21,6 +22,7 @@ import {
 } from "../../utils/adminUi";
 
 const STATUS_OPTIONS = ["ACTIVE", "BLOCKED", "INACTIVE"];
+const ROLE_OPTIONS = ["CUSTOMER", "SALES_STAFF", "TECH_STAFF", "ADMIN"];
 
 function normalizeUser(user) {
   return {
@@ -34,11 +36,15 @@ function normalizeUser(user) {
 }
 
 export function AdminUsersPage() {
+  const { authState } = useAuth();
+  const currentUserId = Number(authState?.user?.id || authState?.user?.userId || 0);
   const [users, setUsers] = useState([]);
   const [keyword, setKeyword] = useState("");
   const [searchKeyword, setSearchKeyword] = useState("");
+  const [roleFilter, setRoleFilter] = useState("ALL");
   const [loading, setLoading] = useState(true);
   const [statusLoadingId, setStatusLoadingId] = useState(null);
+  const [roleLoadingId, setRoleLoadingId] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
@@ -46,9 +52,12 @@ export function AdminUsersPage() {
 
   const filteredUsers = useMemo(() => {
     const q = searchKeyword.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter((u) => [u.fullName, u.email, u.role].join(" ").toLowerCase().includes(q));
-  }, [searchKeyword, users]);
+    return users.filter((u) => {
+      if (roleFilter !== "ALL" && u.role !== roleFilter) return false;
+      if (!q) return true;
+      return [u.fullName, u.email, u.role].join(" ").toLowerCase().includes(q);
+    });
+  }, [searchKeyword, roleFilter, users]);
 
   useEffect(() => {
     async function loadUsers() {
@@ -73,6 +82,10 @@ export function AdminUsersPage() {
 
   async function handleChangeStatus(user, nextStatus) {
     if (!nextStatus || nextStatus === user.status) return;
+    if (Number(user.id) === currentUserId && nextStatus !== "ACTIVE") {
+      setErrorMessage("Không thể tự khóa hoặc vô hiệu hóa tài khoản Quản trị viên đang đăng nhập.");
+      return;
+    }
     try {
       setStatusLoadingId(user.id);
       setErrorMessage("");
@@ -84,6 +97,26 @@ export function AdminUsersPage() {
       setErrorMessage(getAdminErrorMessage(error, "Không thể cập nhật trạng thái."));
     } finally {
       setStatusLoadingId(null);
+    }
+  }
+
+  async function handleChangeRole(user, nextRole) {
+    if (!nextRole || nextRole === user.role) return;
+    if (Number(user.id) === currentUserId && nextRole !== "ADMIN") {
+      setErrorMessage("Không thể tự hạ quyền tài khoản Quản trị viên đang đăng nhập.");
+      return;
+    }
+    try {
+      setRoleLoadingId(user.id);
+      setErrorMessage("");
+      const response = await changeAdminUserRole(user.id, nextRole);
+      const updated = normalizeUser(response?.data || response);
+      setUsers((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      setSuccessMessage(`Đã đổi vai trò tài khoản ${user.email} sang ${getRoleMeta(nextRole).label}.`);
+    } catch (error) {
+      setErrorMessage(getAdminErrorMessage(error, "Không thể cập nhật vai trò."));
+    } finally {
+      setRoleLoadingId(null);
     }
   }
 
@@ -125,6 +158,19 @@ export function AdminUsersPage() {
             <p>Tìm theo họ tên hoặc email, đổi trạng thái trực tiếp trên bảng.</p>
           </div>
           <form onSubmit={handleSearchSubmit} className="admin-search-row">
+            <select
+              className="admin-input"
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              style={{ minWidth: 150 }}
+            >
+              <option value="ALL">Tất cả vai trò</option>
+              {ROLE_OPTIONS.map((role) => (
+                <option key={role} value={role}>
+                  {getRoleMeta(role).label} ({role})
+                </option>
+              ))}
+            </select>
             <input
               className="admin-input"
               value={keyword}
@@ -148,24 +194,46 @@ export function AdminUsersPage() {
                 <tr>
                   <th>Người dùng</th>
                   <th>Email</th>
-                  <th>Vai trò</th>
+                  <th>Vai trò & Phân quyền</th>
                   <th>Trạng thái</th>
                   <th>Ngày tạo</th>
-                  <th>Cập nhật</th>
+                  <th>Khóa / Mở khóa</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredUsers.map((user) => {
                   const roleMeta = getRoleMeta(user.role);
                   const statusMeta = getStatusMeta(user.status);
+                  const isSelf = Number(user.id) === currentUserId;
                   return (
                     <tr key={user.id}>
                       <td>
                         <strong>{user.fullName || "Chưa cập nhật"}</strong>
+                        {isSelf ? (
+                          <span style={{ marginLeft: 8 }}>
+                            <AdminBadge tone="primary">Bạn</AdminBadge>
+                          </span>
+                        ) : null}
                       </td>
                       <td>{user.email || "—"}</td>
                       <td>
-                        <AdminBadge tone={roleMeta.tone}>{roleMeta.label}</AdminBadge>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <AdminBadge tone={roleMeta.tone}>{roleMeta.label}</AdminBadge>
+                          <select
+                            className="admin-input"
+                            value={user.role}
+                            onChange={(e) => handleChangeRole(user, e.target.value)}
+                            disabled={roleLoadingId === user.id || isSelf}
+                            title={isSelf ? "Không thể tự thay đổi quyền của chính mình" : "Đổi vai trò"}
+                            style={{ minWidth: 135, padding: "4px 8px", fontSize: 12 }}
+                          >
+                            {ROLE_OPTIONS.map((r) => (
+                              <option key={r} value={r}>
+                                {getRoleMeta(r).label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </td>
                       <td>
                         <AdminBadge tone={statusMeta.tone}>{statusMeta.label}</AdminBadge>
@@ -176,7 +244,8 @@ export function AdminUsersPage() {
                           className="admin-input"
                           value={user.status}
                           onChange={(e) => handleChangeStatus(user, e.target.value)}
-                          disabled={statusLoadingId === user.id}
+                          disabled={statusLoadingId === user.id || isSelf}
+                          title={isSelf ? "Không thể tự khóa tài khoản của chính mình" : "Đổi trạng thái"}
                           style={{ minWidth: 140 }}
                         >
                           {STATUS_OPTIONS.map((status) => (

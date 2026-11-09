@@ -399,7 +399,22 @@ async function deleteSku(skuId) {
     throw createError("SKU not found", 404);
   }
 
+  const [orderItemCount, warrantyCount, serialCount] = await Promise.all([
+    prisma.orderItem.count({ where: { sku_id: parsedSkuId } }).catch(() => 0),
+    prisma.warranty.count({ where: { sku_id: parsedSkuId } }).catch(() => 0),
+    prisma.inventorySerial.count({ where: { sku_id: parsedSkuId } }).catch(() => 0)
+  ]);
+
+  if (orderItemCount > 0 || warrantyCount > 0 || serialCount > 0) {
+    throw createError(
+      "Không thể xóa SKU đã phát sinh đơn hàng, serial kho hoặc hồ sơ bảo hành. Vui lòng chuyển trạng thái SKU sang Ngừng bán (INACTIVE).",
+      409
+    );
+  }
+
   await prisma.$transaction([
+    prisma.cartItem.deleteMany({ where: { sku_id: parsedSkuId } }),
+    prisma.pcBuildItem.deleteMany({ where: { sku_id: parsedSkuId } }),
     prisma.skuAttribute.deleteMany({ where: { sku_id: parsedSkuId } }),
     prisma.productSku.delete({ where: { id: parsedSkuId } })
   ]);

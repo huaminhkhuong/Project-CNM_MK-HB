@@ -38,9 +38,15 @@ httpServer.listen(env.port, () => {
 });
 
 // Graceful shutdown handling
-function gracefulShutdown(signal: string) {
+async function gracefulShutdown(signal: string) {
   stopPaymentTimeoutWorker();
-  logger.info(`[Server] Received ${signal}. Closing HTTP server and database pools...`);
+  logger.info(`[Server] Received ${signal}. Closing HTTP server, Socket.io, and database pools...`);
+  
+  try {
+    const { closeSocketIO } = await import("./socket/socket.service");
+    await closeSocketIO();
+  } catch {}
+
   httpServer.close(async () => {
     try {
       const { prisma } = await import("./config/prisma");

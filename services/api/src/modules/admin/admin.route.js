@@ -40,6 +40,8 @@ function requirePermission(_permission) {
 
 const router = express.Router();
 
+router.get("/public-store-info", controller.getPublicStoreInfo);
+
 router.get(
   "/dashboard",
   verifyToken,
@@ -267,6 +269,14 @@ router.patch(
   requirePermission(PERMISSIONS.MANAGE_USERS),
   validateChangeUserStatus,
   controller.changeUserStatus
+);
+
+router.patch(
+  "/users/:userId/role",
+  verifyToken,
+  requireRole(ROLES.ADMIN),
+  requirePermission(PERMISSIONS.MANAGE_USERS),
+  controller.changeUserRole
 );
 
 router.get(

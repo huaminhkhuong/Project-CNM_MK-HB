@@ -62,8 +62,41 @@ class UnifiedLlmService {
     const systemInstruction = options.systemInstruction || "Bạn là Chuyên gia Tư vấn Máy tính và Linh kiện Phần cứng PC Mall.";
     const temp = options.temperature !== undefined ? options.temperature : this.config.temperature;
     const maxTokens = options.maxTokens !== undefined ? options.maxTokens : this.config.maxTokens;
-    const signal = options.signal || null;
+    // Timeout cứng: tránh treo request hàng phút khi nhà cung cấp LLM quá tải -> fallback offline nhanh
+    const timeoutMs = Number(options.timeoutMs || this.config.timeoutMs || 30000);
+    const timeoutCtrl = this.createTimeoutController(timeoutMs, options.signal);
+    const signal = timeoutCtrl.signal;
 
+    try {
+      return await this.generateTextInternal({ options, prompt, systemInstruction, temp, maxTokens, signal });
+    } finally {
+      timeoutCtrl.clear();
+    }
+  }
+
+  /**
+   * Tạo AbortController có timeout (hỗ trợ reset khi nhận chunk cho streaming) và liên kết với signal bên ngoài.
+   */
+  createTimeoutController(timeoutMs, externalSignal = null) {
+    const controller = new AbortController();
+    let timer = null;
+    const arm = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => controller.abort(new Error(`LLM request timeout sau ${timeoutMs}ms`)), timeoutMs);
+    };
+    arm();
+    if (externalSignal) {
+      if (externalSignal.aborted) controller.abort();
+      else externalSignal.addEventListener("abort", () => controller.abort(), { once: true });
+    }
+    return {
+      signal: controller.signal,
+      reset: arm,
+      clear: () => timer && clearTimeout(timer)
+    };
+  }
+
+  async generateTextInternal({ options, prompt, systemInstruction, temp, maxTokens, signal }) {
     // ── 1. TÍCH HỢP GUARDRAIL BẢO VỆ TOKEN ──────────────────────────────────────
     if (!options.skipGuardrail) {
       const guard = validateChatMessageDomain(prompt);
@@ -143,8 +176,24 @@ class UnifiedLlmService {
     const systemInstruction = options.systemInstruction || "Bạn là Chuyên gia Tư vấn Máy tính và Linh kiện Phần cứng PC Mall.";
     const temp = options.temperature !== undefined ? options.temperature : this.config.temperature;
     const maxTokens = options.maxTokens !== undefined ? options.maxTokens : this.config.maxTokens;
-    const signal = options.signal || null;
+    // Idle-timeout cho streaming: hủy nếu quá N giây không nhận được chunk mới
+    const idleTimeoutMs = Number(options.timeoutMs || this.config.streamIdleTimeoutMs || 25000);
+    const timeoutCtrl = this.createTimeoutController(idleTimeoutMs, options.signal);
+    const signal = timeoutCtrl.signal;
+    const userOnChunk = onChunk;
+    onChunk = (chunk) => {
+      timeoutCtrl.reset();
+      if (typeof userOnChunk === "function") userOnChunk(chunk);
+    };
 
+    try {
+      return await this.generateStreamTextInternal({ options, prompt, systemInstruction, temp, maxTokens, signal, onChunk });
+    } finally {
+      timeoutCtrl.clear();
+    }
+  }
+
+  async generateStreamTextInternal({ options, prompt, systemInstruction, temp, maxTokens, signal, onChunk }) {
     // 1. Guardrail filter
     if (!options.skipGuardrail) {
       const guard = validateChatMessageDomain(prompt);
@@ -204,34 +253,49 @@ class UnifiedLlmService {
 
   // ── ADAPTER STREAM: GOOGLE GEMINI ──────────────────────────────────────────
   async callGeminiStreamAdapter({ prompt, systemInstruction, temp, maxTokens, signal, onChunk }) {
-    const model = this.config.model || "gemini-3.5-flash-lite";
+    const model = this.config.model || "gemini-2.5-flash";
+    let apiModel = this.resolvedGeminiModel || ((model === "gemini-3.5-flash-lite" || model === "gemini-1.5-flash") ? "gemini-2.5-flash" : model);
     const apiKey = this.config.apiKey;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
+    const reqBody = JSON.stringify({
+      system_instruction: {
+        parts: [{ text: systemInstruction }]
+      },
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }]
+        }
+      ],
+      generationConfig: {
+        temperature: temp,
+        maxOutputTokens: maxTokens
+      }
+    });
 
-    const res = await fetch(url, {
+    let res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:streamGenerateContent?alt=sse&key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal,
-      body: JSON.stringify({
-        system_instruction: {
-          parts: [{ text: systemInstruction }]
-        },
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: prompt }]
-          }
-        ],
-        generationConfig: {
-          temperature: temp,
-          maxOutputTokens: maxTokens
-        }
-      })
+      body: reqBody
     });
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error?.message || `Gemini stream API returned status ${res.status}`);
+      const errMsg = errData.error?.message || `Gemini stream API returned status ${res.status}`;
+      const suggestedMatch = errMsg.match(/use models\/([a-zA-Z0-9.-]+)/i);
+      if (suggestedMatch && suggestedMatch[1] && suggestedMatch[1] !== apiModel) {
+        apiModel = suggestedMatch[1];
+        this.resolvedGeminiModel = apiModel;
+        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:streamGenerateContent?alt=sse&key=${apiKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal,
+          body: reqBody
+        });
+      }
+      if (!res.ok) {
+        throw new Error(errMsg);
+      }
     }
 
     const reader = res.body.getReader();
@@ -347,34 +411,50 @@ class UnifiedLlmService {
 
   // ── ADAPTER 1: GOOGLE GEMINI ────────────────────────────────────────────────
   async callGeminiAdapter({ prompt, systemInstruction, temp, maxTokens, signal }) {
-    const model = this.config.model || "gemini-3.5-flash-lite";
+    const model = this.config.model || "gemini-2.5-flash";
+    let apiModel = this.resolvedGeminiModel || ((model === "gemini-3.5-flash-lite" || model === "gemini-1.5-flash") ? "gemini-2.5-flash" : model);
     const apiKey = this.config.apiKey;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const reqBody = JSON.stringify({
+      system_instruction: {
+        parts: [{ text: systemInstruction }]
+      },
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }]
+        }
+      ],
+      generationConfig: {
+        temperature: temp,
+        maxOutputTokens: maxTokens
+      }
+    });
 
-    const res = await fetch(url, {
+    let res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal,
-      body: JSON.stringify({
-        system_instruction: {
-          parts: [{ text: systemInstruction }]
-        },
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: prompt }]
-          }
-        ],
-        generationConfig: {
-          temperature: temp,
-          maxOutputTokens: maxTokens
-        }
-      })
+      body: reqBody
     });
 
-    const data = await res.json();
+    let data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(data.error?.message || `Gemini API returned status ${res.status}`);
+      const errMsg = data.error?.message || `Gemini API returned status ${res.status}`;
+      const suggestedMatch = errMsg.match(/use models\/([a-zA-Z0-9.-]+)/i);
+      if (suggestedMatch && suggestedMatch[1] && suggestedMatch[1] !== apiModel) {
+        apiModel = suggestedMatch[1];
+        this.resolvedGeminiModel = apiModel;
+        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal,
+          body: reqBody
+        });
+        data = await res.json().catch(() => ({}));
+      }
+      if (!res.ok) {
+        throw new Error(data.error?.message || errMsg);
+      }
     }
 
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";

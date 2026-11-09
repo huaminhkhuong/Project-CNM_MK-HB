@@ -152,4 +152,49 @@ describe("Tickets RMA & Customer Support Authorization", () => {
     assert.equal(res.body.data.status, "IN_PROGRESS");
     assert.equal(res.body.data.priority, "URGENT");
   });
+
+  test("7. Bảo mật INTERNAL Note: Ghi chú nội bộ của Kỹ thuật viên được ẩn hoàn toàn khỏi Khách hàng", async () => {
+    const noteRes = await request(app)
+      .post(`/api/tickets/${createdTicketId}/messages`)
+      .set("Authorization", `Bearer ${techToken}`)
+      .send({
+        message: "INTERNAL SECRET: Khách có dấu hiệu ép xung GPU quá mức, cần kiểm tra kỹ mạch VRM.",
+        visibility: "INTERNAL"
+      });
+
+    assert.equal(noteRes.status, 201);
+    const techMessages = noteRes.body.data.messages || [];
+    assert.ok(
+      techMessages.some((m: any) => m.visibility === "INTERNAL" && m.message.includes("INTERNAL SECRET")),
+      "Kỹ thuật viên phải nhìn thấy ghi chú INTERNAL"
+    );
+
+    const custDetailRes = await request(app)
+      .get(`/api/tickets/${createdTicketId}`)
+      .set("Authorization", `Bearer ${customerToken}`);
+
+    assert.equal(custDetailRes.status, 200);
+    const custMessages = custDetailRes.body.data.messages || [];
+    assert.ok(
+      !custMessages.some((m: any) => m.visibility === "INTERNAL" || m.message.includes("INTERNAL SECRET")),
+      "Khách hàng tuyệt đối KHÔNG được thấy ghi chú INTERNAL"
+    );
+  });
+
+  test("8. Tự động mở lại Ticket (IN_PROGRESS) khi Khách hàng phản hồi vào Ticket đã RESOLVED", async () => {
+    await request(app)
+      .patch(`/api/tickets/${createdTicketId}`)
+      .set("Authorization", `Bearer ${techToken}`)
+      .send({ status: "RESOLVED" });
+
+    const replyRes = await request(app)
+      .post(`/api/tickets/${createdTicketId}/messages`)
+      .set("Authorization", `Bearer ${customerToken}`)
+      .send({
+        message: "Em mang về cắm lại vẫn bị mất tín hiệu màn hình anh ơi!"
+      });
+
+    assert.equal(replyRes.status, 201);
+    assert.equal(replyRes.body.data.status, "IN_PROGRESS", "Ticket phải tự động chuyển từ RESOLVED về IN_PROGRESS khi khách phản hồi");
+  });
 });

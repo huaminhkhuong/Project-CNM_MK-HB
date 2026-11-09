@@ -6,7 +6,9 @@ import { usePcBuilder } from "../../hooks/usePcBuilder";
 import { useBuilderModals } from "../../hooks/useBuilderModals";
 import { useBuilderFilters } from "../../hooks/useBuilderFilters";
 import { routeConfig } from "../../routes/routeConfig";
+import { usePageSeo } from "../../hooks/usePageSeo";
 import { addItemToCart } from "../../services/cart.service";
+import { refreshCart } from "../../store/cartStore";
 import { getCategories, getProductDetail, getProducts, clearCatalogCache } from "../../services/catalog.service";
 import { resolveProductImage } from "../../utils/productImage";
 import { XAIExplanationDrawer } from "../../components/pc-builder/XAIExplanationDrawer";
@@ -455,6 +457,12 @@ export function PcBuilderPage() {
     loading, error, success, compatibility, suggestion, guestBuildList, actions
   } = usePcBuilder();
 
+  usePageSeo({
+    title: buildName ? `PC Builder - ${buildName}` : "Xây Dựng Cấu Hình PC Thông Minh",
+    description: "Công cụ tự ráp máy tính PC Builder chuyên nghiệp với hệ thống kiểm tra tương thích phần cứng tự động, AI Advisor thẩm định hiệu năng và cân bằng linh kiện số 1 tại PC Mall.",
+    type: "website"
+  });
+
   useEffect(() => {
     if (locationHandledRef.current) return;
     const state = location?.state;
@@ -479,7 +487,8 @@ export function PcBuilderPage() {
             sku: item.sku || "",
             price: Number(item.price || 0),
             image_url: item.imageUrl || ""
-          }
+          },
+          quantity: Math.max(1, Number(item.quantity || 1))
         }))
         .filter((x) => x.componentType && x.product.id);
 
@@ -494,7 +503,27 @@ export function PcBuilderPage() {
         name: state.productName,
         skuId: state.skuId
       };
-      const cType = p.componentType || (p.categoryName || "").toLowerCase();
+      const rawCat = String(p.componentType || p.categoryName || "").toLowerCase();
+      let cType = "";
+      if (["cpu", "mainboard", "ram", "gpu", "storage", "psu", "case", "cooling"].includes(rawCat)) {
+        cType = rawCat;
+      } else if (rawCat.includes("cpu") || rawCat.includes("vi xử lý")) {
+        cType = "cpu";
+      } else if (rawCat.includes("main") || rawCat.includes("bo mạch")) {
+        cType = "mainboard";
+      } else if (rawCat.includes("ram") || rawCat.includes("bộ nhớ")) {
+        cType = "ram";
+      } else if (rawCat.includes("gpu") || rawCat.includes("vga") || rawCat.includes("card")) {
+        cType = "gpu";
+      } else if (rawCat.includes("ssd") || rawCat.includes("hdd") || rawCat.includes("storage") || rawCat.includes("ổ cứng")) {
+        cType = "storage";
+      } else if (rawCat.includes("psu") || rawCat.includes("nguồn")) {
+        cType = "psu";
+      } else if (rawCat.includes("case") || rawCat.includes("vỏ")) {
+        cType = "case";
+      } else if (rawCat.includes("cool") || rawCat.includes("tản") || rawCat.includes("fan")) {
+        cType = "cooling";
+      }
       if (cType && (p.id || p.productId)) {
         actions.applyComponent(
           cType,
@@ -1353,13 +1382,14 @@ export function PcBuilderPage() {
                 const compsList = Object.entries(comps).map(([type, c]) => ({
                   type,
                   componentType: type,
-                  product: c
+                  product: c,
+                  explanation: c.explanation || ""
                 }));
 
                 setProposalModalData((prev) => ({
                   ...prev,
                   isStreaming: false,
-                  aiAdvice: result.advice,
+                  aiAdvice: result.advice || prev?.aiAdvice || "",
                   provider: result.provider || "Google Gemini (gemini-3.5-flash-lite)",
                   totalPrice: result.totalPrice,
                   budgetUtilization: result.budgetUtilization,
@@ -2139,20 +2169,40 @@ export function PcBuilderPage() {
   }
 
   async function handleAddAllToCart() {
-    const items = Object.values(selectedItems).filter((item) => Boolean(getVariantId(item)));
-    if (items.length === 0) { actions.setError("Chưa có linh kiện để thêm vào giỏ hàng."); return; }
-    if (!isAuthenticated) { navigate(routeConfig.public.login); return; }
+    const entries = Object.entries(selectedItems).filter(([, item]) => Boolean(getVariantId(item)));
+    if (entries.length === 0) { actions.setError("Chưa có linh kiện để thêm vào giỏ hàng."); return; }
     setProcessingComponent("cart");
     try {
-      await Promise.all(
-        items.map((item) =>
-          addItemToCart({
-            productVariantId: getVariantId(item),
-            quantity: Math.max(1, Number(item?.quantity || 1))
-          })
-        )
-      );
-      setLocalMessage("✅ Đã thêm toàn bộ linh kiện vào giỏ hàng.");
+      for (const [type, item] of entries) {
+        const prod = getSelectedProduct(item);
+        const variant = getSelectedVariant(item);
+        const pId = getProductId(prod);
+        const vId = getVariantId(item);
+        const unitPrice = Number(variant?.price || getProductPrice(prod) || 0);
+        const qty = Math.max(1, Number(item?.quantity || 1));
+        await addItemToCart({
+          productId: pId || vId,
+          productVariantId: vId,
+          quantity: qty,
+          unitPrice,
+          product: {
+            id: pId || vId,
+            name: getProductName(prod),
+            slug: prod?.slug || "",
+            category: { name: type.toUpperCase() },
+            imageUrl: resolveProductImage(prod)
+          },
+          variant: {
+            id: vId,
+            sku: variant?.sku || `SKU-${vId}`,
+            price: unitPrice,
+            stock: Number(variant?.stock ?? getProductStock(prod) ?? 10),
+            imageUrl: resolveProductImage(prod)
+          }
+        });
+      }
+      await refreshCart();
+      setLocalMessage(`✅ Đã thêm toàn bộ ${entries.length} linh kiện vào giỏ hàng.`);
     } catch { actions.setError("Không thể thêm toàn bộ linh kiện vào giỏ hàng."); }
     finally { setProcessingComponent(""); }
   }
@@ -2160,23 +2210,44 @@ export function PcBuilderPage() {
   async function handleBuyWholeBuild() {
     const ids = Object.values(selectedItems).map(getVariantId).filter(Boolean);
     if (ids.length === 0) { actions.setError("Chưa có linh kiện để mua."); return; }
-    if (!isAuthenticated) { navigate(routeConfig.public.login); return; }
+    if (!isAuthenticated) { navigate("/login?redirect=/pc-builder"); return; }
     setIsFinalReviewOpen(true);
   }
 
   async function executeBuyWholeBuild(options = {}) {
-    const items = Object.values(selectedItems).filter((item) => Boolean(getVariantId(item)));
+    const entries = Object.entries(selectedItems).filter(([, item]) => Boolean(getVariantId(item)));
     setProcessingComponent("cart");
     setIsFinalReviewOpen(false);
     try {
-      await Promise.all(
-        items.map((item) =>
-          addItemToCart({
-            productVariantId: getVariantId(item),
-            quantity: Math.max(1, Number(item?.quantity || 1))
-          })
-        )
-      );
+      for (const [type, item] of entries) {
+        const prod = getSelectedProduct(item);
+        const variant = getSelectedVariant(item);
+        const pId = getProductId(prod);
+        const vId = getVariantId(item);
+        const unitPrice = Number(variant?.price || getProductPrice(prod) || 0);
+        const qty = Math.max(1, Number(item?.quantity || 1));
+        await addItemToCart({
+          productId: pId || vId,
+          productVariantId: vId,
+          quantity: qty,
+          unitPrice,
+          product: {
+            id: pId || vId,
+            name: getProductName(prod),
+            slug: prod?.slug || "",
+            category: { name: type.toUpperCase() },
+            imageUrl: resolveProductImage(prod)
+          },
+          variant: {
+            id: vId,
+            sku: variant?.sku || `SKU-${vId}`,
+            price: unitPrice,
+            stock: Number(variant?.stock ?? getProductStock(prod) ?? 10),
+            imageUrl: resolveProductImage(prod)
+          }
+        });
+      }
+      await refreshCart();
       setLocalMessage("✅ Đã xác nhận & nạp toàn bộ linh kiện vào giỏ hàng. Đang chuyển đến trang thanh toán...");
       navigate(routeConfig.public.checkout);
     } catch {
@@ -2751,7 +2822,7 @@ export function PcBuilderPage() {
             handleAutoRecommend={handleAutoRecommend}
             suggestionFormBudget={suggestionForm.budget}
             visibleChecks={visibleChecks}
-            onOpenXaiDrawer={setIsXaiDrawerOpen}
+            onOpenXaiDrawer={handleOpenXaiDrawer}
             onOpenAiDrawer={() => setIsAiAdvisorDrawerOpen(true)}
             handleRunWhatIf={handleRunWhatIf}
             isWhatIfLoading={isWhatIfLoading}
@@ -2996,9 +3067,10 @@ export function PcBuilderPage() {
           resolution: suggestionForm.resolution
         }}
         onApplyReplacement={async (compType, product, variant) => {
-          if (actions.addComponent) {
-            await actions.addComponent(compType, product, variant);
-            setLocalMessage(`✅ Đã thay thế ${compType.toUpperCase()} bằng ${getProductName(product)}!`);
+          const targetType = String(compType || "cpu").toLowerCase();
+          if (product) {
+            await handleSelectProduct(targetType, product);
+            setLocalMessage(`✅ Đã thay thế ${targetType.toUpperCase()} bằng ${getProductName(product)}!`);
           }
         }}
       />
@@ -3198,7 +3270,7 @@ export function PcBuilderPage() {
               visibleChecks={visibleChecks}
               onOpenXaiDrawer={() => {
                 setIsMobileSummaryOpen(false);
-                setIsXaiDrawerOpen(true);
+                handleOpenXaiDrawer();
               }}
               onOpenAiDrawer={() => {
                 setIsMobileSummaryOpen(false);

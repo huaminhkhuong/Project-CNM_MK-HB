@@ -58,3 +58,10 @@ pc_crawler/data/
 
 data
 apps/web/public/data/images/products/
+
+# SSL Certificates (exclude real private keys from git)
+nginx/ssl/*.pem
+nginx/ssl/*.crt
+nginx/ssl/*.key
+!nginx/ssl/.gitkeep
+!nginx/ssl/README.md

@@ -22,7 +22,11 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     if (revoked) {
       return next(new AppError("Token has been revoked", 401));
     }
-    req.user = payload;
+    req.user = {
+      ...payload,
+      userId: Number(payload.userId) || payload.userId,
+      id: Number(payload.userId) || payload.userId
+    } as any;
     return next();
   } catch (_error) {
     return next(new AppError("Invalid or expired token", 401));
@@ -70,7 +74,11 @@ export function optionalAuthenticate(req: Request, _res: Response, next: NextFun
   const token = authHeader.split(" ")[1];
   try {
     const payload = jwt.verify(token, env.jwtAccessSecret) as AuthTokenPayload;
-    req.user = payload;
+    req.user = {
+      ...payload,
+      userId: Number(payload.userId) || payload.userId,
+      id: Number(payload.userId) || payload.userId
+    } as any;
   } catch (_error) {
     // Non-blocking: continue as guest if token is invalid or expired
   }

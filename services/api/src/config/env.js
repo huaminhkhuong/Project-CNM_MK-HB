@@ -19,7 +19,7 @@ function getProductionSecret(key, defaultValue) {
   const value = getRequiredProductionEnv(key);
 
   if (value === defaultValue || value.length < 24 || value.startsWith("your_") || value.startsWith("replace_")) {
-    throw new Error(`${key} must be a strong production secret`);
+    throw new Error(`[Security Alert] ${key} must be a strong production secret (minimum 24 characters, cannot be default or placeholder). Please generate secure secrets with 'node scripts/setup-env.js' or 'openssl rand -hex 32' in your .env file.`);
   }
 
   return value;
@@ -57,7 +57,7 @@ const env = {
   jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "7d",
   llmProvider: process.env.LLM_PROVIDER || "gemini",
   llmApiKey: process.env.LLM_API_KEY || process.env.GEMINI_API_KEY || process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY || "",
-  llmModel: process.env.LLM_MODEL || process.env.GEMINI_MODEL || "gemini-1.5-flash",
+  llmModel: process.env.LLM_MODEL || process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
   llmEndpoint: process.env.LLM_ENDPOINT || "",
   llmTemperature: Number(process.env.LLM_TEMPERATURE || 0.7),
   llmMaxTokens: Number(process.env.LLM_MAX_TOKENS || 2048),

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import axios from "axios";
 
 import { ProductCard } from "../../components/common/ProductCard";
 import { getProductFilterOptions, getProducts } from "../../services/catalog.service";
+import { resolveProductImage } from "../../utils/productImage";
 
 /* ── Helpers ─────────────────────────────────────────────────── */
 function normalizeProductResponse(data) {
@@ -306,7 +307,11 @@ export function ProductListPage() {
     if (eventOrE2) {
       const { name: n1, value: v1 } = eventOrE1.target;
       const { name: n2, value: v2 } = eventOrE2.target;
-      setFilters(prev => ({ ...prev, [n1]: v1, [n2]: v2, page: 1 }));
+      setFilters(prev => {
+        const next = { ...prev, [n1]: v1, [n2]: v2, page: 1 };
+        syncFiltersToUrl(next);
+        return next;
+      });
     } else {
       const { name, value } = eventOrE1.target;
       setFilters(prev => ({ ...prev, [name]: value, page: 1 }));
@@ -525,7 +530,19 @@ export function ProductListPage() {
                     <button
                       key={c.id}
                       type="button"
-                      onClick={() => { setFilters(p => ({ ...p, category_id: String(c.id), page: 1 })); }}
+                      onClick={() => {
+                        setFilters(p => {
+                          const isSameCat = String(p.category_id) === String(c.id);
+                          const next = {
+                            ...p,
+                            category_id: String(c.id),
+                            attribute_value_ids: isSameCat ? p.attribute_value_ids : [],
+                            page: 1
+                          };
+                          syncFiltersToUrl(next);
+                          return next;
+                        });
+                      }}
                       style={{
                         display: "flex", alignItems: "center", gap: 8,
                         padding: "7px 10px", borderRadius: 9,
@@ -557,7 +574,13 @@ export function ProductListPage() {
                       <button
                         key={b.id}
                         type="button"
-                        onClick={() => setFilters(p => ({ ...p, brand_id: isActive ? "" : String(b.id), page: 1 }))}
+                        onClick={() => {
+                          setFilters(p => {
+                            const next = { ...p, brand_id: isActive ? "" : String(b.id), page: 1 };
+                            syncFiltersToUrl(next);
+                            return next;
+                          });
+                        }}
                         style={{
                           padding: "5px 12px", borderRadius: 99,
                           border: `1px solid ${isActive ? "rgba(37,99,235,0.4)" : "var(--market-border, #e2e8f0)"}`,
@@ -971,23 +994,27 @@ export function ProductListPage() {
                   >
                     {viewMode === "list" ? (
                       /* List View Card */
-                      <div style={{
-                        display: "grid",
-                        gridTemplateColumns: "100px 1fr auto",
-                        gap: 16,
-                        padding: 16,
-                        background: "var(--market-surface, #fff)",
-                        border: "1px solid var(--market-border, #e2e8f0)",
-                        borderRadius: 16,
-                        alignItems: "center",
-                        transition: "all 0.22s ease",
-                        cursor: "pointer",
-                      }}
+                      <Link
+                        to={`/products/${product.slug || product.product_id || product.id}`}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "100px 1fr auto",
+                          gap: 16,
+                          padding: 16,
+                          background: "var(--market-surface, #fff)",
+                          border: "1px solid var(--market-border, #e2e8f0)",
+                          borderRadius: 16,
+                          alignItems: "center",
+                          transition: "all 0.22s ease",
+                          cursor: "pointer",
+                          textDecoration: "none",
+                          color: "inherit",
+                        }}
                         onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 6px 20px rgba(37,99,235,0.12)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.3)"; }}
                         onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.borderColor = "var(--market-border, #e2e8f0)"; }}
                       >
                         <img
-                          src={product.imageUrl || product.image_url || ""}
+                          src={resolveProductImage(product)}
                           alt={product.product_name || product.name || ""}
                           style={{ width: 90, height: 90, objectFit: "contain", borderRadius: 10, background: "#f8fafc" }}
                           onError={e => { e.target.style.display = "none"; }}
@@ -997,7 +1024,7 @@ export function ProductListPage() {
                             {product.product_name || product.name}
                           </div>
                           <div style={{ fontSize: 11, color: "var(--market-muted, #64748b)" }}>
-                            {product.brand_name || ""} · {product.category_name || ""}
+                            {product.brand_name || product.brand?.name || ""} · {product.category_name || product.category?.name || ""}
                           </div>
                         </div>
                         <div style={{ textAlign: "right" }}>
@@ -1007,11 +1034,24 @@ export function ProductListPage() {
                             WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text",
                             marginBottom: 4,
                           }}>
-                            {Number(product.price || 0).toLocaleString("vi-VN")}đ
+                            {Number(product.price || product.primaryVariant?.price || 0).toLocaleString("vi-VN")}đ
                           </div>
-                          <div style={{ fontSize: 11, color: "#10b981", fontWeight: 700 }}>Còn hàng</div>
+                          {(() => {
+                            const inStock = Number(
+                              product?.primaryVariant?.stock_quantity ??
+                              product?.primaryVariant?.stock ??
+                              product?.stock_quantity ??
+                              product?.stock ??
+                              1
+                            ) > 0;
+                            return (
+                              <div style={{ fontSize: 11, color: inStock ? "#10b981" : "#ef4444", fontWeight: 700 }}>
+                                {inStock ? "Còn hàng" : "Hết hàng"}
+                              </div>
+                            );
+                          })()}
                         </div>
-                      </div>
+                      </Link>
                     ) : (
                       <ProductCard product={product} />
                     )}

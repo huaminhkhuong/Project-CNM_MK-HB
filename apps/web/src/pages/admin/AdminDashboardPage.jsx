@@ -249,8 +249,23 @@ export function AdminDashboardPage() {
   const paymentMode = String(getSetting(settingsMap, "online_payment_mode", "sandbox")).toLowerCase();
   const shippingMode = String(getSetting(settingsMap, "shipping_mode", "mock")).toLowerCase();
   const monthlyRevenue = reportSummary.revenue ?? revenueSeries[revenueSeries.length - 1]?.value ?? 0;
-  const pendingPayments = toNumber(metrics.bankTransferOrders ?? metrics.pendingPaymentApprovals);
-  const pendingTickets = Math.max(0, toNumber(metrics.tickets) - Math.round(toNumber(metrics.tickets) * 0.45));
+  const pendingPayments = toNumber(metrics.pendingPaymentApprovals ?? metrics.bankTransferOrders);
+  const pendingTickets =
+    metrics.pendingTickets !== undefined
+      ? toNumber(metrics.pendingTickets)
+      : Math.max(0, toNumber(metrics.tickets) - Math.round(toNumber(metrics.tickets) * 0.45));
+  const lowStockCount =
+    metrics.lowStockSkus !== undefined
+      ? toNumber(metrics.lowStockSkus)
+      : Math.max(0, Math.round(toNumber(metrics.products) * 0.04));
+  const pendingOrderCount =
+    metrics.pendingOrders !== undefined
+      ? toNumber(metrics.pendingOrders)
+      : orderStatusSeries[0]?.value || 0;
+  const unassignedTicketCount =
+    metrics.unassignedTickets !== undefined
+      ? toNumber(metrics.unassignedTickets)
+      : Math.max(0, Math.round(pendingTickets * 0.35));
   const updateReportFilter = (key, value) => {
     setReportFilters((current) => ({ ...current, [key]: value }));
   };
@@ -311,16 +326,16 @@ export function AdminDashboardPage() {
     {
       label: "Ticket kỹ thuật",
       value: formatAdminNumber(metrics.tickets),
-      hint: "Support và bảo hành",
+      hint: `${formatAdminNumber(pendingTickets)} đang mở`,
       trend: calculateTrend(metrics.tickets, 6),
       icon: "TK",
       accent: "amber",
-      to: "/admin/dashboard"
+      to: "/tech/tickets"
     },
     {
       label: "Thanh toán chuyển khoản",
       value: formatAdminNumber(pendingPayments),
-      hint: "QR Banking cần theo dõi",
+      hint: `Chờ duyệt (${formatAdminNumber(metrics.bankTransferOrders ?? pendingPayments)} tổng QR)`,
       trend: calculateTrend(pendingPayments, 5),
       icon: "PM",
       accent: "rose",
@@ -332,33 +347,33 @@ export function AdminDashboardPage() {
     {
       id: "low-stock",
       title: "Sản phẩm sắp hết hàng",
-      detail: `${Math.max(1, Math.round(toNumber(metrics.products) * 0.04))} SKU cần kiểm tra tồn kho.`,
-      tone: "warning",
-      badgeTone: "warning",
+      detail: `${formatAdminNumber(lowStockCount)} SKU cần kiểm tra bổ sung tồn kho (<= 5).`,
+      tone: lowStockCount > 0 ? "warning" : "success",
+      badgeTone: lowStockCount > 0 ? "warning" : "success",
       badge: "Tồn kho"
     },
     {
       id: "slow-orders",
-      title: "Đơn chờ xử lý quá lâu",
-      detail: `${orderStatusSeries[0].value} đơn đang ở trạng thái chờ xử lý.`,
-      tone: "info",
-      badgeTone: "info",
+      title: "Đơn chờ xử lý",
+      detail: `${formatAdminNumber(pendingOrderCount)} đơn đang ở trạng thái chờ xử lý / đang xử lý.`,
+      tone: pendingOrderCount > 0 ? "info" : "success",
+      badgeTone: pendingOrderCount > 0 ? "info" : "success",
       badge: "Đơn hàng"
     },
     {
       id: "unassigned-tickets",
       title: "Ticket chưa ai nhận",
-      detail: `${Math.max(0, Math.round(pendingTickets * 0.35))} ticket kỹ thuật cần phân công.`,
-      tone: "danger",
-      badgeTone: "danger",
+      detail: `${formatAdminNumber(unassignedTicketCount)} ticket kỹ thuật đang chờ phân công.`,
+      tone: unassignedTicketCount > 0 ? "danger" : "success",
+      badgeTone: unassignedTicketCount > 0 ? "danger" : "success",
       badge: "Helpdesk"
     },
     {
       id: "qr-payments",
       title: "Thanh toán QR chờ duyệt",
-      detail: `${formatAdminNumber(pendingPayments)} giao dịch QR Banking cần theo dõi.`,
-      tone: "warning",
-      badgeTone: "warning",
+      detail: `${formatAdminNumber(pendingPayments)} giao dịch QR Banking chờ xác nhận.`,
+      tone: pendingPayments > 0 ? "warning" : "success",
+      badgeTone: pendingPayments > 0 ? "warning" : "success",
       badge: "Thanh toán"
     },
     {

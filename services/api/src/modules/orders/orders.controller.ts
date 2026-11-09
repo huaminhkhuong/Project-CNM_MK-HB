@@ -27,6 +27,7 @@ import { buildPaymentResultEmail } from "../../templates/email-payment-result";
 import { createWarrantyRecordsForDeliveredOrder } from "../warranties/warranty-sync.service";
 import { publishOrderEvent, subscribeOrderEvents } from "../../services/order-events";
 import { validateAndCalculateCoupon } from "../coupons/coupons.service";
+import { sendOrderStatusNotification } from "../notifications/notifications.service";
 
 type UploadedPaymentProofFile = {
   filename: string;
@@ -272,6 +273,14 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
 
   const normalizedOrder = await normalizeOrderRecord(result);
 
+  if (result?.id && currentUser.userId) {
+    sendOrderStatusNotification({
+      userId: Number(currentUser.userId),
+      orderId: result.id,
+      status: "PENDING"
+    }).catch((err: Error) => console.warn("[Notification] Order created notification failed:", err.message));
+  }
+
   // 📧 Email: Gửi xác nhận đặt hàng cho khách (bất đồng bộ - không block response)
   try {
     const user = await prisma.user.findUnique({
@@ -422,6 +431,15 @@ export const patchOrderStatus = asyncHandler(async (req: Request, res: Response)
           data: { status: "CANCELED" }
         });
 
+        await tx.orderItemSerial.deleteMany({
+          where: { order_id: orderId }
+        }).catch(() => {});
+
+        await tx.orderItem.updateMany({
+          where: { order_id: orderId },
+          data: { serial_numbers: null }
+        }).catch(() => {});
+
         if (orderToCancel.coupon_id) {
           await tx.coupon.update({
             where: { id: orderToCancel.coupon_id },
@@ -441,6 +459,11 @@ export const patchOrderStatus = asyncHandler(async (req: Request, res: Response)
   });
 
   // Return full order to show new trackingCode or details
+  if (payload.status === "DELIVERED" || payload.status === "COMPLETED") {
+    await createWarrantyRecordsForDeliveredOrder(orderId).catch((err: Error) =>
+      console.warn("[WarrantySync] Failed to sync warranties on patchOrderStatus:", err.message)
+    );
+  }
   const finalOrder = await getOrderById(orderId);
   if (finalOrder?.user_id) {
     publishOrderEvent(finalOrder.user_id, {
@@ -448,6 +471,11 @@ export const patchOrderStatus = asyncHandler(async (req: Request, res: Response)
       status: finalOrder.status,
       paymentStatus: finalOrder.payment_status
     });
+    sendOrderStatusNotification({
+      userId: Number(finalOrder.user_id),
+      orderId: finalOrder.id,
+      status: String(finalOrder.status || payload.status)
+    }).catch((err: Error) => console.warn("[Notification] Order status notification failed:", err.message));
   }
 
   res.status(200).json({
@@ -482,6 +510,11 @@ export const confirmOrderReceived = asyncHandler(async (req: Request, res: Respo
     status: updatedOrder?.status || "COMPLETED",
     paymentStatus: updatedOrder?.payment_status
   });
+  sendOrderStatusNotification({
+    userId: Number(req.user.userId),
+    orderId: updatedOrder?.id || req.params.id,
+    status: "COMPLETED"
+  }).catch((err: Error) => console.warn("[Notification] Confirm received notification failed:", err.message));
 
   res.status(200).json({
     success: true,
@@ -581,6 +614,11 @@ export const confirmMockPayment = asyncHandler(async (req: Request, res: Respons
   }
 
   await markOrderPaid(req.params.id);
+  sendOrderStatusNotification({
+    userId: Number(order.user_id),
+    orderId: order.id,
+    status: "PROCESSING"
+  }).catch(() => {});
 
   res.status(200).json({
     success: true,
@@ -694,6 +732,12 @@ export const approvePaymentProof = asyncHandler(async (req: Request, res: Respon
       status: updatedOrder.status,
       paymentStatus: updatedOrder.payment_status
     });
+    sendOrderStatusNotification({
+      userId: Number(updatedOrder.user_id),
+      orderId: updatedOrder.id,
+      status: approved ? "PROCESSING" : "PENDING",
+      reason: !approved ? (req.body?.reason || req.body?.rejectionReason || "Ảnh minh chứng chuyển khoản không hợp lệ") : undefined
+    }).catch((err: Error) => console.warn("[Notification] Payment approval notification failed:", err.message));
   }
 
   // 📧 Email: Thông báo kết quả duyệt thanh toán
@@ -947,6 +991,11 @@ export const cancelMyOrder = asyncHandler(async (req: Request, res: Response) =>
     status: "CANCELED",
     paymentStatus: result.payment_status
   });
+  sendOrderStatusNotification({
+    userId: Number(userId),
+    orderId,
+    status: "CANCELED"
+  }).catch(() => {});
 });
 
 export const cleanupExpiredOrders = asyncHandler(async (req: Request, res: Response) => {

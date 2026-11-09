@@ -792,7 +792,11 @@ export function AdminAiConfigPage() {
               </AdminField>
 
               <div>
-                <AdminBtn variant="primary" type="submit" disabled={isTesting || !testText.trim()}>
+                <AdminBtn
+                  variant="primary"
+                  type="submit"
+                  disabled={isTesting || (!testText.trim() && testScope !== "BUILDER_SUGGEST")}
+                >
                   {isTesting ? "Đang kiểm tra..." : "🚀 Chạy Kiểm Thử Bộ Lọc"}
                 </AdminBtn>
               </div>

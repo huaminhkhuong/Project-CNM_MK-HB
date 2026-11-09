@@ -8,6 +8,7 @@ import { routeConfig } from "../../routes/routeConfig";
 import { addStoredCompareId, buildCompareUrl } from "../../utils/compare";
 import { resolveProductImage } from "../../utils/productImage";
 import { ProductReviewsSection } from "../../components/ProductReviewsSection";
+import { usePageSeo } from "../../hooks/usePageSeo";
 
 const DIRECT_CHECKOUT_DRAFT_KEY = "checkout_direct_draft_v1";
 
@@ -222,6 +223,15 @@ export function ProductDetailPage() {
   const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
+  usePageSeo({
+    title: product ? getProductName(product) : "Chi Tiết Sản Phẩm",
+    description: product
+      ? `${getProductName(product)} chính hãng tại PC Mall. Giá tốt, bảo hành uy tín, hỗ trợ trả góp và giao hàng siêu tốc toàn quốc.`
+      : "Xem thông số kỹ thuật, giá niêm yết và tình trạng tồn kho linh kiện máy tính tại PC Mall.",
+    image: product ? resolveProductImage(product) : undefined,
+    type: "product"
+  });
+
   const skus = useMemo(() => {
     const rawSkus = Array.isArray(product?.skus) ? product.skus : [];
     const rawVariants = Array.isArray(product?.variants) ? product.variants : [];
@@ -318,6 +328,11 @@ export function ProductDetailPage() {
       try {
         setLoading(true);
         setFetchError("");
+        setActionError("");
+        setSuccessMessage("");
+        setSelectedSkuId("");
+        setQuantity(1);
+        window.scrollTo({ top: 0, behavior: "smooth" });
         const response = await getProductDetail(idOrSlug);
         const data = normalizeProductDetail(response);
         setProduct(data);
@@ -412,7 +427,20 @@ export function ProductDetailPage() {
       state: {
         productId,
         productName,
-        skuId: selectedSku?.id
+        skuId: selectedSku?.id || productId,
+        loadItem: {
+          id: productId,
+          productId,
+          name: productName,
+          productName,
+          slug: product?.slug || "",
+          price: heroPrice,
+          categoryName,
+          brandName,
+          skuId: selectedSku?.id || productId,
+          sku: selectedSku?.sku || "",
+          imageUrl: displayImage
+        }
       }
     });
   }

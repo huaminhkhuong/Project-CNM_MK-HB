@@ -20,6 +20,11 @@ export async function getAiBuildAdvice(buildId, payload) {
   return response.data;
 }
 
+export async function sendAiFeedback(payload) {
+  const response = await httpClient.post("/ai/feedback", payload);
+  return response.data;
+}
+
 // ==================== ADMIN AI MANAGEMENT ====================
 
 export async function getAdminAiRules(params = {}) {

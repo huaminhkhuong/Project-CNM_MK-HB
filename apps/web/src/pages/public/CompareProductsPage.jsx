@@ -4,6 +4,7 @@ import axios from "axios";
 
 import { getCategories, getCompareProducts, getProductDetail, getProducts } from "../../services/catalog.service";
 import { addItemToCart } from "../../services/cart.service";
+import { refreshCart } from "../../store/cartStore";
 import { useAuth } from "../../hooks/useAuth";
 import { getStoredCompareIds, MAX_COMPARE_ITEMS, normalizeCompareIds, storeCompareIds } from "../../utils/compare";
 import { resolveProductImage } from "../../utils/productImage";
@@ -440,6 +441,7 @@ export function CompareProductsPage() {
           imageUrl: resolveProductImage(product)
         }
       });
+      await refreshCart();
       setActionMessage(`Đã thêm ${getProductName(product)} vào giỏ hàng.`);
     } catch (error) {
       setCompareError(getErrorMessage(error, "Không thể thêm sản phẩm vào giỏ hàng."));

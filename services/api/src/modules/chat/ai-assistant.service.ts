@@ -142,8 +142,8 @@ export class AiAssistantService {
     const ratios = isGaming
       ? { cpu: 0.18, mainboard: 0.12, ram: 0.10, gpu: 0.38, ssd: 0.08, psu: 0.08, case: 0.04, cooling: 0.02 }
       : isWork
-      ? { cpu: 0.28, mainboard: 0.14, ram: 0.18, gpu: 0.20, ssd: 0.10, psu: 0.06, case: 0.04, cooling: 0.00 }
-      : { cpu: 0.22, mainboard: 0.14, ram: 0.14, gpu: 0.25, ssd: 0.10, psu: 0.08, case: 0.05, cooling: 0.02 };
+        ? { cpu: 0.28, mainboard: 0.14, ram: 0.18, gpu: 0.20, ssd: 0.10, psu: 0.06, case: 0.04, cooling: 0.00 }
+        : { cpu: 0.22, mainboard: 0.14, ram: 0.14, gpu: 0.25, ssd: 0.10, psu: 0.08, case: 0.05, cooling: 0.02 };
 
     const components: RecommendedComponent[] = [];
     let totalPrice = 0;
@@ -423,7 +423,34 @@ export class AiAssistantService {
     contextOptions?: { userId?: number | null; sessionId?: string | null }
   ): Promise<AiConsultationResponse> {
     const message = (messageText || "").trim();
-    const budget = criteria?.budget ? Number(criteria.budget) : this.extractBudgetFromText(message);
+    const isExplicitFormSubmit = Boolean((criteria as any)?.isFormSubmit);
+
+    // 0.0 Đánh giá qua 2-Tier Input Filter Rules (FAQ / Guardrail / System Inject) nếu là chat tự do
+    if (!isExplicitFormSubmit && message) {
+      try {
+        const { aiRuleService } = require("../ai/ai-rule.service");
+        const ruleEval = aiRuleService.evaluateInput("GENERAL_CHAT", message);
+        if (ruleEval?.handled) {
+          return {
+            text: ruleEval.reply,
+            type: "advisor_reply"
+          };
+        }
+        const { validateChatMessageDomain } = require("../ai/ai-guardrail.service");
+        const guardCheck = validateChatMessageDomain(message);
+        if (guardCheck && !guardCheck.isAllowed) {
+          return {
+            text: guardCheck.fallbackReply,
+            type: "advisor_reply"
+          };
+        }
+      } catch (_ruleErr) { }
+    }
+
+    const extractedBudget = this.extractBudgetFromText(message);
+    const budget = isExplicitFormSubmit && criteria?.budget
+      ? Number(criteria.budget)
+      : extractedBudget || (criteria?.budget ? Number(criteria.budget) : undefined);
     const purpose = criteria?.purpose || this.extractPurposeFromText(message);
 
     // 0. Truy xuất ngữ cảnh phần cứng thống nhất (Active PC Build, Cart, Orders)
@@ -438,7 +465,7 @@ export class AiAssistantService {
 
     // 1. Kiểm tra câu hỏi lý thuyết / chính sách qua RAG Knowledge Base
     const isTheory = this.isTheoryOrPolicyQuestion(message);
-    const isBuildRequest = this.isPcBuildIntent(message) || criteria?.budget !== undefined;
+    const isBuildRequest = isExplicitFormSubmit || this.isPcBuildIntent(message) || (!isTheory && extractedBudget !== undefined);
 
     // 1.1 Khách hỏi trực tiếp về cấu hình vừa chọn trong PC Builder
     const isAskingAboutCurrentBuild = Boolean(

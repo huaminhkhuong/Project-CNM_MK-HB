@@ -90,7 +90,8 @@ function buildAuthResponse(user: NonNullable<Awaited<ReturnType<typeof findUserB
       email: user.email || "",
       fullName: user.full_name,
       phone: user.phone || null,
-      role: tokenPayload.role
+      role: tokenPayload.role,
+      createdAt: user.created_at
     },
     accessToken: signAccessToken(tokenPayload),
     refreshToken: signRefreshToken(tokenPayload)
@@ -184,6 +185,7 @@ export const me = asyncHandler(async (req: Request, res: Response) => {
       fullName: user.full_name,
       phone: user.phone,
       role: (user as any).Role?.name || "USER",
+      createdAt: user.created_at,
       addresses: addresses.map(formatAddress)
     }
   });
@@ -334,6 +336,7 @@ export const updateCurrentProfile = asyncHandler(async (req: Request, res: Respo
       fullName: user.full_name,
       phone: user.phone,
       role: user.Role?.name || "USER",
+      createdAt: user.created_at,
       addresses: user.Address.map(formatAddress)
     }
   });
