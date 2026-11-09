@@ -184,7 +184,10 @@ async function assignOrderSerials({ orderId, assignments, staffUserId }) {
       const existingSerials = await tx.orderItemSerial.findMany({
         where: {
           serial_number: { in: serialValues },
-          order_id: { not: parsedOrderId }
+          order_id: { not: parsedOrderId },
+          Order: {
+            status: { not: "CANCELED" }
+          }
         },
         select: {
           serial_number: true,

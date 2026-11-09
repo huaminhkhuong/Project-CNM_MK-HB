@@ -19,7 +19,7 @@ function getProductionSecret(key, defaultValue) {
   const value = getRequiredProductionEnv(key);
 
   if (value === defaultValue || value.length < 24 || value.startsWith("your_") || value.startsWith("replace_")) {
-    throw new Error(`${key} must be a strong production secret`);
+    throw new Error(`[Security Alert] ${key} must be a strong production secret (minimum 24 characters, cannot be default or placeholder). Please generate secure secrets with 'node scripts/setup-env.js' or 'openssl rand -hex 32' in your .env file.`);
   }
 
   return value;
@@ -55,12 +55,30 @@ const env = {
     : process.env.JWT_REFRESH_SECRET || "change_me_refresh",
   jwtAccessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || "15m",
   jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "7d",
+  llmProvider: process.env.LLM_PROVIDER || "gemini",
+  llmApiKey: process.env.LLM_API_KEY || process.env.GEMINI_API_KEY || process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY || "",
+  llmModel: process.env.LLM_MODEL || process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
+  llmEndpoint: process.env.LLM_ENDPOINT || "",
+  llmTemperature: Number(process.env.LLM_TEMPERATURE || 0.7),
+  llmMaxTokens: Number(process.env.LLM_MAX_TOKENS || 2048),
   geminiApiKey: process.env.GEMINI_API_KEY || "",
+  geminiModel: process.env.GEMINI_MODEL || "gemini-1.5-flash",
+  groqApiKey: process.env.GROQ_API_KEY || "",
   openaiApiKey: process.env.OPENAI_API_KEY || "",
   openaiModel: process.env.OPENAI_MODEL || "gpt-5.2",
-  groqApiKey: process.env.GROQ_API_KEY || "",
   paymentMockMode: process.env.PAYMENT_MOCK_MODE === "true",
+  shippingMockMode: process.env.SHIPPING_MOCK_MODE === "true",
   shippingProvider: process.env.SHIPPING_PROVIDER || "manual",
+  vnpayTmnCode: process.env.VNPAY_TMN_CODE || "",
+  vnpayHashSecret: process.env.VNPAY_HASH_SECRET || "",
+  vnpayUrl: process.env.VNPAY_URL || "",
+  momoPartnerCode: process.env.MOMO_PARTNER_CODE || "",
+  momoAccessKey: process.env.MOMO_ACCESS_KEY || "",
+  momoSecretKey: process.env.MOMO_SECRET_KEY || "",
+  momoApiUrl: process.env.MOMO_API_URL || "",
+  mailUser: process.env.MAIL_USER || "",
+  mailPass: process.env.MAIL_PASS || "",
+  mailFrom: process.env.MAIL_FROM || "",
   backendUrl: process.env.BACKEND_URL || process.env.API_BASE_URL || `http://localhost:${Number(process.env.PORT || 4000)}`,
   apiBaseUrl: process.env.API_BASE_URL || process.env.BACKEND_URL || `http://localhost:${Number(process.env.PORT || 4000)}`,
   paymentTimeoutMinutes: Number(process.env.PAYMENT_TIMEOUT_MINUTES || 30),

@@ -1,47 +1,34 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { resolveProductImage } from "../../utils/productImage";
-import { SPEC_ALIASES } from "./pcBuilderConstants";
+import { SPEC_ALIASES } from "../../components/pc-builder/pcBuilderConstants";
 import {
-  formatCurrency,
   getProductId,
   getProductName,
   getProductBrand,
   getProductPrice,
   getProductStock,
   getRating,
+  formatCurrency,
   findSpec,
-  estimateProductPerformance,
   getCoolingBadge,
-  getStockState
-} from "./pcBuilderUtils";
-import { getCoolingCardStatus } from "./builderInsightsCalculator";
+  getCoolingCardStatus,
+  estimateProductPerformance,
+  getStockState,
+  findOptimalAlternative
+} from "../../components/pc-builder/pcBuilderUtils";
 
-/* ── SKELETON CARD ────────────────────────────────────────────── */
-export function SkeletonCard() {
-  return (
-    <div className="skeleton-card">
-      <div className="skeleton-media" />
-      <div className="skeleton-body">
-        <div className="skeleton-line skeleton-line--short" />
-        <div className="skeleton-line skeleton-line--full" />
-        <div className="skeleton-line skeleton-line--medium" />
-      </div>
-    </div>
-  );
-}
-
-/* ── SMART TECHNICAL SPECIFICATION EXTRACTOR ─────────────────── */
 export function extractProductSpecs(product, type) {
-  const name = getProductName(product);
-  const nameLower = name.toLowerCase();
+  const nameLower = getProductName(product).toLowerCase();
 
   if (type === "cpu") {
     let socket = findSpec(product, SPEC_ALIASES.socket);
     if (!socket) {
-      if (nameLower.includes("lga1700") || /\bi[3579]-1[234]\d{3}/.test(nameLower)) socket = "LGA1700";
-      else if (nameLower.includes("am5") || /ryzen\s*[79]?\s*7\d{3}/.test(nameLower)) socket = "AM5";
-      else if (nameLower.includes("am4") || /ryzen\s*[3579]?\s*[35]\d{3}/.test(nameLower)) socket = "AM4";
-      else socket = "AM5 / LGA1700";
+      if (nameLower.includes("lga1851") || nameLower.includes("ultra") || /2[0-9]{2}[k|f|t]?/i.test(nameLower)) socket = "LGA1851";
+      else if (nameLower.includes("lga1700") || /\bi[3579]-1[234]\d{3}/.test(nameLower)) socket = "LGA1700";
+      else if (nameLower.includes("lga1200") || /\bi[3579]-1[01]\d{3}/.test(nameLower)) socket = "LGA1200";
+      else if (nameLower.includes("am5") || /ryzen\s*[79]?\s*[789]\d{3}/.test(nameLower)) socket = "AM5";
+      else if (nameLower.includes("am4") || /ryzen\s*[3579]?\s*[12345]\d{3}/.test(nameLower)) socket = "AM4";
+      else socket = "Chưa rõ socket";
     }
     let tdp = findSpec(product, SPEC_ALIASES.tdp);
     if (!tdp) {
@@ -87,7 +74,7 @@ export function extractProductSpecs(product, type) {
 
     return [
       { label: "Chuẩn RAM", value: `${ramType} ${speed}`.trim() },
-      { label: "Loại bộ nhớ", value: "Desktop DIMM" }
+      { label: "Cấu hình", value: /2x|kit\s*2/i.test(nameLower) ? "Kit 2 thanh (Dual-Channel)" : "Thanh đơn (Single DIMM)" }
     ];
   }
 
@@ -185,7 +172,6 @@ export function getComponentEmoji(componentType) {
   return map[componentType] || "📦";
 }
 
-/* ── PRODUCT IMAGE CONTAINER WITH AUTOMATIC CATEGORY FALLBACK ──── */
 export function ProductImageContainer({ product, activeComponent, isSelected }) {
   const [imageSrc, setImageSrc] = useState(() => resolveProductImage(product));
   const [imgError, setImgError] = useState(false);
@@ -210,7 +196,6 @@ export function ProductImageContainer({ product, activeComponent, isSelected }) 
 
   return (
     <div className="product-card__image-container">
-      {/* Skeleton Loading State (P9-07) */}
       {!loaded && !imgError && imageSrc && (
         <div className="product-card__skeleton" aria-hidden="true" />
       )}
@@ -231,10 +216,7 @@ export function ProductImageContainer({ product, activeComponent, isSelected }) 
         </div>
       )}
 
-      {/* Quick view overlay badge */}
       <span className="product-card__quick-hint">🔍 Xem chi tiết</span>
-
-      {/* Badges Overlaid */}
       <span className={`product-card__stock-badge ${stockState.cls}`}>{stockState.label}</span>
       {isSelected && <span className="product-card__selected-mark">✓ Đã chọn</span>}
       {activeComponent === "cooling" && (
@@ -251,7 +233,6 @@ export function getAiScoreBadge(perf) {
   return { label: `AI ${perf}/100 • Cần Cân Nhắc`, cls: "ai-badge--poor" };
 }
 
-/* ── "WHY THIS COMPONENT?" EXPLANATION GENERATOR ────────────────── */
 export function getWhyThisComponentExplanation(product, activeComponent, selectedItems, totalPrice, suggestionForm) {
   const price = getProductPrice(product);
   const budget = Number(suggestionForm?.budget || 25000000);
@@ -259,12 +240,10 @@ export function getWhyThisComponentExplanation(product, activeComponent, selecte
   
   const reasons = [];
 
-  // 1. Budget Ratio Reason
   if (priceRatio > 0) {
     reasons.push(`Giá chiếm ${priceRatio}% ngân sách`);
   }
 
-  // 2. Spec & Compatibility Reason
   const specs = extractProductSpecs(product, activeComponent);
   const findSpecVal = (labelKey) => {
     const s = specs.find((item) => item.label.toLowerCase().includes(labelKey.toLowerCase()));
@@ -310,7 +289,6 @@ export function getWhyThisComponentExplanation(product, activeComponent, selecte
     reasons.push("Tốc độ đọc/ghi NVMe cao, load game cực nhanh");
   }
 
-  // 3. Purpose Match Reason
   const purpose = suggestionForm?.purpose;
   if (purpose === "gaming") reasons.push("Tối ưu Gaming FPS");
   else if (purpose === "editing") reasons.push("Tối ưu Đồ họa & Video");
@@ -319,7 +297,6 @@ export function getWhyThisComponentExplanation(product, activeComponent, selecte
   return reasons.join(" • ");
 }
 
-/* ── PRODUCT CARD COMPONENT ──────────────────────────────────── */
 export function BuilderProductCard({
   activeComponent,
   isSelected,
@@ -332,7 +309,8 @@ export function BuilderProductCard({
   suggestionForm,
   totalPrice,
   isCompared,
-  onToggleCompare
+  onToggleCompare,
+  onSubstitute
 }) {
   const productId     = getProductId(product);
   const perf          = estimateProductPerformance(product, activeComponent);
@@ -381,27 +359,13 @@ export function BuilderProductCard({
           </div>
         </div>
 
-        {/* WHY THIS COMPONENT EXPLANATION BOX */}
         {whyText && (
-          <div
-            className={`product-card__why-box${isSelected ? " is-selected" : ""}`}
-            style={{
-              marginTop: "10px",
-              marginBottom: "8px",
-              padding: "8px 10px",
-              backgroundColor: isSelected ? "#eff6ff" : "#f8fafc",
-              border: `1px solid ${isSelected ? "#bfdbfe" : "#e2e8f0"}`,
-              borderRadius: "8px",
-              fontSize: "12px",
-              lineHeight: "1.4",
-              color: isSelected ? "#1e40af" : "#475569"
-            }}
-          >
-            <div style={{ fontWeight: "700", fontSize: "11px", color: isSelected ? "#1d4ed8" : "#0369a1", marginBottom: "2px", display: "flex", alignItems: "center", gap: "4px" }}>
+          <div className={`product-card__why-box${isSelected ? " is-selected" : ""}`}>
+            <div className="product-card__why-title">
               <span>💡</span>
               <span>Lý do chọn ({activeComponent.toUpperCase()}):</span>
             </div>
-            <div style={{ fontSize: "11.5px", fontWeight: isSelected ? "600" : "400" }}>
+            <div className="product-card__why-content" style={{ fontWeight: isSelected ? "600" : "400" }}>
               {whyText}
             </div>
           </div>
@@ -434,21 +398,45 @@ export function BuilderProductCard({
               So sánh
             </label>
 
-            <button
-              type="button"
-              className={`btn-select${isSelected ? " is-selected" : ""}`}
-              disabled={isProcessing || loading}
-              onClick={(e) => {
-                e.stopPropagation();
-                onSelect(activeComponent, product);
-              }}
-            >
-              {isProcessing ? "Đang chọn..." : isSelected ? "✓ Đã chọn" : "Chọn"}
-            </button>
+            {stock <= 0 ? (
+              <button
+                type="button"
+                className="btn-select"
+                style={{
+                  backgroundColor: "#fef3c7",
+                  color: "#d97706",
+                  border: "1px solid #f59e0b",
+                  fontWeight: "800",
+                  fontSize: "11px",
+                  padding: "6px 10px"
+                }}
+                disabled={isProcessing || loading}
+                title="Tự động tìm linh kiện tương thích còn hàng thay thế"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (typeof onSubstitute === "function") {
+                    onSubstitute(activeComponent, product);
+                  }
+                }}
+              >
+                🔄 Đổi mẫu khác
+              </button>
+            ) : (
+              <button
+                type="button"
+                className={`btn-select${isSelected ? " is-selected" : ""}`}
+                disabled={isProcessing || loading}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelect(activeComponent, product);
+                }}
+              >
+                {isProcessing ? "Đang chọn..." : isSelected ? "✓ Đã chọn" : "Chọn"}
+              </button>
+            )}
           </div>
         </div>
       </div>
     </article>
   );
 }
-export default BuilderProductCard;

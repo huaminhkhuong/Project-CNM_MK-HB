@@ -27,10 +27,13 @@ export function FinalReviewModal({
   const itemsList = Object.entries(selectedItems || {}).map(([type, item]) => {
     const product = item?.product || item;
     const variant = item?.variant;
+    const qty = Math.max(1, Number(item?.quantity || 1));
+    const unitPrice = Number(variant?.price || product?.price || item?.price || 0);
+    const baseName = product?.product_name || product?.name || type;
     return {
       type: type.toUpperCase(),
-      name: product?.product_name || product?.name || type,
-      price: Number(variant?.price || product?.price || item?.price || 0)
+      name: qty > 1 ? `${baseName} (x${qty})` : baseName,
+      price: unitPrice * qty
     };
   });
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import {
   AdminAlerts,
-  AdminLinkBtn,
+  AdminBtn,
   AdminPage,
   AdminPageHead,
   AdminTable,
@@ -14,7 +14,7 @@ import { approvePaymentProof } from "../../services/order.service";
 import { httpClient } from "../../services/http";
 import { getAdminErrorMessage } from "../../utils/adminUi";
 
-const API_ORIGIN = (import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api").replace(/\/api\/?$/, "");
+const API_ORIGIN = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/api\/?$/, "");
 
 function resolveUploadUrl(path) {
   if (!path) return "";
@@ -39,7 +39,7 @@ function getPaymentStatusLabel(order) {
 function getPaymentStatusVariant(order) {
   const status = String(order?.payment_status || order?.paymentStatus || "").toUpperCase();
   if (status === "PAID") return "success";
-  if (status === "REJECTED") return "error";
+  if (status === "REJECTED") return "danger";
   if (isAwaitingApproval(order)) return "warning";
   return "neutral";
 }
@@ -59,6 +59,8 @@ export function AdminPaymentApprovalPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
   const [actionLoading, setActionLoading] = useState(false);
   const [zoomUrl, setZoomUrl] = useState(null);
 
@@ -87,6 +89,10 @@ export function AdminPaymentApprovalPage() {
   }
 
   async function handleApprove(orderId, approved) {
+    if (!approved && !rejectionReason.trim()) {
+      alert("Vui lòng nhập lý do từ chối minh chứng thanh toán.");
+      return;
+    }
     if (!confirm(approved ? "Duyệt thanh toán này?" : "Từ chối thanh toán này?")) return;
     
     try {
@@ -96,18 +102,27 @@ export function AdminPaymentApprovalPage() {
       
       await approvePaymentProof(orderId, {
         approved,
-        rejectionReason: approved ? null : "Không hợp lệ"
+        rejectionReason: approved ? null : rejectionReason.trim() || "Minh chứng thanh toán không hợp lệ"
       });
       
       setSuccessMessage(approved ? "Đã duyệt thanh toán thành công!" : "Đã từ chối thanh toán!");
       await loadPendingPayments();
       setSelectedOrder(null);
+      setRejectionReason("");
     } catch (error) {
       setErrorMessage(getAdminErrorMessage(error, "Không thể xử lý thanh toán."));
     } finally {
       setActionLoading(false);
     }
   }
+
+  const filteredOrders = orders.filter((order) => {
+    const status = String(order?.payment_status || order?.paymentStatus || "").toUpperCase();
+    if (statusFilter === "PENDING") return isAwaitingApproval(order);
+    if (statusFilter === "PAID") return status === "PAID";
+    if (statusFilter === "REJECTED") return status === "REJECTED";
+    return true;
+  });
 
   return (
     <AdminPage>
@@ -116,23 +131,50 @@ export function AdminPaymentApprovalPage() {
         title="Duyệt thanh toán chuyển khoản"
         description="Xem và duyệt các bằng chứng thanh toán chuyển khoản từ khách hàng."
         actions={
-          <AdminLinkBtn onClick={loadPendingPayments} variant="secondary">
+          <AdminBtn onClick={loadPendingPayments} variant="secondary">
             🔄 Tải lại
-          </AdminLinkBtn>
+          </AdminBtn>
         }
       />
 
       <AdminAlerts errorMessage={errorMessage} successMessage={successMessage} />
 
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        {[
+          { id: "ALL", label: `Tất cả (${orders.length})` },
+          { id: "PENDING", label: `Chờ xác nhận (${orders.filter(isAwaitingApproval).length})` },
+          { id: "PAID", label: `Đã thanh toán (${orders.filter((o) => String(o?.payment_status || o?.paymentStatus || "").toUpperCase() === "PAID").length})` },
+          { id: "REJECTED", label: `Đã từ chối (${orders.filter((o) => String(o?.payment_status || o?.paymentStatus || "").toUpperCase() === "REJECTED").length})` }
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setStatusFilter(tab.id)}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 8,
+              border: "1px solid #cbd5e1",
+              background: statusFilter === tab.id ? "#2563eb" : "#fff",
+              color: statusFilter === tab.id ? "#fff" : "#334155",
+              fontWeight: 700,
+              fontSize: 13,
+              cursor: "pointer"
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {loading ? (
         <div style={{ padding: 40, textAlign: "center", color: "#64748b" }}>
           Đang tải danh sách thanh toán...
         </div>
-      ) : orders.length === 0 ? (
+      ) : filteredOrders.length === 0 ? (
         <div style={{ padding: 40, textAlign: "center", color: "#64748b", background: "#f8fafc", borderRadius: 12, border: "1px dashed #cbd5e1" }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>💳</div>
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>Không có thanh toán nào cần duyệt</div>
-          <div style={{ fontSize: 14 }}>Tất cả các đơn hàng chuyển khoản đã được xử lý</div>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Không có thanh toán nào trong mục này</div>
+          <div style={{ fontSize: 14 }}>Tất cả các đơn hàng chuyển khoản tương ứng đã được xử lý</div>
         </div>
       ) : (
         <div style={{ display: "grid", gap: 24 }}>
@@ -146,7 +188,7 @@ export function AdminPaymentApprovalPage() {
               "Hành động"
             ]}
           >
-            {orders.map((order) => (
+            {filteredOrders.map((order) => (
               <AdminTableRow key={order.id}>
                 <AdminTableCell>
                   <strong>#{order.id}</strong>
@@ -158,7 +200,7 @@ export function AdminPaymentApprovalPage() {
                   <strong>{formatCurrency(order.final_amount || order.finalAmount)} đ</strong>
                 </AdminTableCell>
                 <AdminTableCell>
-                  <AdminBadge variant={getPaymentStatusVariant(order)}>
+                  <AdminBadge tone={getPaymentStatusVariant(order)}>
                     {getPaymentStatusLabel(order)}
                   </AdminBadge>
                 </AdminTableCell>
@@ -167,7 +209,10 @@ export function AdminPaymentApprovalPage() {
                 </AdminTableCell>
                 <AdminTableCell>
                   <button
-                    onClick={() => setSelectedOrder(order)}
+                    onClick={() => {
+                      setSelectedOrder(order);
+                      setRejectionReason("");
+                    }}
                     disabled={actionLoading}
                     style={{
                       padding: "8px 16px",
@@ -236,7 +281,7 @@ export function AdminPaymentApprovalPage() {
               <div style={{ display: "flex", justifyContent: "space-between", padding: 12, background: "#f8fafc", borderRadius: 8 }}>
                 <span style={{ color: "#64748b" }}>Trạng thái:</span>
                 <AdminBadge
-                  variant={getPaymentStatusVariant(selectedOrder)}
+                  tone={getPaymentStatusVariant(selectedOrder)}
                 >
                   {getPaymentStatusLabel(selectedOrder)}
                 </AdminBadge>
@@ -280,41 +325,61 @@ export function AdminPaymentApprovalPage() {
             )}
 
             {isAwaitingApproval(selectedOrder) && (
-              <div style={{ display: "flex", gap: 12 }}>
-                <button
-                  onClick={() => handleApprove(selectedOrder.id, true)}
-                  disabled={actionLoading}
-                  style={{
-                    flex: 1,
-                    padding: "12px 24px",
-                    borderRadius: 12,
-                    border: "none",
-                    background: "#22c55e",
-                    color: "#fff",
-                    fontWeight: 800,
-                    cursor: "pointer",
-                    fontSize: 14
-                  }}
-                >
-                  {actionLoading ? "Đang xử lý..." : "✅ Duyệt thanh toán"}
-                </button>
-                <button
-                  onClick={() => handleApprove(selectedOrder.id, false)}
-                  disabled={actionLoading}
-                  style={{
-                    flex: 1,
-                    padding: "12px 24px",
-                    borderRadius: 12,
-                    border: "1px solid #fecaca",
-                    background: "#fff",
-                    color: "#b91c1c",
-                    fontWeight: 800,
-                    cursor: "pointer",
-                    fontSize: 14
-                  }}
-                >
-                  {actionLoading ? "Đang xử lý..." : "❌ Từ chối"}
-                </button>
+              <div style={{ display: "grid", gap: 12 }}>
+                <div>
+                  <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "#475569", marginBottom: 6 }}>
+                    Lý do từ chối (nếu từ chối minh chứng):
+                  </label>
+                  <input
+                    type="text"
+                    value={rejectionReason}
+                    onChange={(e) => setRejectionReason(e.target.value)}
+                    placeholder="Ví dụ: Ảnh mờ, sai số tiền chuyển khoản, sai nội dung..."
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      fontSize: 13
+                    }}
+                  />
+                </div>
+                <div style={{ display: "flex", gap: 12 }}>
+                  <button
+                    onClick={() => handleApprove(selectedOrder.id, true)}
+                    disabled={actionLoading}
+                    style={{
+                      flex: 1,
+                      padding: "12px 24px",
+                      borderRadius: 12,
+                      border: "none",
+                      background: "#22c55e",
+                      color: "#fff",
+                      fontWeight: 800,
+                      cursor: "pointer",
+                      fontSize: 14
+                    }}
+                  >
+                    {actionLoading ? "Đang xử lý..." : "✅ Duyệt thanh toán"}
+                  </button>
+                  <button
+                    onClick={() => handleApprove(selectedOrder.id, false)}
+                    disabled={actionLoading}
+                    style={{
+                      flex: 1,
+                      padding: "12px 24px",
+                      borderRadius: 12,
+                      border: "1px solid #fecaca",
+                      background: "#fff",
+                      color: "#b91c1c",
+                      fontWeight: 800,
+                      cursor: "pointer",
+                      fontSize: 14
+                    }}
+                  >
+                    {actionLoading ? "Đang xử lý..." : "❌ Từ chối"}
+                  </button>
+                </div>
               </div>
             )}
           </div>

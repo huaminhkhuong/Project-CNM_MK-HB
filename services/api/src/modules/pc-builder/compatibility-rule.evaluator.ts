@@ -278,26 +278,37 @@ export function evaluateCompatibility(
   const isRadiatorOk = radiatorDb.failed ? false : (radiatorDb.passed ? true : (!hasCooling || radiatorSize === 0 || caseRadiatorSupport === 0 || caseRadiatorSupport >= radiatorSize));
   const isCoolingSocketOk = coolingSocketDb.failed ? false : (coolingSocketDb.passed ? true : (!hasCooling || socketMatches(cpuSocket, coolerSockets)));
 
+  const hasCpu = Boolean(componentMap.cpu?.productName);
+  const hasMainboard = Boolean(componentMap.mainboard?.productName);
+  const hasRam = Boolean(componentMap.ram?.productName);
+  const hasGpu = Boolean(componentMap.gpu?.productName);
+  const hasPsu = Boolean(componentMap.psu?.productName);
+  const hasCase = Boolean(componentMap.case?.productName);
+
   const checks = [
     {
       key: "socket",
       ok: isSocketOk,
+      applicable: hasCpu && hasMainboard,
       detail: socketDb.failed ? socketDb.failed.detail : (socketDb.passed ? socketDb.passed.detail : (cpuSocket && boardSocket ? `${cpuSocket} / ${boardSocket}` : "Cần thông số socket"))
     },
     {
       key: "ram",
       ok: isRamOk,
+      applicable: hasRam && hasMainboard,
       detail: ramDb.failed ? ramDb.failed.detail : (ramDb.passed ? ramDb.passed.detail : (ramType && boardRam ? `${ramType} / ${boardRam}` : "Cần thông số RAM"))
     },
     {
       key: "psu",
       ok: !componentMap.psu || psuWatt === 0 || psuWatt >= requiredWatt,
+      applicable: hasPsu && (hasCpu || hasGpu),
       detail: componentMap.psu ? `${psuWatt || "?"}W / cần ${requiredWatt}W` : "Chưa chọn nguồn"
     },
     {
       // COMP-004: GPU Card Length vs Case GPU Clearance
       key: "gpu_clearance",
       ok: !componentMap.gpu || !componentMap.case || !gpuLength || !caseClearance || caseClearance >= gpuLength,
+      applicable: hasGpu && hasCase,
       detail: (() => {
         if (!componentMap.gpu || !componentMap.case) return "GPU hoặc Case chưa được chọn";
         if (gpuLength > 0 && caseClearance > 0) return `GPU dài ${gpuLength}mm / Case cho phép tối đa ${caseClearance}mm`;
@@ -309,22 +320,26 @@ export function evaluateCompatibility(
     {
       key: "cooling_required",
       ok: !cpu.productName || !requiresCooling || hasCooling,
+      applicable: hasCpu,
       detail: requiresCooling ? (hasCooling ? "Đã chọn tản nhiệt rời phù hợp" : "CPU dòng K/KF/hiệu năng cao cần tản nhiệt rời") : "CPU có tản nhiệt nguyên hộp kèm theo"
     },
     {
       key: "cooling_socket",
       ok: isCoolingSocketOk,
+      applicable: hasCooling && hasCpu,
       detail: coolingSocketDb.failed ? coolingSocketDb.failed.detail : (coolingSocketDb.passed ? coolingSocketDb.passed.detail : (hasCooling ? (coolerSockets || "Chưa có dữ liệu socket tản nhiệt") : "Chưa chọn tản nhiệt"))
     },
     {
       key: "cooling_tdp",
       ok: !hasCooling || coolerCapacity === 0 || cpuTdp === 0 || coolerCapacity >= cpuTdp,
+      applicable: hasCooling && hasCpu,
       detail: hasCooling ? `Tản nhiệt ${coolerCapacity || "?"}W / CPU tỏa nhiệt ${cpuTdp || "?"}W` : "Chưa chọn tản nhiệt"
     },
     {
       // COMP-006A: AIO Radiator Size vs Case Radiator Support (240 / 280 / 360mm)
       key: "radiator_fit",
       ok: isRadiatorOk,
+      applicable: hasCooling && hasCase && radiatorSize > 0,
       detail: (() => {
         if (radiatorDb.failed) return radiatorDb.failed.detail;
         if (radiatorDb.passed) return radiatorDb.passed.detail;
@@ -338,6 +353,7 @@ export function evaluateCompatibility(
       // COMP-006B: Air Cooler Tower Height vs Case CPU Cooler Clearance
       key: "cooler_height",
       ok: !hasCooling || coolerHeight === 0 || caseCoolerClearance === 0 || caseCoolerClearance >= coolerHeight,
+      applicable: hasCooling && hasCase && coolerHeight > 0,
       detail: (() => {
         if (!hasCooling) return "Chưa chọn tản nhiệt";
         if (coolerHeight === 0) return "Tản nước AIO — chiều cao tháp không áp dụng";
@@ -348,17 +364,20 @@ export function evaluateCompatibility(
     {
       key: "ram_slots",
       ok: isRamSlotsOk,
+      applicable: hasRam && hasMainboard,
       detail: componentMap.ram && componentMap.mainboard ? `${ramSticks} thanh RAM / ${ramSlots} khe Mainboard` : "RAM hoặc Mainboard chưa được chọn"
     },
     {
       key: "psu_connectors",
       ok: !componentMap.psu || psuWatt >= (gpuTdp > 250 ? 650 : 450),
+      applicable: hasPsu && hasGpu,
       detail: componentMap.psu ? `PSU ${psuWatt}W — kiểm tra đầu cắm PCIe / EPS` : "Chưa chọn nguồn"
     },
     {
       // COMP-009: M.2 NVMe Slot Availability on Mainboard
       key: "storage_m2",
       ok: !storageComp || !componentMap.mainboard || m2Slots >= 1,
+      applicable: Boolean(storageComp) && hasMainboard,
       detail: storageComp && componentMap.mainboard
         ? `Mainboard có ${m2Slots} khe M.2 NVMe`
         : "Ổ cứng hoặc Mainboard chưa được chọn"
@@ -367,6 +386,7 @@ export function evaluateCompatibility(
       // COMP-011: M.2 PCIe Generation 4 / Generation 5 Support
       key: "storage_m2_gen",
       ok: isM2GenCompatible,
+      applicable: Boolean(storageComp) && hasMainboard,
       detail: (() => {
         if (!storageComp || !componentMap.mainboard) return "Ổ cứng hoặc Mainboard chưa được chọn";
         if (storageIsGen5) {
@@ -385,6 +405,7 @@ export function evaluateCompatibility(
     {
       key: "case_form_factor",
       ok: isFormFactorOk,
+      applicable: hasMainboard && hasCase,
       detail: formFactorDb.failed ? formFactorDb.failed.detail : (formFactorDb.passed ? formFactorDb.passed.detail : (componentMap.mainboard && componentMap.case ? `MB ${boardFormFactor || "ATX"} / Case ${caseFormFactor || "ATX"}` : "Mainboard hoặc Case chưa được chọn"))
     },
     {
@@ -395,6 +416,7 @@ export function evaluateCompatibility(
         const gTier = gpuTdp > 300 ? 5 : gpuTdp > 200 ? 4 : gpuTdp > 120 ? 3 : 2;
         return Math.abs(cTier - gTier) <= 1;
       })(),
+      applicable: hasCpu && hasGpu,
       detail: (() => {
         if (!componentMap.cpu || !componentMap.gpu) return "CPU hoặc GPU chưa được chọn";
         const cTier = cpuTdp > 150 ? 5 : cpuTdp > 100 ? 4 : cpuTdp > 60 ? 3 : 2;

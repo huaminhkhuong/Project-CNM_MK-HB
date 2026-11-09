@@ -5,7 +5,8 @@ export const COMPONENT_SECTIONS = [
   { componentType: "mainboard", label: "Bo mạch chủ (Mainboard)" },
   { componentType: "ram", label: "Bộ nhớ (RAM)" },
   { componentType: "gpu", label: "Card màn hình (GPU)" },
-  { componentType: "storage", label: "Ổ cứng (SSD / HDD)" },
+  { componentType: "storage", label: "Ổ cứng chính (SSD)" },
+  { componentType: "storage_2", label: "Ổ phụ (SSD 2 / HDD)", optional: true },
   { componentType: "psu", label: "Nguồn (PSU)" },
   { componentType: "case", label: "Vỏ máy (Case)" },
   { componentType: "cooling", label: "Tản nhiệt (Cooling)" }
@@ -40,7 +41,11 @@ export const parseNumber = (value, fallback = 0) => {
 export const getProductId = (product) => product?.id || product?.product_id || product?.productId || null;
 export const getProductName = (product) => product?.product_name || product?.name || product?.title || "";
 export const getProductPrice = (product) => Number(product?.price || product?.variant?.price || 0);
-export const getItemPrice = (item) => Number(item?.variant?.price || item?.product?.price || item?.price || 0);
+export const getItemPrice = (item) => {
+  const unitPrice = Number(item?.variant?.price || item?.product?.price || item?.price || 0);
+  const qty = Math.max(1, Number(item?.quantity || 1));
+  return unitPrice * qty;
+};
 export const getSelectedProduct = (item) => item?.product || item;
 
 export function findSpec(product, possibleKeys = []) {
@@ -103,7 +108,24 @@ export function getCoolingDiagnostics(cpu, cooling, caseProduct, coolingSelected
   const caseCoolerClearance = parseNumber(findSpec(caseProduct, SPEC_ALIASES.caseCoolerClearance), 0);
 
   const cpuName = normalizeText(getProductName(cpu));
-  const hasIncludedStockCooler = cpuName.includes("boxed") || cpuName.includes("box") || (!cpuName.includes("tray") && (cpuName.includes("i3") || cpuName.includes("i5-13400") || cpuName.includes("ryzen 5 5600")));
+  // Intel K/KF/KS/Ultra and AMD X/X3D/XT NEVER come with stock coolers in modern market
+  const isExcludedFromStock = /\bi[3579]-?\d{4,5}(k|kf|ks)\b/.test(cpuName) || 
+    /ultra\s*[579]/.test(cpuName) || 
+    /ryzen\s*[3579].*(x3d|xt|\bx\b)/.test(cpuName) ||
+    cpuName.includes("tray");
+
+  const hasIncludedStockCooler = !isExcludedFromStock && (
+    cpuName.includes("boxed") || 
+    cpuName.includes("box") || 
+    cpuName.includes("i3") || 
+    cpuName.includes("i5-12400") || 
+    cpuName.includes("i5-14400") || 
+    cpuName.includes("ryzen 5 5600") || 
+    cpuName.includes("ryzen 5 5500") || 
+    cpuName.includes("3200g") || 
+    cpuName.includes("3400g") || 
+    cpuName.includes("athlon")
+  );
   const required = Boolean(getProductId(cpu)) && !hasIncludedStockCooler;
 
   const socketMatches = (cpuSoc, coolSoc) => {
@@ -173,7 +195,9 @@ export function calculateBuilderInsights(selectedItems = {}, selectedCount = 0, 
   const ramSlots = parseNumber(findSpec(mainboard, SPEC_ALIASES.ramSlots), 4);
   const ramName = normalizeText(getProductName(ram));
   const ramSticksMatch = ramName.match(/(\d+)\s*x\s*\d+\s*gb/i);
-  const ramSticks = ramSticksMatch ? parseNumber(ramSticksMatch[1], 1) : 1;
+  const sticksPerUnit = ramSticksMatch ? parseNumber(ramSticksMatch[1], 1) : 1;
+  const ramQuantity = Math.max(1, Number(s.ram?.quantity || 1));
+  const ramSticks = sticksPerUnit * ramQuantity;
 
   const m2Slots = parseNumber(findSpec(mainboard, SPEC_ALIASES.m2Slots), 2);
   const boardForm = findSpec(mainboard, SPEC_ALIASES.boardFormFactor);
@@ -214,8 +238,35 @@ export function calculateBuilderInsights(selectedItems = {}, selectedCount = 0, 
     },
     {
       label: "PCIe Slot GPU ↔ Mainboard [COMP-003]", icon: "🎛",
-      ok: true,
-      detail: s.gpu && s.mainboard ? "Mainboard hỗ trợ khe cắm PCIe x16 cho GPU" : "Chưa chọn GPU hoặc Mainboard."
+      ok: (() => {
+        if (!s.gpu || !s.mainboard) return true;
+        // Kiểm tra vật lý: GPU rời yêu cầu Mainboard có khe PCIe x16
+        // Tất cả 20 mainboard trong catalog đều hỗ trợ PCIe x16.
+        // Cảnh báo băng thông nếu CPU là APU thế hệ cũ chỉ có PCIe x8 lane
+        const cpuName = normalizeText(getProductName(cpu));
+        const isLimitedLanesApu = cpuName.includes("3200g") || cpuName.includes("3400g") || cpuName.includes("athlon");
+        const gpuName = normalizeText(getProductName(gpu));
+        const isHighEndGpu = gpuName.includes("4070") || gpuName.includes("4080") || gpuName.includes("4090") || gpuName.includes("5070") || gpuName.includes("5080") || gpuName.includes("5090");
+        return !(isLimitedLanesApu && isHighEndGpu);
+      })(),
+      severity: (() => {
+        const cpuName = normalizeText(getProductName(cpu));
+        const isLimitedLanesApu = cpuName.includes("3200g") || cpuName.includes("3400g") || cpuName.includes("athlon");
+        const gpuName = normalizeText(getProductName(gpu));
+        const isHighEndGpu = gpuName.includes("4070") || gpuName.includes("4080") || gpuName.includes("4090") || gpuName.includes("5070") || gpuName.includes("5080") || gpuName.includes("5090");
+        return isLimitedLanesApu && isHighEndGpu ? "WARNING" : undefined;
+      })(),
+      detail: (() => {
+        if (!s.gpu || !s.mainboard) return "Chưa chọn GPU hoặc Mainboard.";
+        const cpuName = normalizeText(getProductName(cpu));
+        const isLimitedLanesApu = cpuName.includes("3200g") || cpuName.includes("3400g") || cpuName.includes("athlon");
+        const gpuName = normalizeText(getProductName(gpu));
+        const isHighEndGpu = gpuName.includes("4070") || gpuName.includes("4080") || gpuName.includes("4090") || gpuName.includes("5070") || gpuName.includes("5080") || gpuName.includes("5090");
+        if (isLimitedLanesApu && isHighEndGpu) {
+          return "APU chỉ cấp 8 làn PCIe x8, sẽ giới hạn băng thông tối đa của GPU cao cấp.";
+        }
+        return "Mainboard hỗ trợ khe cắm PCIe x16 cho GPU.";
+      })()
     },
     {
       label: "Chiều dài GPU ↔ Case [COMP-004]", icon: "📐",
@@ -225,18 +276,31 @@ export function calculateBuilderInsights(selectedItems = {}, selectedCount = 0, 
     {
       label: "Yêu cầu tản nhiệt CPU [COMP-005]", icon: "❄️",
       ok: !getProductId(cpu) || !coolingDiag.required || coolingSelected,
-      detail: !getProductId(cpu) ? "Chọn CPU để đánh giá." : coolingDiag.required ? (coolingSelected ? "Đã chọn cooler." : "Cần tản riêng.") : "Có tản stock."
+      detail: !getProductId(cpu) ? "Chọn CPU để đánh giá." : coolingDiag.required ? (coolingSelected ? "Đã chọn cooler rời." : "Bắt buộc chọn tản nhiệt rời (CPU không kèm tản stock).") : "CPU có kèm tản stock chính hãng."
     },
     {
       label: "Hiệu năng & Kích thước làm mát [COMP-006]", icon: "🌡",
       ok: !coolingSelected || coolingFitOk,
-      detail: !coolingSelected ? "Chưa chọn tản nhiệt." : "Đã chọn tản nhiệt."
+      detail: (() => {
+        if (!coolingSelected) return "Chưa chọn tản nhiệt.";
+        if (!coolingDiag.socketOk) return `Chân tản ${coolingDiag.coolerSockets || "?"} không vừa socket CPU ${cpuSocket}.`;
+        if (!coolingDiag.capacityOk) return `Công suất tản (${coolingDiag.coolerCapacity}W) nhỏ hơn TDP CPU (${coolingDiag.cpuTdp}W).`;
+        if (!coolingDiag.radiatorOk) return `Radiator ${coolingDiag.radiatorSize}mm vượt quá hỗ trợ của case.`;
+        if (!coolingDiag.heightOk) return `Chiều cao tản ${coolingDiag.coolerHeight}mm cấn nắp hông case (${caseProduct?.specs?.find?.(s => s.name === 'case_cooler_clearance')?.value || "155mm"}).`;
+        return "Tản nhiệt tương thích socket, công suất làm mát và kích thước thùng máy.";
+      })()
     },
     {
       label: "Nguồn đủ công suất Watt [COMP-007]", icon: "⚡",
-      ok: !s.psu || psuWatt === 0 || isPsuMarginWarning || psuWatt >= power,
-      severity: !s.psu || psuWatt === 0 ? undefined : isPsuMarginWarning ? "WARNING" : psuWatt < power ? "BLOCKER" : undefined,
-      detail: s.psu ? `${psuWatt}W PSU / thực tế ${power}W` : "Chưa chọn PSU."
+      ok: !s.psu || psuWatt === 0 || psuWatt >= power,
+      severity: !s.psu || psuWatt === 0 ? undefined : psuWatt < power ? "BLOCKER" : isPsuMarginWarning ? "WARNING" : undefined,
+      detail: (() => {
+        if (!s.psu) return "Chưa chọn PSU.";
+        if (psuWatt === 0) return "Chưa có thông số công suất PSU.";
+        if (psuWatt < power) return `THIẾU CÔNG SUẤT: Nguồn ${psuWatt}W không đủ tải hệ thống ${power}W (Nguy cơ sập nguồn).`;
+        if (isPsuMarginWarning) return `Biên độ an toàn nguồn thấp (${psuMarginPercent}% < 20%). Khuyến nghị nguồn từ ${recommendedPsuWatt}W trở lên.`;
+        return `PSU ${psuWatt}W đáp ứng tốt hệ thống tải ${power}W (Dư tải ${psuMarginPercent}% an toàn).`;
+      })()
     },
     {
       label: "Đầu cắm nguồn GPU / CPU [COMP-008]", icon: "🔌",
@@ -245,8 +309,31 @@ export function calculateBuilderInsights(selectedItems = {}, selectedCount = 0, 
     },
     {
       label: "Khe cắm M.2 SSD ↔ Mainboard [COMP-009]", icon: "💾",
-      ok: !s.storage || m2Slots >= 1,
-      detail: s.storage ? `Mainboard trang bị ${m2Slots} khe M.2` : "Chưa chọn Storage."
+      ok: (() => {
+        if (!s.storage && !s.storage_2) return true;
+        const isM2 = (item) => {
+          if (!item) return false;
+          const p = getSelectedProduct(item);
+          const name = normalizeText(getProductName(p));
+          const type = normalizeText(findSpec(p, ["storage_type", "loại ổ cứng", "form_factor", "giao thức"]) || "");
+          return name.includes("m.2") || name.includes("nvme") || type.includes("m.2") || type.includes("nvme");
+        };
+        const m2Count = (isM2(s.storage) ? 1 : 0) + (isM2(s.storage_2) ? 1 : 0);
+        if (m2Count === 0) return true;
+        return m2Slots >= m2Count;
+      })(),
+      detail: (() => {
+        const isM2 = (item) => {
+          if (!item) return false;
+          const p = getSelectedProduct(item);
+          const name = normalizeText(getProductName(p));
+          const type = normalizeText(findSpec(p, ["storage_type", "loại ổ cứng", "form_factor", "giao thức"]) || "");
+          return name.includes("m.2") || name.includes("nvme") || type.includes("m.2") || type.includes("nvme");
+        };
+        const m2Count = (isM2(s.storage) ? 1 : 0) + (isM2(s.storage_2) ? 1 : 0);
+        if (!s.storage && !s.storage_2) return "Chưa chọn Storage.";
+        return `${m2Count} ổ M.2 NVMe / ${m2Slots} khe Mainboard`;
+      })()
     },
     {
       label: "Form Factor Mainboard ↔ Case [COMP-010]", icon: "📦",
@@ -256,7 +343,9 @@ export function calculateBuilderInsights(selectedItems = {}, selectedCount = 0, 
   ];
 
   const hardFails = checks.filter((c) => c.ok === false && c.severity !== "WARNING").length;
-  const requiredCount = getProductId(cpu) && !coolingDiag.required ? COMPONENT_SECTIONS.length - 1 : COMPONENT_SECTIONS.length;
+  // storage_2 là optional, cooling có thể optional nếu CPU có stock cooler
+  const optionalCount = (getProductId(cpu) && !coolingDiag.required ? 1 : 0) + 1; // +1 cho storage_2 optional
+  const requiredCount = Math.max(1, COMPONENT_SECTIONS.length - optionalCount);
   const completionRatio = requiredCount > 0 ? Math.min(selectedCount, requiredCount) / requiredCount : 0;
   const compatibilityScore = Math.max(0, Math.round(completionRatio * 65 + ((checks.length - hardFails) / checks.length) * 35));
   const cpuScore = s.cpu ? estimateProductPerformance(cpu, "cpu") : 45;

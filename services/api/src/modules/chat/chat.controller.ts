@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { v4 as uuidv4 } from "uuid";
 
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../../config/prisma";
 import {
   emitToChatRoom,
   emitToStaff,
@@ -11,8 +11,6 @@ import {
   releaseStaffSession
 } from "../../socket/socket.service";
 import { AiContextService } from "../ai/ai-context.service";
-
-const prisma = new PrismaClient();
 
 type ChatSender = "customer" | "staff" | "system";
 type ChatStatus = "open" | "assigned" | "waiting_customer" | "waiting_staff" | "resolved" | "waiting" | "active" | "closed";
@@ -152,7 +150,7 @@ export const createSession = async (req: Request, res: Response) => {
       data: {
         session_id: sessionId,
         status: sessionStatus,
-        customer_name: customerName || "Khach hang PC Mall",
+        customer_name: customerName || "Khách hàng PC Mall",
         staff_name: staffName,
         linked_order_id: linkedOrderId ? Number(linkedOrderId) : null,
         created_at: now,
@@ -179,7 +177,7 @@ export const createSession = async (req: Request, res: Response) => {
     console.error("Error creating chat session:", error);
     res.status(500).json({
       success: false,
-      message: "Yeu cau tu van da duoc ghi nhan nhung he thong phan hoi cham. Vui long thu lai sau it phut.",
+      message: "Yêu cầu tư vấn đã được ghi nhận nhưng hệ thống phản hồi chậm. Vui lòng thử lại sau ít phút.",
       detail: process.env.NODE_ENV === "production" ? undefined : error instanceof Error ? error.message : String(error)
     });
   }
@@ -226,7 +224,7 @@ export const sendMessage = async (req: Request, res: Response) => {
     }
 
     if (["closed", "resolved"].includes(session.status)) {
-      return res.status(400).json({ success: false, message: "Phien tu van da ket thuc" });
+      return res.status(400).json({ success: false, message: "Phiên tư vấn đã kết thúc" });
     }
 
     const normalizedSender: ChatSender = sender === "staff" ? "staff" : sender === "system" ? "system" : "customer";
@@ -242,7 +240,7 @@ export const sendMessage = async (req: Request, res: Response) => {
 
     const nextStatus =
       normalizedSender === "staff"
-        ? "active"
+        ? "waiting_customer"
         : ["assigned", "waiting_customer", "active"].includes(session.status)
           ? "active"
           : session.status;
@@ -257,7 +255,12 @@ export const sendMessage = async (req: Request, res: Response) => {
     // 🔔 Real-time: Đẩy tin nhắn mới ngay tức thì đến tất cả clients trong room này
     emitToChatRoom(id, "chat:new_message", messageData);
     // 🔔 Real-time: Cập nhật hàng đợi cho nhân viên (để cập nhật preview)
-    emitToStaffChatQueue("queue:updated", { sessionId: id, status: nextStatus });
+    emitToStaffChatQueue("queue:updated", {
+      sessionId: id,
+      status: normalizeStatus(nextStatus),
+      lastMessage: trimmedText,
+      updatedAt: messageData.timestamp
+    });
 
     res.status(201).json({ success: true, data: messageData });
   } catch (error) {
@@ -326,7 +329,7 @@ export const acceptSession = async (req: Request, res: Response) => {
         where: { id: session.id },
         data: {
           status: "active",
-          staff_name: staffName || "Nhan vien ban hang",
+          staff_name: staffName || "Nhân viên bán hàng",
           updated_at: new Date()
         }
       });
@@ -335,7 +338,7 @@ export const acceptSession = async (req: Request, res: Response) => {
         data: {
           session_id: session.id,
           sender: "system",
-          text: `${staffName || "Nhan vien ban hang"} da tham gia phien tu van.`,
+          text: `${staffName || "Nhân viên bán hàng"} đã tham gia phiên tư vấn.`,
           created_at: new Date()
         }
       });
@@ -350,7 +353,11 @@ export const acceptSession = async (req: Request, res: Response) => {
 
     // 🔔 Real-time: Thông báo session được nhận cho cả khách và nhân viên
     emitToChatRoom(id, "chat:session_updated", refreshedData);
-    emitToStaffChatQueue("queue:updated", { sessionId: id, status: "active" });
+    emitToStaffChatQueue("queue:updated", {
+      sessionId: id,
+      status: "assigned",
+      staffName: refreshedData.staffName
+    });
 
     res.status(200).json({ success: true, data: refreshedData });
   } catch (error) {
@@ -386,7 +393,7 @@ export const closeSession = async (req: Request, res: Response) => {
       data: {
         session_id: session.id,
         sender: "system",
-        text: "Phien tu van da ket thuc. Cam on ban da lien he PC Mall.",
+        text: "Phiên tư vấn đã kết thúc. Cảm ơn bạn đã liên hệ PC Mall.",
         created_at: new Date()
       }
     });

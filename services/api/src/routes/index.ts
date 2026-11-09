@@ -21,6 +21,8 @@ const productsRouter = require("../modules/products/products.route");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const adminRouter = require("../modules/admin/admin.route");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
+const adminController = require("../modules/admin/admin.controller");
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const staffRouter = require("../modules/staff/staff.route");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const shipmentsRouter = require("../modules/shipments/shipments.route");
@@ -36,16 +38,31 @@ export const apiRouter = Router();
 apiRouter.use(generalApiLimiter);
 
 apiRouter.get("/health", async (_req, res) => {
+  const startedAt = Date.now();
   const database = await checkDatabaseConnection();
   const isReady = database.connected;
+  const memory = process.memoryUsage();
 
   res.status(isReady ? 200 : 503).json({
     status: isReady ? "ok" : "degraded",
     service: "api",
+    version: "0.1.0",
+    env: process.env.NODE_ENV || "development",
     timestamp: new Date().toISOString(),
-    database
+    uptimeSeconds: Math.round(process.uptime()),
+    memoryUsageMb: {
+      rss: Math.round(memory.rss / 1024 / 1024),
+      heapUsed: Math.round(memory.heapUsed / 1024 / 1024),
+      heapTotal: Math.round(memory.heapTotal / 1024 / 1024)
+    },
+    database: {
+      ...database,
+      pingLatencyMs: database.latencyMs ?? (Date.now() - startedAt)
+    }
   });
 });
+
+apiRouter.get("/system/public-info", adminController.getPublicStoreInfo);
 
 apiRouter.use("/auth", authRateLimiter, authRouter);
 apiRouter.use("/users", usersRouter);

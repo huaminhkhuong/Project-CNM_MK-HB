@@ -13,6 +13,15 @@ import {
   assignStaffOrderSerials,
   autoGenerateStaffOrderSerials
 } from "../../services/staff.service";
+import { approvePaymentProof } from "../../services/order.service";
+
+const API_ORIGIN = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/api\/?$/, "");
+
+function resolveUploadUrl(path) {
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${API_ORIGIN}${path.startsWith("/") ? path : `/${path}`}`;
+}
 
 const STORAGE_KEY = "pcmall_staff_selected_order";
 
@@ -136,14 +145,25 @@ function getItemThumbnail(item) {
 function getPaymentTone(paymentStatus) {
   const normalized = String(paymentStatus || "").toUpperCase();
   if (normalized === "PAID") return "success";
-  if (normalized === "PENDING") return "warning";
+  if (["PENDING", "PENDING_GATEWAY", "AWAITING_ADMIN_CONFIRMATION", "PENDING_VERIFICATION"].includes(normalized)) {
+    return "warning";
+  }
+  if (["REJECTED", "EXPIRED", "PAYMENT_CANCELLED", "FAILED"].includes(normalized)) {
+    return "danger";
+  }
   return "neutral";
 }
 
 function getPaymentLabel(paymentStatus) {
   const normalized = String(paymentStatus || "").toUpperCase();
   if (normalized === "PAID") return "Đã thanh toán";
-  if (normalized === "PENDING") return "Chờ thanh toán";
+  if (normalized === "AWAITING_ADMIN_CONFIRMATION" || normalized === "PENDING_VERIFICATION") {
+    return "Chờ duyệt minh chứng";
+  }
+  if (normalized === "PENDING_GATEWAY" || normalized === "PENDING") return "Chờ thanh toán";
+  if (normalized === "REJECTED") return "Từ chối minh chứng";
+  if (normalized === "EXPIRED") return "Hết hạn TT";
+  if (normalized === "PAYMENT_CANCELLED") return "Đã hủy TT";
   return "Chưa thanh toán";
 }
 
@@ -591,24 +611,125 @@ function StaffSerialNumbersManager({
   );
 }
 
-function StaffPaymentPanel({ selectedOrder }) {
+function StaffPaymentPanel({ selectedOrder, onApprovePaymentProof, actionLoading, onZoomProof }) {
+  const paymentProofRaw =
+    selectedOrder.paymentProof ||
+    selectedOrder.payment_proof ||
+    selectedOrder.proofImageUrl ||
+    selectedOrder.proof_image_url ||
+    "";
+  const paymentProofUrl = resolveUploadUrl(paymentProofRaw);
+  const normalizedPaymentStatus = String(selectedOrder.paymentStatus || selectedOrder.payment_status || "").toUpperCase();
+  const isBankTransfer = String(selectedOrder.paymentMethod || selectedOrder.payment_method || "").toUpperCase() === "BANK_TRANSFER";
+  const canVerifyProof =
+    isBankTransfer &&
+    selectedOrder.status !== "CANCELED" &&
+    (normalizedPaymentStatus === "AWAITING_ADMIN_CONFIRMATION" ||
+      normalizedPaymentStatus === "PENDING_VERIFICATION" ||
+      Boolean(paymentProofUrl && normalizedPaymentStatus !== "PAID"));
+
+  const rows = [
+    { label: "Phương thức", value: selectedOrder.paymentMethod || "COD" },
+    {
+      label: "Trạng thái thanh toán",
+      value: (
+        <span className={`staff-badge staff-badge--${getPaymentTone(selectedOrder.paymentStatus)}`}>
+          {getPaymentLabel(selectedOrder.paymentStatus)}
+        </span>
+      )
+    },
+    { label: "Tạm tính linh kiện", value: `${formatCurrency(selectedOrder.totalAmount || getOrderAmount(selectedOrder))} đ` }
+  ];
+
+  if (Number(selectedOrder.discountAmount || 0) > 0 || selectedOrder.couponCode) {
+    rows.push({
+      label: `Giảm giá${selectedOrder.couponCode ? ` (${selectedOrder.couponCode})` : ""}`,
+      value: `-${formatCurrency(selectedOrder.discountAmount || 0)} đ`
+    });
+  }
+
+  rows.push(
+    { label: "Phí vận chuyển", value: `${formatCurrency(selectedOrder.shippingFee)} đ` },
+    { label: "Tổng thanh toán", value: `${formatCurrency(getOrderAmount(selectedOrder))} đ` },
+    { label: "Mã giao dịch", value: selectedOrder.transactionCode || selectedOrder.paymentTransactionId || "—", wrap: true, full: true }
+  );
+
   return (
     <section className="staff-card">
       <div className="staff-orders-section__head">
         <div>
-          <h3>Thanh toán</h3>
-          <p>Trạng thái chi phí và giao dịch.</p>
+          <h3>Thanh toán & Minh chứng</h3>
+          <p>Trạng thái chi phí, mã giảm giá và duyệt biên lai chuyển khoản.</p>
         </div>
       </div>
-      <InfoList
-        rows={[
-          { label: "Phương thức", value: selectedOrder.paymentMethod || "COD" },
-          { label: "Trạng thái thanh toán", value: <span className={`staff-badge staff-badge--${getPaymentTone(selectedOrder.paymentStatus)}`}>{getPaymentLabel(selectedOrder.paymentStatus)}</span> },
-          { label: "Phí vận chuyển", value: `${formatCurrency(selectedOrder.shippingFee)} đ` },
-          { label: "Tổng tiền", value: `${formatCurrency(getOrderAmount(selectedOrder))} đ` },
-          { label: "Mã giao dịch", value: selectedOrder.transactionCode || selectedOrder.paymentTransactionId || "—", wrap: true, full: true }
-        ]}
-      />
+      <InfoList rows={rows} />
+
+      {isBankTransfer ? (
+        <div style={{ padding: 16, borderRadius: 16, background: "#f8fafc", border: "1px solid #e2e8f0", display: "grid", gap: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <strong style={{ fontSize: 14, color: "#0f172a" }}>📸 Biên lai / Minh chứng chuyển khoản QR</strong>
+            {paymentProofUrl ? (
+              <button
+                type="button"
+                onClick={() => onZoomProof?.(paymentProofUrl)}
+                style={{ fontSize: 12, fontWeight: 800, color: "#2563eb", background: "none", border: "none", cursor: "pointer" }}
+              >
+                🔍 Phóng to toàn màn hình
+              </button>
+            ) : null}
+          </div>
+
+          {paymentProofUrl ? (
+            <div
+              onClick={() => onZoomProof?.(paymentProofUrl)}
+              style={{
+                border: "1px solid #cbd5e1",
+                borderRadius: 12,
+                overflow: "hidden",
+                cursor: "zoom-in",
+                background: "#fff",
+                maxHeight: 280,
+                display: "grid",
+                placeItems: "center"
+              }}
+              title="Nhấp để phóng to biên lai"
+            >
+              <img
+                src={paymentProofUrl}
+                alt="Minh chứng chuyển khoản"
+                style={{ width: "100%", maxHeight: 260, objectFit: "contain", display: "block" }}
+              />
+            </div>
+          ) : (
+            <div style={{ fontSize: 13, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", padding: "10px 14px", borderRadius: 12 }}>
+              ⚠️ Khách hàng chưa tải lên ảnh biên lai chuyển khoản cho đơn hàng này.
+            </div>
+          )}
+
+          {canVerifyProof ? (
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="staff-btn staff-btn--success"
+                disabled={Boolean(actionLoading)}
+                onClick={() => onApprovePaymentProof?.(true)}
+                style={{ flex: 1 }}
+              >
+                {actionLoading === "approve_payment" ? "Đang duyệt..." : "✅ Duyệt thanh toán & Chuyển xử lý"}
+              </button>
+              <button
+                type="button"
+                className="staff-btn staff-btn--danger"
+                disabled={Boolean(actionLoading)}
+                onClick={() => onApprovePaymentProof?.(false)}
+                style={{ flex: 1 }}
+              >
+                {actionLoading === "reject_payment" ? "Đang từ chối..." : "❌ Từ chối biên lai"}
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -716,6 +837,7 @@ export function StaffOrdersPage() {
   const [serialsLoading, setSerialsLoading] = useState(false);
   const [serialsSaving, setSerialsSaving] = useState(false);
   const [serialsError, setSerialsError] = useState("");
+  const [zoomProofUrl, setZoomProofUrl] = useState(null);
 
   useEffect(() => {
     loadOrders();
@@ -1056,6 +1178,35 @@ export function StaffOrdersPage() {
     }
   }
 
+  async function handleApprovePaymentProof(approved) {
+    if (!selectedOrder?.id) return;
+    const confirmMsg = approved
+      ? `Xác nhận duyệt biên lai chuyển khoản cho đơn #${selectedOrder.id} và chuyển đơn sang Đang xử lý?`
+      : `Xác nhận từ chối biên lai chuyển khoản của đơn #${selectedOrder.id}?`;
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      setActionLoading(approved ? "approve_payment" : "reject_payment");
+      setErrorMessage("");
+      await approvePaymentProof(selectedOrder.id, {
+        approved,
+        reason: approved ? null : "Biên lai chuyển khoản không hợp lệ hoặc không rõ ràng."
+      });
+      setSuccessMessage(
+        approved
+          ? `Đã duyệt thanh toán đơn #${selectedOrder.id}! Đơn đã chuyển sang Đang xử lý.`
+          : `Đã từ chối biên lai thanh toán của đơn #${selectedOrder.id}.`
+      );
+      const targetFilter = approved ? "PROCESSING" : statusFilter;
+      await Promise.all([loadOrderDetail(selectedOrder.id), loadOrders(targetFilter), loadStatsOrders()]);
+      if (approved) setStatusFilter("PROCESSING");
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error, "Không thể cập nhật trạng thái duyệt biên lai."));
+    } finally {
+      setActionLoading("");
+    }
+  }
+
   async function handleCancelOrder() {
     if (!selectedOrder) return;
 
@@ -1088,14 +1239,14 @@ export function StaffOrdersPage() {
   const canMoveToProcessing = selectedOrder?.status === "PENDING";
   const canShip = selectedOrder?.status === "PROCESSING";
   const canMarkDelivered = selectedOrder?.status === "SHIPPED";
-  const canCancel = selectedOrder?.status === "PENDING";
+  const canCancel = selectedOrder?.status === "PENDING" || selectedOrder?.status === "PROCESSING";
   const currentFlowIndex = ORDER_FLOW.indexOf(selectedOrder?.status);
 
   const actionHelp = {
     processing: canMoveToProcessing ? "Xác nhận đơn và chuyển sang bước xử lý." : "Chỉ đơn chờ xử lý mới có thể xác nhận.",
     ship: canShip ? "Nhập mã vận đơn và chuyển đơn sang đang giao." : "Đơn phải ở trạng thái Đang xử lý trước khi giao hàng.",
     delivered: canMarkDelivered ? "Xác nhận đơn vị vận chuyển đã giao hàng. Khách hàng sẽ bấm xác nhận đã nhận hàng để hoàn tất." : "Đơn phải ở trạng thái Đang giao trước khi xác nhận đã giao.",
-    cancel: canCancel ? "Hủy đơn khi đơn vẫn còn ở trạng thái chờ xử lý." : "Chỉ đơn chờ xử lý mới được hủy."
+    cancel: canCancel ? "Hủy đơn trước khi xuất kho và tự động hoàn trả tồn kho." : "Chỉ đơn chờ xử lý hoặc đang xử lý (chưa giao) mới được hủy."
   };
 
   function handleGenerateTracking() {
@@ -1397,7 +1548,12 @@ export function StaffOrdersPage() {
                   handleAutoGenerateSerials={handleAutoGenerateSerials}
                   selectedOrder={selectedOrder}
                 />
-                <StaffPaymentPanel selectedOrder={selectedOrder} />
+                <StaffPaymentPanel
+                  selectedOrder={selectedOrder}
+                  onApprovePaymentProof={handleApprovePaymentProof}
+                  actionLoading={actionLoading}
+                  onZoomProof={setZoomProofUrl}
+                />
                 <StaffShipmentPanel
                   selectedOrder={selectedOrder}
                   shippingCarrier={shippingCarrier}
@@ -1424,7 +1580,7 @@ export function StaffOrdersPage() {
         <div className="staff-modal">
           <div className="staff-modal__panel">
             <h2>Hủy đơn #{selectedOrder?.id}</h2>
-            <p>Nhập lý do hủy đơn. Hành động này chỉ áp dụng cho đơn đang chờ xử lý.</p>
+            <p>Nhập lý do hủy đơn. Tồn kho SKU, lượt dùng voucher và Serial Number đã gán (nếu có) sẽ được tự động hoàn trả.</p>
             <textarea
               className="staff-orders-textarea"
               value={cancelReason}
@@ -1447,6 +1603,43 @@ export function StaffOrdersPage() {
                 Quay lại
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {zoomProofUrl ? (
+        <div
+          className="staff-modal"
+          onClick={() => setZoomProofUrl(null)}
+          style={{ background: "rgba(15, 23, 42, 0.85)", cursor: "zoom-out", zIndex: 100 }}
+        >
+          <div style={{ position: "relative", maxWidth: "90vw", maxHeight: "90vh" }} onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => setZoomProofUrl(null)}
+              style={{
+                position: "absolute",
+                top: -16,
+                right: -16,
+                background: "#ef4444",
+                color: "#fff",
+                border: "none",
+                borderRadius: "50%",
+                width: 36,
+                height: 36,
+                fontSize: 20,
+                fontWeight: 900,
+                cursor: "pointer"
+              }}
+              title="Đóng"
+            >
+              ×
+            </button>
+            <img
+              src={zoomProofUrl}
+              alt="Biên lai phóng to"
+              style={{ maxWidth: "100%", maxHeight: "85vh", borderRadius: 16, objectFit: "contain", background: "#fff" }}
+            />
           </div>
         </div>
       ) : null}

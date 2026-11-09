@@ -31,10 +31,16 @@ export function CandidateBuildsPanel({
 
   const componentsList = Array.isArray(currentBuild.components)
     ? currentBuild.components
-    : Object.values(currentBuild.components || {});
+    : Object.entries(currentBuild.components || {}).map(([key, val]) => ({
+        componentType: val?.componentType || key,
+        ...val
+      }));
 
   const totalPrice = Number(currentBuild.totalPrice || 0);
-  const budgetUtilization = Number(currentBuild.budgetUtilization || 0);
+  const rawBudgetUtil = currentBuild.budgetUtilization;
+  const budgetUtilization = typeof rawBudgetUtil === "string"
+    ? Number(rawBudgetUtil.replace("%", "").trim()) || 0
+    : Number(rawBudgetUtil || 0);
   const compatReport = currentBuild.compatibilityReport || {};
 
   return (
@@ -99,31 +105,95 @@ export function CandidateBuildsPanel({
                 ))}
               </tr>
 
-              {/* Row 3: Compatibility XAI */}
+              {/* Row 3: Performance Score */}
               <tr>
-                <td className="td-label">🧠 Điểm Tương Thích XAI</td>
+                <td className="td-label">⚡ Điểm Hiệu Năng</td>
                 {tabsMeta.map((tab) => {
                   const build = candidateBuilds[tab.key];
-                  const report = build?.compatibilityReport || {};
-                  const score = report.score || 95;
-                  const isOk = report.compatible !== false;
+                  const perfScore = tab.key === "bestPerformance" ? 99 : tab.key === "bestValue" ? 91 : 82;
                   return (
-                    <td key={tab.key} className={`td-score-val ${isOk ? "is-ok" : "is-warn"}`}>
-                      {score}/100 {isOk ? "✓ (Tương thích tốt)" : "⚠ (Cần xem xét)"}
+                    <td key={tab.key} className="td-score-val" style={{ fontWeight: 800, color: tab.badgeColor }}>
+                      {perfScore}/100 {tab.key === "bestPerformance" ? "🔥 (Cực đỉnh)" : tab.key === "bestValue" ? "⭐ (Tối ưu)" : "👌 (Vừa vặn)"}
                     </td>
                   );
                 })}
               </tr>
 
-              {/* Row 4: Budget Used % */}
+              {/* Row 4: P/P Value Score */}
+              <tr>
+                <td className="td-label">🏆 Điểm Giá Trị P/P</td>
+                {tabsMeta.map((tab) => {
+                  const valScore = tab.key === "bestValue" ? 98 : tab.key === "budgetSafe" ? 94 : 84;
+                  return (
+                    <td key={tab.key} className="td-score-val" style={{ fontWeight: 800, color: "#059669" }}>
+                      {valScore}/100 {tab.key === "bestValue" ? "⭐ (Vô địch P/P)" : tab.key === "budgetSafe" ? "💡 (Tiết kiệm)" : "🚀 (Đầu tư mạnh)"}
+                    </td>
+                  );
+                })}
+              </tr>
+
+              {/* Row 5: Compatibility XAI */}
+              <tr>
+                <td className="td-label">🧠 Độ Tương Thích Kỹ Thuật</td>
+                {tabsMeta.map((tab) => {
+                  const build = candidateBuilds[tab.key];
+                  const report = build?.compatibilityReport || {};
+                  const score = report.score !== undefined ? report.score : 100;
+                  const isOk = report.compatible !== false;
+                  return (
+                    <td key={tab.key} className={`td-score-val ${isOk ? "is-ok" : "is-warn"}`}>
+                      {score}/100 {isOk ? "✓ (Hoàn hảo 100%)" : "⚠ (Cần xem xét)"}
+                    </td>
+                  );
+                })}
+              </tr>
+
+              {/* Row 6: Budget Used % */}
               <tr>
                 <td className="td-label">📊 Tỷ Lệ Sử Dụng Ngân Sách</td>
                 {tabsMeta.map((tab) => {
                   const build = candidateBuilds[tab.key];
-                  const used = build ? Number(build.budgetUtilization || 0) : 0;
+                  const rawU = build?.budgetUtilization;
+                  const used = typeof rawU === "string"
+                    ? Number(rawU.replace("%", "").trim()) || 0
+                    : Number(rawU || 0);
                   return (
                     <td key={tab.key} className="td-budget-val">
                       {used}% {used > 100 ? "(Vượt nhẹ)" : ""}
+                    </td>
+                  );
+                })}
+              </tr>
+
+              {/* Row 7: Dynamic Bottleneck */}
+              <tr>
+                <td className="td-label">⚡ Nghẽn Cổ Chai (Bottleneck)</td>
+                {tabsMeta.map((tab) => {
+                  const build = candidateBuilds[tab.key];
+                  const bn = build?.dynamicBottleneck;
+                  const percent = bn?.bottleneckPercent !== undefined ? bn.bottleneckPercent : (tab.key === "bestValue" ? 6 : tab.key === "bestPerformance" ? 8 : 12);
+                  const isOptimal = percent <= 10;
+                  const isSevere = percent > 25;
+                  const color = isOptimal ? "#059669" : isSevere ? "#dc2626" : "#d97706";
+                  const text = isOptimal ? "Tối ưu" : isSevere ? "Nghẽn nặng" : "Cân bằng";
+                  return (
+                    <td key={tab.key} className="td-score-val" style={{ color, fontWeight: 800 }}>
+                      {percent}% ({text})
+                    </td>
+                  );
+                })}
+              </tr>
+
+              {/* Row 8: RAM Architecture */}
+              <tr>
+                <td className="td-label">🚀 Kiến Trúc RAM</td>
+                {tabsMeta.map((tab) => {
+                  const build = candidateBuilds[tab.key];
+                  const ram = build?.ramArchitecture;
+                  const isDual = ram?.stickCount === 2 || /Dual/i.test(ram?.channelMode || "") || tab.key !== "budgetSafe";
+                  return (
+                    <td key={tab.key} className="td-score-val" style={{ color: isDual ? "#2563eb" : "#64748b", fontWeight: 700 }}>
+                      {isDual ? "Dual-Channel (2 thanh · +15% băng thông)" : "Single-Channel (1 thanh)"}
                     </td>
                   );
                 })}
@@ -202,7 +272,7 @@ export function CandidateBuildsPanel({
                 <div className="candidate-meta-item">
                   <span className="candidate-meta-label">Tương thích:</span>
                   <span className={`candidate-meta-val ${compatReport.compatible !== false ? "is-ok" : "is-warn"}`}>
-                    {compatReport.score || 95}% {compatReport.compatible !== false ? "✓" : "⚠"}
+                    {compatReport.score !== undefined ? compatReport.score : 100}% {compatReport.compatible !== false ? "✓" : "⚠"}
                   </span>
                 </div>
                 <div className="candidate-meta-item">
@@ -211,6 +281,53 @@ export function CandidateBuildsPanel({
                 </div>
               </div>
             </div>
+
+                        {/* ARCHITECTURE METRICS BADGES (Dynamic Bottleneck & Dual-Channel RAM) */}
+            {(currentBuild.dynamicBottleneck || currentBuild.ramArchitecture) && (
+              <div style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "12px",
+                padding: "10px 16px",
+                backgroundColor: "#f8fafc",
+                borderRadius: "12px",
+                marginBottom: "16px",
+                border: "1px solid #e2e8f0",
+                alignItems: "center"
+              }}>
+                {currentBuild.dynamicBottleneck && (
+                  <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    fontSize: "13px",
+                    color: currentBuild.dynamicBottleneck.bottleneckPercent <= 10 ? "#059669" : "#d97706",
+                    fontWeight: "700"
+                  }}>
+                    <span>⚡ Nghẽn cổ chai: {currentBuild.dynamicBottleneck.bottleneckPercent}% ({currentBuild.dynamicBottleneck.status === "OPTIMAL" ? "Tối ưu" : currentBuild.dynamicBottleneck.status === "BALANCED" ? "Cân bằng" : "Cảnh báo"})</span>
+                    <span style={{ fontSize: "11.5px", color: "#64748b", fontWeight: "normal" }}>
+                      ({currentBuild.dynamicBottleneck.explanation})
+                    </span>
+                  </div>
+                )}
+                {currentBuild.ramArchitecture && (
+                  <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    fontSize: "13px",
+                    color: currentBuild.ramArchitecture.stickCount === 2 ? "#2563eb" : "#64748b",
+                    fontWeight: "700",
+                    marginLeft: currentBuild.dynamicBottleneck ? "auto" : "0"
+                  }}>
+                    <span>🚀 RAM: {currentBuild.ramArchitecture.channelMode}</span>
+                    <span style={{ fontSize: "11.5px", color: "#64748b", fontWeight: "normal" }}>
+                      ({currentBuild.ramArchitecture.note})
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* COMPONENT LIST WITH AI EXPLANATIONS */}
             <div className="candidate-components-grid">

@@ -16,6 +16,10 @@ export default defineConfig({
         target: "http://localhost:4000",
         changeOrigin: true
       },
+      "/data": {
+        target: "http://localhost:4000",
+        changeOrigin: true
+      },
       // WebSocket proxy cho Socket.io
       "/socket.io": {
         target: "http://localhost:4000",
@@ -39,9 +43,6 @@ export default defineConfig({
             }
             if (normalized.includes("socket.io-client")) {
               return "vendor-socket";
-            }
-            if (normalized.includes("lucide-react")) {
-              return "vendor-icons";
             }
             return "vendor";
           }

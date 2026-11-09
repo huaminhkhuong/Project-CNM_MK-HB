@@ -18,7 +18,7 @@ Script sẽ tự động:
 
 ## 2. Khởi Chạy Bằng Docker Compose (Production / Staging Server)
 Dự án được đóng gói hoàn chỉnh bằng Docker với 4 dịch vụ container:
-- `cnm_mysql`: Database MySQL 8.0 (Port 3308).
+- `cnm_mysql`: Database MySQL 8.0 (Port 3307).
 - `cnm_phpmyadmin`: Trình quản lý DB phpMyAdmin (Port 8080).
 - `cnm_api`: Backend Server Node.js Express (Port 4000).
 - `cnm_web`: Frontend App React Vite (Port 5173).
@@ -45,9 +45,11 @@ docker-compose down
 | Biến Môi Trường | Mô Tả | Ví Dụ |
 |------------------|-------|-------|
 | `PORT` | Cổng dịch vụ API | `4000` |
-| `DATABASE_URL` | Chuỗi kết nối MySQL Database | `mysql://root:password@127.0.0.1:3308/cnm_mk_hb` |
+| `DATABASE_URL` | Chuỗi kết nối MySQL Database | `mysql://root:password@127.0.0.1:3307/cnm_mk_hb` |
 | `JWT_SECRET` | Khóa bí mật mã hóa Token đăng nhập | `your-secret-jwt-key` |
-| `GEMINI_API_KEY` | Key AI Google Gemini cho AI Advisor | `AIzaSy...` |
+| `LLM_PROVIDER` | Nhà cung cấp AI LLM (`gemini`, `groq`, `deepseek`, `openai`, `ollama`) | `gemini` |
+| `LLM_API_KEY` | Khóa API của nhà cung cấp LLM đã chọn | `AIzaSy... / sk-... / gsk_...` |
+| `LLM_MODEL` | Tên mô hình tương ứng | `gemini-1.5-flash` / `deepseek-chat` |
 | `SENTRY_DSN` | URL Sentry Error Tracking (Tùy chọn) | `https://xxxx@sentry.io/12345` |
 | `VITE_API_BASE_URL` | Đường dẫn API cho Frontend Web | `http://localhost:4000/api` |
 

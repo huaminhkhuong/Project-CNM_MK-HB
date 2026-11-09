@@ -50,13 +50,21 @@ export function useSocket() {
 
   /**
    * Đăng ký lắng nghe 1 socket event, tự cleanup khi component unmount
+   * hoặc khi gọi hàm unsubscribe trả về
    * @param {string} event - tên event
    * @param {Function} handler - callback khi nhận event
+   * @returns {Function} unsubscribe function
    */
   const on = useCallback(
     (event, handler) => {
       socket.on(event, handler);
       listenersRef.current.push({ event, handler });
+      return () => {
+        socket.off(event, handler);
+        listenersRef.current = listenersRef.current.filter(
+          (item) => !(item.event === event && item.handler === handler)
+        );
+      };
     },
     [socket]
   );

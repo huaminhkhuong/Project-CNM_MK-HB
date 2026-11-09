@@ -3,21 +3,22 @@
  * Tests POST /api/auth/logout and ensures blacklisted refresh tokens
  * return 401 on POST /api/auth/refresh.
  */
-import { test, describe, before, after } from "node:test";
+import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
+import supertest from "supertest";
+import { createApp } from "../src/app";
+import { prisma } from "../src/config/prisma";
+const { closePool } = require("../src/config/database");
 
-const BASE = process.env.API_BASE_URL ?? "http://localhost:4000";
+const app = createApp();
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 async function request(method: string, path: string, body?: unknown) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  const json = await res.json().catch(() => ({}));
-  return { status: res.status, body: json };
+  const m = method.toLowerCase() as "post" | "get" | "put" | "delete";
+  const req = supertest(app)[m](path).set("Content-Type", "application/json");
+  const res = body !== undefined ? await req.send(body as object) : await req;
+  return { status: res.status, body: res.body || {} };
 }
 
 async function register(suffix: string) {
@@ -38,6 +39,14 @@ async function register(suffix: string) {
 // ─── tests ──────────────────────────────────────────────────────────────────
 
 describe("Token Blacklist on Logout", () => {
+  after(async () => {
+    try {
+      await prisma.$disconnect();
+    } catch {}
+    try {
+      await closePool();
+    } catch {}
+  });
 
   test("POST /api/auth/logout without refreshToken returns 400", async () => {
     const r = await request("POST", "/api/auth/logout", {});

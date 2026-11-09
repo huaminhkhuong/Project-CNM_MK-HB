@@ -1,5 +1,6 @@
 const { getDbPool, query } = require("../../config/database");
 const { createError, toPositiveInteger } = require("../../utils/service-helpers");
+const { getTableColumns } = require("../../utils/schema-helpers");
 const { ROLES } = require("../../utils/role-helpers");
 const { env } = require("../../config/env");
 const { publishOrderEvent } = require("../../services/order-events");

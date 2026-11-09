@@ -1,0 +1,363 @@
+const fs = require('fs');
+const path = require('path');
+
+const rulesData = {
+  $schema: "http://json-schema.org/draft-07/schema#",
+  metadata: {
+    systemName: "PC Mall Hardware Knowledge Engine & AI Advisor Rules",
+    version: "2.1.0",
+    lastUpdated: "2026-10-31",
+    description: "Quy chuẩn hệ thống tập trung chứa toàn bộ quy tắc tương thích phần cứng (COMP-001..COMP-010), tỷ lệ ngân sách Heuristic, chính sách phân loại GPU/CPU/SSD, ngưỡng Dynamic Bottleneck và kiến trúc RAM.",
+    author: "PC Mall Engineering Team"
+  },
+  coreRules: [
+    {
+      ruleId: "COMP-001",
+      name: "Socket CPU ↔ Mainboard Matching",
+      sourceCategory: "CPU",
+      sourceCategoryId: 1,
+      targetCategory: "MAINBOARD",
+      targetCategoryId: 2,
+      attributeKey: "socket",
+      operator: "EQ",
+      severityOnPass: "INFO",
+      severityOnFail: "BLOCKER",
+      description: "Chuẩn chân cắm (socket) của CPU bắt buộc phải trùng khớp 100% với khe cắm CPU trên Bo mạch chủ (Mainboard).",
+      supportedSockets: ["LGA1851", "LGA1700", "LGA1200", "AM5", "AM4"],
+      templates: {
+        successShort: "✅ [COMP-001] Socket CPU & Mainboard hoàn toàn tương thích",
+        successLong: "Chân cắm CPU và khe cắm trên Mainboard đều khớp chuẩn ({detail}). Đảm bảo CPU có thể lắp vừa vặn và hoạt động ổn định trên bo mạch chủ.",
+        failShort: "❌ [COMP-001] [BLOCKER] Xung đột Socket CPU và Mainboard",
+        failLong: "CPU và Mainboard bạn chọn không cùng loại chân cắm ({detail}). Việc cố tình lắp ráp sẽ gây cong chân socket hoặc không cắm vừa.",
+        remediation: "Vui lòng đổi Mainboard hoặc CPU sao cho cùng chuẩn socket (ví dụ: Intel LGA1700 hoặc AMD AM5)."
+      }
+    },
+    {
+      ruleId: "COMP-002",
+      name: "RAM Generation & Slots Matching",
+      sourceCategory: "RAM",
+      sourceCategoryId: 3,
+      targetCategory: "MAINBOARD",
+      targetCategoryId: 2,
+      attributeKey: "ram_type",
+      operator: "EQ",
+      severityOnPass: "INFO",
+      severityOnFail: "BLOCKER",
+      description: "Thế hệ RAM (DDR4 / DDR5) phải trùng khớp chuẩn khe cắm trên Mainboard. Số thanh RAM không được vượt quá số khe cắm khả dụng.",
+      supportedGenerations: ["DDR5", "DDR4", "DDR3"],
+      templates: {
+        successShort: "✅ [COMP-002] Đã khớp chuẩn RAM và Mainboard",
+        successLong: "Loại bộ nhớ RAM và bo mạch chủ hỗ trợ cùng chuẩn ({detail}). Tốc độ bus và chuẩn DDR sẽ hoạt động tối ưu.",
+        failShort: "❌ [COMP-002] [BLOCKER] Xung đột chuẩn RAM và Mainboard",
+        failLong: "Loại RAM đã chọn không tương thích với khe cắm trên bo mạch chủ ({detail}). Khác biệt về rãnh khóa (notch) và điện áp ngăn cắm vật lý.",
+        remediation: "Đổi RAM hoặc bo mạch chủ để cùng chuẩn DDR4 hoặc DDR5."
+      }
+    },
+    {
+      ruleId: "COMP-003",
+      name: "GPU PCIe Slot & Bus Interface",
+      sourceCategory: "GPU",
+      sourceCategoryId: 4,
+      targetCategory: "MAINBOARD",
+      targetCategoryId: 2,
+      attributeKey: "pcie_slot",
+      operator: "COMPATIBLE",
+      severityOnPass: "INFO",
+      severityOnFail: "WARNING",
+      description: "Bo mạch chủ phải có ít nhất 1 khe cắm PCIe x16 cho Card đồ họa rời.",
+      templates: {
+        successShort: "✅ [COMP-003] Khe cắm PCIe x16 khả dụng",
+        successLong: "Bo mạch chủ trang bị đủ khe PCIe x16 với băng thông phù hợp cho Card đồ họa.",
+        failShort: "⚠️ [COMP-003] [WARNING] Cảnh báo khe cắm GPU",
+        failLong: "Bo mạch chủ có thể thiếu khe PCIe x16 tiêu chuẩn hoặc bị giới hạn băng thông.",
+        remediation: "Chọn Mainboard có khe PCIe 4.0 x16 hoặc PCIe 5.0 x16."
+      }
+    },
+    {
+      ruleId: "COMP-004",
+      name: "GPU Length Clearance vs Case",
+      sourceCategory: "GPU",
+      sourceCategoryId: 4,
+      targetCategory: "CASE",
+      targetCategoryId: 7,
+      attributeKey: "gpu_length_mm",
+      operator: "LTE",
+      severityOnPass: "INFO",
+      severityOnFail: "BLOCKER",
+      description: "Chiều dài của Card đồ họa (mm) phải nhỏ hơn hoặc bằng chiều dài GPU tối đa mà Vỏ case cho phép.",
+      templates: {
+        successShort: "✅ [COMP-004] Kích thước GPU vừa vặn trong Case",
+        successLong: "Chiều dài Card đồ họa ({detail}) nhỏ hơn kích thước khoang chứa của thùng máy, không bị cấn quạt tản trước.",
+        failShort: "❌ [COMP-004] [BLOCKER] Card đồ họa quá dài so với Vỏ case",
+        failLong: "Chiều dài VGA ({detail}) vượt quá chiều dài tối đa mà case hỗ trợ. Card sẽ bị cấn khung hoặc két nước tản nhiệt.",
+        remediation: "Chọn Vỏ Case kích thước Mid-Tower/Full-Tower lớn hơn hoặc chọn dòng card 2 quạt gọn gàng."
+      }
+    },
+    {
+      ruleId: "COMP-005",
+      name: "CPU Thermal Dissipation & Cooler TDP",
+      sourceCategory: "COOLING",
+      sourceCategoryId: 8,
+      targetCategory: "CPU",
+      targetCategoryId: 1,
+      attributeKey: "cooling_tdp",
+      operator: "GTE",
+      severityOnPass: "INFO",
+      severityOnFail: "WARNING",
+      description: "Công suất giải nhiệt (TDP) của tản nhiệt phải lớn hơn hoặc bằng mức TDP tỏa nhiệt của CPU.",
+      templates: {
+        successShort: "✅ [COMP-005] Tản nhiệt đáp ứng đủ công suất CPU",
+        successLong: "Khả năng tản nhiệt của quạt/AIO ({detail}) hoàn toàn làm mát tốt mức nhiệt của CPU khi tải nặng.",
+        failShort: "⚠️ [COMP-005] [WARNING] Tản nhiệt yếu hơn mức nhiệt CPU",
+        failLong: "Tản nhiệt bạn chọn ({detail}) có thể không gánh nổi CPU khi Render hoặc chơi game nặng kéo dài, gây Thermal Throttling.",
+        remediation: "Nâng cấp lên tản khí tháp đôi 6 ống đồng hoặc tản nhiệt nước AIO 240mm/360mm."
+      }
+    },
+    {
+      ruleId: "COMP-006",
+      name: "CPU Cooler Height / Radiator Fit vs Case",
+      sourceCategory: "COOLING",
+      sourceCategoryId: 8,
+      targetCategory: "CASE",
+      targetCategoryId: 7,
+      attributeKey: "cooler_dimensions",
+      operator: "LTE",
+      severityOnPass: "INFO",
+      severityOnFail: "BLOCKER",
+      description: "Chiều cao tản khí không được vượt quá khoảng trống nắp hông case; kích thước két nước AIO (120/240/280/360) phải vừa khay gắn case.",
+      templates: {
+        successShort: "✅ [COMP-006] Tản nhiệt lắp vừa vặn trong Case",
+        successLong: "Chiều cao tản nhiệt khí và radiator tản nước hoàn toàn vừa khít với không gian case.",
+        failShort: "❌ [COMP-006] [BLOCKER] Tản nhiệt cấn nắp hông hoặc không vừa case",
+        failLong: "Chiều cao tản khí hoặc kích cỡ Radiator ({detail}) vượt quá kích thước khoang lắp đặt của case.",
+        remediation: "Đổi case rộng hơn hoặc chọn tản nhiệt khí có chiều cao thấp hơn / AIO kích thước phù hợp."
+      }
+    },
+    {
+      ruleId: "COMP-007",
+      name: "PSU Wattage & System Load Headroom",
+      sourceCategory: "PSU",
+      sourceCategoryId: 6,
+      targetCategory: "SYSTEM",
+      targetCategoryId: 0,
+      attributeKey: "wattage",
+      operator: "GTE",
+      formula: "Min_Watt = Math.max(500, Math.round((TDP_CPU + TDP_GPU + 120) * 1.25))",
+      severityOnPass: "INFO",
+      severityOnFail: "BLOCKER",
+      description: "Công suất nguồn thực tế phải đáp ứng tổng TDP CPU + GPU + 120W ngoại vi nhân với hệ số an toàn 1.25 (tối thiểu 500W).",
+      templates: {
+        successShort: "✅ [COMP-007] Nguồn điện (PSU) dư tải an toàn",
+        successLong: "Công suất bộ nguồn ({detail}) đáp ứng tốt tổng công suất tiêu thụ của toàn bộ linh kiện kèm biên độ tải đỉnh an toàn.",
+        failShort: "❌ [COMP-007] [BLOCKER] Nguồn (PSU) không đủ công suất vận hành",
+        failLong: "Công suất nguồn quá thấp ({detail}). Khi chơi game hoặc render nặng, máy tính sẽ bị sập nguồn đột ngột, nguy cơ hư hỏng linh kiện.",
+        remediation: "Nâng cấp bộ nguồn công suất thực cao hơn theo khuyến nghị."
+      }
+    },
+    {
+      ruleId: "COMP-008",
+      name: "PSU Power Connectors (PCIe 8-pin / 12VHPWR)",
+      sourceCategory: "PSU",
+      sourceCategoryId: 6,
+      targetCategory: "GPU",
+      targetCategoryId: 4,
+      attributeKey: "power_connectors",
+      operator: "CONTAINS",
+      severityOnPass: "INFO",
+      severityOnFail: "BLOCKER",
+      description: "Nguồn phải có đủ đầu cấp nguồn phụ PCIe 8-pin hoặc chuẩn 12VHPWR / PCIe 5.0 16-pin cho GPU cao cấp.",
+      templates: {
+        successShort: "✅ [COMP-008] Đủ chân cắm nguồn phụ cho GPU",
+        successLong: "Nguồn trang bị đủ chân cắm PCIe/12VHPWR cấp điện ổn định cho Card đồ họa.",
+        failShort: "❌ [COMP-008] [BLOCKER] Thiếu đầu cắm nguồn phụ cho GPU",
+        failLong: "Nguồn không có đủ đầu cấp nguồn PCIe tương ứng với yêu cầu của Card đồ họa ({detail}).",
+        remediation: "Chọn nguồn chuẩn ATX 3.0/PCIe 5.0 hoặc có đủ cổng 8-pin độc lập."
+      }
+    },
+    {
+      ruleId: "COMP-009",
+      name: "Storage Interface & M.2 Slots Count",
+      sourceCategory: "STORAGE",
+      sourceCategoryId: 5,
+      targetCategory: "MAINBOARD",
+      targetCategoryId: 2,
+      attributeKey: "m2_slots",
+      operator: "LTE",
+      severityOnPass: "INFO",
+      severityOnFail: "WARNING",
+      description: "Số lượng ổ cứng SSD chuẩn M.2 NVMe không được vượt quá số khe cắm M.2 có sẵn trên Bo mạch chủ.",
+      templates: {
+        successShort: "✅ [COMP-009] Đủ khe cắm M.2 NVMe trên Mainboard",
+        successLong: "Số lượng ổ SSD M.2 nằm trong giới hạn khe cắm khả dụng của Mainboard ({detail}).",
+        failShort: "⚠️ [COMP-009] [WARNING] Thiếu khe cắm M.2 trên Mainboard",
+        failLong: "Số lượng ổ M.2 vượt quá số khe cắm vật lý trên bo mạch chủ ({detail}).",
+        remediation: "Đổi sang Mainboard có nhiều khe M.2 hơn hoặc dùng ổ cứng chuẩn SATA 2.5 inch."
+      }
+    },
+    {
+      ruleId: "COMP-010",
+      name: "Mainboard Form Factor vs Case Form Factor",
+      sourceCategory: "MAINBOARD",
+      sourceCategoryId: 2,
+      targetCategory: "CASE",
+      targetCategoryId: 7,
+      attributeKey: "form_factor",
+      operator: "IN_SUPPORTED_LIST",
+      severityOnPass: "INFO",
+      severityOnFail: "BLOCKER",
+      description: "Kích cỡ bo mạch chủ (E-ATX, ATX, Micro-ATX, Mini-ITX) phải được Vỏ case hỗ trợ gắn chân standoff.",
+      hierarchy: ["E-ATX", "ATX", "Micro-ATX", "Mini-ITX"],
+      templates: {
+        successShort: "✅ [COMP-010] Kích cỡ Mainboard lắp vừa thùng máy",
+        successLong: "Chuẩn form-factor của Mainboard ({detail}) hoàn toàn tương thích với các lỗ ốc bắt cố định trên case.",
+        failShort: "❌ [COMP-010] [BLOCKER] Bo mạch chủ quá to so với Vỏ case",
+        failLong: "Mainboard có kích cỡ lớn hơn chuẩn tối đa mà vỏ case hỗ trợ ({detail}), không thể lắp vào thùng máy.",
+        remediation: "Chọn vỏ case kích thước lớn hơn hoặc đổi bo mạch chủ cỡ Micro-ATX / Mini-ITX."
+      }
+    }
+  ],
+  budgetProfiles: {
+    gaming: {
+      useCase: "gaming",
+      label: "Gaming Phổ Thông & AAA",
+      weights: { cpu: 0.18, mainboard: 0.12, ram: 0.10, gpu: 0.44, storage: 0.08, psu: 0.07, case: 0.05, cooling: 0.04 },
+      description: "Dành ưu tiên tối đa cho Card đồ họa (GPU 40-50%) để tối ưu FPS cao nhất."
+    },
+    esports: {
+      useCase: "esports",
+      label: "eSports Tần Số Quét Cao",
+      weights: { cpu: 0.22, mainboard: 0.12, ram: 0.12, gpu: 0.38, storage: 0.08, psu: 0.07, case: 0.05, cooling: 0.04 },
+      description: "Cân bằng CPU đơn nhân khỏe và GPU tầm trung để ổn định 144Hz - 240Hz."
+    },
+    aaa: {
+      useCase: "aaa",
+      label: "Game AAA Đồ Họa Nặng (Ray Tracing / 4K)",
+      weights: { cpu: 0.16, mainboard: 0.11, ram: 0.10, gpu: 0.48, storage: 0.08, psu: 0.08, case: 0.05, cooling: 0.04 },
+      description: "Dồn tối đa ngân sách vào GPU cao cấp (DLSS 3.5, VRAM 12-16GB trở lên)."
+    },
+    rendering: {
+      useCase: "rendering",
+      label: "Đồ Họa & Dựng Phim (Workstation)",
+      weights: { cpu: 0.26, mainboard: 0.14, ram: 0.16, gpu: 0.28, storage: 0.08, psu: 0.08, case: 0.05, cooling: 0.05 },
+      description: "Tăng trọng số CPU đa nhân và RAM lớn (32GB-64GB) phục vụ preview & render video."
+    },
+    deeplearning: {
+      useCase: "deeplearning",
+      label: "AI Research & Deep Learning",
+      weights: { cpu: 0.20, mainboard: 0.13, ram: 0.18, gpu: 0.35, storage: 0.08, psu: 0.09, case: 0.05, cooling: 0.05 },
+      description: "Ưu tiên GPU VRAM cao với nhân Tensor và dung lượng RAM hệ thống dồi dào."
+    },
+    office: {
+      useCase: "office",
+      label: "Văn Phòng & Doanh Nghiệp",
+      weights: { cpu: 0.35, mainboard: 0.20, ram: 0.16, gpu: 0.00, storage: 0.13, psu: 0.08, case: 0.05, cooling: 0.03 },
+      description: "Sử dụng CPU tích hợp đồ họa (iGPU), tối ưu độ bền và tiết kiệm điện năng."
+    },
+    default: {
+      useCase: "default",
+      label: "Đa Dụng Tiêu Chuẩn",
+      weights: { cpu: 0.20, mainboard: 0.13, ram: 0.11, gpu: 0.40, storage: 0.08, psu: 0.07, case: 0.05, cooling: 0.04 },
+      description: "Cấu hình cân đối đồng đều giữa các linh kiện."
+    }
+  },
+  componentPolicies: {
+    gpu: {
+      policy: "SEPARATE_GAMING_AND_WORKSTATION",
+      gamingConsumerSeries: [
+        "GeForce RTX 50", "GeForce RTX 40", "GeForce RTX 30", "GeForce RTX 20", "GeForce GTX 16",
+        "Radeon RX 7000", "Radeon RX 6000", "Radeon RX 5000"
+      ],
+      workstationKeywords: [
+        "a400", "a1000", "a2000", "a4000", "a5000", "a6000",
+        "t400", "t600", "t1000", "rtx pro", "quadro", "gv100", "firepro"
+      ],
+      enterpriseKeywords: [
+        "a40", "a100", "h100", "h200", "l40", "tesla", "a800"
+      ],
+      gamingAllowedExceptions: [
+        "proart", "pro gaming", "gaming pro"
+      ],
+      rules: {
+        forGamingOrOffice: "EXCLUDE_WORKSTATION_AND_ENTERPRISE",
+        forRenderingOrAI: "ALLOW_ALL_INCLUDING_WORKSTATION"
+      }
+    },
+    cpu: {
+      policy: "CONSUMER_VS_SERVER_SEGREGATION",
+      serverKeywords: ["threadripper", "epyc", "xeon"],
+      consumerSeries: [
+        "Intel Core i3", "Intel Core i5", "Intel Core i7", "Intel Core i9",
+        "Intel Core Ultra 5", "Intel Core Ultra 7", "Intel Core Ultra 9",
+        "AMD Ryzen 3", "AMD Ryzen 5", "AMD Ryzen 7", "AMD Ryzen 9"
+      ],
+      rules: {
+        forConsumerBuilds: "EXCLUDE_SERVER_CPUS"
+      }
+    },
+    storage: {
+      policy: "SSD_FIRST",
+      rules: {
+        primaryDriveMustBeSsd: true,
+        allowedPrimaryKeywords: ["ssd", "nvme", "m.2", "pcie"],
+        disallowedPrimaryKeywords: ["hdd", "ultrastar", "barracuda", "ironwolf"],
+        secondaryDrivePolicy: "ALLOW_SECONDARY_HDD_OR_SSD"
+      }
+    },
+    psu: {
+      policy: "SAFETY_HEADROOM_FORMULA",
+      safetyMultiplier: 1.25,
+      baseSystemOverheadWattage: 120,
+      minimumRecommendedWattage: 500
+    }
+  },
+  bottleneckSpecs: {
+    statusThresholds: {
+      BALANCED: { min: 0, max: 10, label: "Cân bằng hoàn hảo", level: "success" },
+      MINOR_BOTTLENECK: { min: 11, max: 20, label: "Nghẽn nhẹ, chấp nhận tốt", level: "info" },
+      MODERATE_BOTTLENECK: { min: 21, max: 35, label: "Nghẽn vừa, cần tối ưu thêm", level: "warning" },
+      SEVERELY_BOTTLENECKED: { min: 36, max: 100, label: "Lệch hiệu năng nghiêm trọng", level: "danger" }
+    },
+    resolutionWeights: {
+      "1080p": { cpuWeight: 0.50, gpuWeight: 0.50, description: "Phụ thuộc nhiều vào CPU" },
+      "2k": { cpuWeight: 0.35, gpuWeight: 0.65, description: "Cân bằng giữa CPU và GPU" },
+      "4k": { cpuWeight: 0.15, gpuWeight: 0.85, description: "Chủ yếu phụ thuộc vào GPU" }
+    }
+  },
+  ramArchitectureSpecs: {
+    singleChannel: {
+      channels: 1,
+      multiplier: 1.0,
+      label: "Single-Channel (1 thanh đơn)",
+      advisory: "Tiết kiệm khe cắm nhưng băng thông chỉ đạt 1x. Khuyến nghị nâng thêm 1 thanh cùng bus để kích hoạt Dual-Channel."
+    },
+    dualChannel: {
+      channels: 2,
+      multiplier: 2.0,
+      label: "Dual-Channel (2 thanh song song)",
+      advisory: "Chuẩn tối ưu nhân đôi băng thông (2x), giúp tăng 15-25% FPS ổn định và tránh giật lag."
+    },
+    quadChannel: {
+      channels: 4,
+      multiplier: 4.0,
+      label: "Quad-Channel (4 thanh)",
+      advisory: "Băng thông tối đa cho hệ thống Workstation và biên tập video nặng."
+    }
+  }
+};
+
+const jsonStr = JSON.stringify(rulesData, null, 2);
+
+// 1. Ghi vào data/rules.json (File chính thức theo yêu cầu của bạn)
+fs.writeFileSync('data/rules.json', jsonStr, 'utf8');
+console.log('✓ Wrote data/rules.json');
+
+// 2. Ghi vào data/json/rules.json (Đồng bộ với kho data/json)
+fs.writeFileSync('data/json/rules.json', jsonStr, 'utf8');
+console.log('✓ Wrote data/json/rules.json');
+
+// 3. Ghi vào apps/web/public/data/rules.json (Phục vụ Frontend tải tĩnh nếu cần)
+if (!fs.existsSync('apps/web/public/data')) {
+  fs.mkdirSync('apps/web/public/data', { recursive: true });
+}
+fs.writeFileSync('apps/web/public/data/rules.json', jsonStr, 'utf8');
+console.log('✓ Wrote apps/web/public/data/rules.json');

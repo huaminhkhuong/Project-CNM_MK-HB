@@ -6,14 +6,14 @@ services:
     container_name: cnm_mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: password
-      MYSQL_DATABASE: cnm_mk_hb
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-cnm_mk_hb}
     ports:
-      - "3308:3306"
+      - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-ppassword"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD:-root}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -43,7 +43,17 @@ services:
     environment:
       - NODE_ENV=development
       - PORT=4000
-      - DATABASE_URL=mysql://root:password@mysql:3306/cnm_mk_hb
+      - DATABASE_URL=mysql://${DB_USER:-root}:${DB_PASSWORD:-root}@mysql:3306/${DB_NAME:-cnm_mk_hb}
+      - FRONTEND_URL=http://localhost:5173
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - JWT_ACCESS_EXPIRES_IN=${JWT_ACCESS_EXPIRES_IN:-15m}
+      - JWT_REFRESH_EXPIRES_IN=${JWT_REFRESH_EXPIRES_IN:-7d}
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-gemini-1.5-flash}
+      - PAYMENT_MOCK_MODE=${PAYMENT_MOCK_MODE:-true}
+      - SHIPPING_MOCK_MODE=${SHIPPING_MOCK_MODE:-true}
     depends_on:
       mysql:
         condition: service_healthy

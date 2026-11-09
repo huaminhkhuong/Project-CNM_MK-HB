@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="primaryGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563eb" />
+      <stop offset="100%" stop-color="#06b6d4" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#ef4444" />
+    </linearGradient>
+  </defs>
+  <!-- Background Rounded Rect -->
+  <rect width="512" height="512" rx="112" fill="url(#primaryGrad)" />
+  
+  <!-- Stylized PC Monitor / Case Outline -->
+  <rect x="96" y="104" width="320" height="224" rx="28" stroke="#ffffff" stroke-width="28" fill="rgba(255, 255, 255, 0.12)" />
+  
+  <!-- Screen Grid / Graphics Detail -->
+  <circle cx="168" cy="184" r="24" fill="#ffffff" />
+  <rect x="224" y="168" width="144" height="32" rx="8" fill="#ffffff" />
+  <rect x="144" y="240" width="224" height="24" rx="8" fill="rgba(255, 255, 255, 0.7)" />
+  
+  <!-- Monitor Stand Base -->
+  <path d="M216 328 L200 400 L312 400 L296 328 Z" fill="#ffffff" />
+  <rect x="160" y="400" width="192" height="24" rx="12" fill="#ffffff" />
+  
+  <!-- AI / Power Lightning Accent -->
+  <path d="M376 72 L320 200 L368 200 L336 312 L432 176 L384 176 Z" fill="url(#accentGrad)" stroke="#ffffff" stroke-width="8" stroke-linejoin="round" />
+</svg>
+

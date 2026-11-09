@@ -135,7 +135,23 @@ export function AIAdvisorPanel({
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [proactiveAlert, setProactiveAlert] = useState(null);
+  const [feedbackMap, setFeedbackMap] = useState({});
   const lastNoticeKeyRef = useRef("");
+
+  async function handleFeedback(msgIdx, rating, text) {
+    if (feedbackMap[msgIdx]) return;
+    setFeedbackMap((prev) => ({ ...prev, [msgIdx]: rating }));
+    try {
+      await httpClient.post("/ai/feedback", {
+        query: "PC Builder AI Advisor Advice",
+        response: text,
+        rating,
+        category: "PC_BUILDER"
+      });
+    } catch {
+      // Graceful fallback
+    }
+  }
 
   const safeTotalPrice = Number(totalPrice || 0);
   const selectedCount = Object.keys(selectedItems || {}).length;
@@ -273,12 +289,15 @@ export function AIAdvisorPanel({
         };
         const dbComponents = Object.entries(resData.recommendedBuild.components).map(([type, c]) => ({
           componentType: type,
-          id: c.productId,
-          productId: c.productId,
-          variantId: c.variantId,
-          name: c.name,
+          id: c.productId || c.id,
+          productId: c.productId || c.id,
+          variantId: c.variantId || c.id,
+          variant_id: c.variantId || c.id,
+          name: c.name || c.productName,
+          product_name: c.name || c.productName,
           price: c.price,
           imageUrl: c.imageUrl,
+          specs: c.specs || {},
           specSummary: c.explanation || `${Number(c.price || 0).toLocaleString("vi-VN")}đ`,
           icon: iconMap[type] || "🧩"
         }));
@@ -561,30 +580,6 @@ export function AIAdvisorPanel({
         </div>
       </div>
 
-      {/* PROACTIVE AI WARNING BANNER */}
-      {proactiveAlert && (
-        <div style={{
-          marginBottom: "14px",
-          padding: "12px 16px",
-          borderRadius: "14px",
-          backgroundColor: proactiveAlert.type === "error" ? "#fff1f2" : proactiveAlert.type === "warning" ? "#fff7ed" : "#f0fdf4",
-          border: `1px solid ${proactiveAlert.type === "error" ? "#fecdd3" : proactiveAlert.type === "warning" ? "#ffedd5" : "#bbf7d0"}`,
-          boxShadow: "0 2px 8px rgba(0, 0, 0, 0.02)"
-        }}>
-          <strong style={{
-            fontSize: "13px",
-            display: "block",
-            marginBottom: "3px",
-            color: proactiveAlert.type === "error" ? "#be123c" : proactiveAlert.type === "warning" ? "#c2410c" : "#15803d"
-          }}>
-            {proactiveAlert.title}
-          </strong>
-          <p style={{ margin: 0, fontSize: "12.5px", color: "#334155", lineHeight: "1.5" }}>
-            {proactiveAlert.text}
-          </p>
-        </div>
-      )}
-
       {/* CHAT MESSAGES */}
       <div style={styles.chatBox}>
         {messages.map((m, idx) => (
@@ -728,6 +723,51 @@ export function AIAdvisorPanel({
                 >
                   🚀 Tự Động Chọn & Nạp Dàn PC {(m.detectedBudget ? (m.detectedBudget / 1000000).toFixed(0) : "20")}Tr Này Về Máy Cho Tôi →
                 </button>
+              )}
+
+              {/* Thumbs Up / Down Feedback for AI Advice */}
+              {m.role === "assistant" && idx > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px", fontSize: "11px", color: "#64748b" }}>
+                  <span>Lời khuyên hữu ích?</span>
+                  {feedbackMap[idx] ? (
+                    <span style={{ color: "#059669", fontWeight: "700" }}>
+                      {feedbackMap[idx] === 1 ? "👍 Cảm ơn bạn!" : "👎 Đã ghi nhận góp ý!"}
+                    </span>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleFeedback(idx, 1, m.text)}
+                        title="Hữu ích"
+                        style={{
+                          background: "#ffffff",
+                          border: "1px solid #cbd5e1",
+                          borderRadius: "4px",
+                          padding: "1px 6px",
+                          cursor: "pointer",
+                          fontSize: "11px"
+                        }}
+                      >
+                        👍
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleFeedback(idx, -1, m.text)}
+                        title="Chưa hài lòng"
+                        style={{
+                          background: "#ffffff",
+                          border: "1px solid #cbd5e1",
+                          borderRadius: "4px",
+                          padding: "1px 6px",
+                          cursor: "pointer",
+                          fontSize: "11px"
+                        }}
+                      >
+                        👎
+                      </button>
+                    </>
+                  )}
+                </div>
               )}
             </div>
           </div>

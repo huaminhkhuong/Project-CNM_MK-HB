@@ -4,6 +4,11 @@ import { env } from "./config/env";
 import { initSocketIO } from "./socket/socket.service";
 import { verifyEmailConnection } from "./services/email.service";
 import { startPaymentTimeoutWorker, stopPaymentTimeoutWorker } from "./workers/payment-timeout.worker";
+import { logger } from "./utils/logger";
+
+import { pcBuilderService } from "./modules/pc-builder/pc-builder.service";
+
+(global as any).pcBuilderService = pcBuilderService;
 
 const app = createApp();
 const httpServer = createServer(app);
@@ -12,14 +17,18 @@ const httpServer = createServer(app);
 initSocketIO(httpServer, env.frontendUrl);
 
 httpServer.listen(env.port, () => {
-  console.log(`API running at http://localhost:${env.port}`);
-  console.log(`Socket.io ready at ws://localhost:${env.port}`);
+  logger.info(`API running at http://localhost:${env.port}`);
+  logger.info(`Socket.io ready at ws://localhost:${env.port}`);
   
-  if (env.geminiApiKey || env.openaiApiKey) {
-    console.log(`[AI Advisor] LLM API Engine active (${env.geminiApiKey ? "Google Gemini 1.5 Flash" : "OpenAI GPT-4o-mini"})`);
-  } else {
-    console.log(`[AI Advisor] Notice: GEMINI_API_KEY & OPENAI_API_KEY are empty. AI Advisor will fallback to PC Mall Rule-Based Knowledge Engine.`);
-  }
+  try {
+    const { unifiedLlmService } = require("./modules/ai/unified-llm.service");
+    const llmInfo = unifiedLlmService.getProviderInfo();
+    if (llmInfo.hasApiKey) {
+      logger.info(`[AI Advisor] Unified LLM Engine active: ${llmInfo.provider.toUpperCase()} (${llmInfo.model})`);
+    } else {
+      logger.info(`[AI Advisor] Operating in 100% local Rule Engine & Database grounded mode (LLM_API_KEY empty).`);
+    }
+  } catch {}
 
   // Verify email config on startup (non-blocking)
   verifyEmailConnection();
@@ -28,11 +37,35 @@ httpServer.listen(env.port, () => {
   startPaymentTimeoutWorker();
 });
 
-process.on("SIGTERM", () => {
+// Graceful shutdown handling
+async function gracefulShutdown(signal: string) {
   stopPaymentTimeoutWorker();
-});
+  logger.info(`[Server] Received ${signal}. Closing HTTP server, Socket.io, and database pools...`);
+  
+  try {
+    const { closeSocketIO } = await import("./socket/socket.service");
+    await closeSocketIO();
+  } catch {}
 
-process.on("SIGINT", () => {
-  stopPaymentTimeoutWorker();
-});
+  httpServer.close(async () => {
+    try {
+      const { prisma } = await import("./config/prisma");
+      await prisma.$disconnect();
+    } catch {}
+    try {
+      const { closePool } = require("./config/database");
+      await closePool();
+    } catch {}
+    logger.info("[Server] Graceful shutdown completed. Exiting.");
+    process.exit(0);
+  });
 
+  // Force exit after 10s if connections do not drain
+  setTimeout(() => {
+    logger.error(new Error("[Server] Forcefully shutting down due to timeout."));
+    process.exit(1);
+  }, 10000).unref();
+}
+
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));

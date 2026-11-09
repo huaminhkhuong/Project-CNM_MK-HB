@@ -1,9 +1,11 @@
-import { Navigate, Link, Outlet, useLocation } from "react-router-dom";
+import { Navigate, Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 
+import { NotificationBell } from "../components/notifications/NotificationBell";
 import { useAuth } from "../hooks/useAuth";
 
 const ADMIN_NAV_ITEMS = [
   { to: "/admin/dashboard", label: "Tổng quan", icon: "📊" },
+  { to: "/admin/ai-config", label: "Quản trị AI & Lọc", icon: "🧠" },
   { to: "/admin/system", label: "Hệ thống", icon: "⚙️" },
   { to: "/admin/products", label: "Sản phẩm", icon: "🏷️" },
   { to: "/admin/attributes", label: "Thuộc tính", icon: "✨" },
@@ -11,15 +13,23 @@ const ADMIN_NAV_ITEMS = [
   { to: "/admin/users", label: "Người dùng", icon: "👥" },
   { to: "/admin/payment-approval", label: "Duyệt thanh toán", icon: "💳" },
   { to: "/admin/compatibility-rules", label: "Tương thích", icon: "🔗" },
-  { to: "/staff/orders", label: "Đơn hàng", icon: "🛒", external: true }
+  { to: "/staff/orders", label: "Đơn hàng", icon: "🛒" },
+  { to: "/tech/tickets", label: "Ticket KT", icon: "🎫" },
+  { to: "/tech/warranties", label: "Bảo hành", icon: "🛡️" }
 ];
 
 export function AdminLayout() {
   const location = useLocation();
-  const { authState, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+  const { authState, isAuthenticated, logout } = useAuth();
   const role = String(authState?.user?.role || "").toUpperCase();
   const adminName = authState?.user?.fullName || authState?.user?.email || "Quản trị viên";
   const canAccess = role === "ADMIN";
+
+  function handleLogout() {
+    logout();
+    navigate("/login");
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
@@ -68,7 +78,8 @@ export function AdminLayout() {
             })}
           </nav>
 
-          <div className="admin-account">
+          <div className="admin-account" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <NotificationBell />
             <div className="admin-account__meta">
               <div className="admin-account__name">{adminName}</div>
               <div className="admin-account__role">Quản trị viên</div>
@@ -76,6 +87,19 @@ export function AdminLayout() {
             <Link to="/" className="admin-account__link">
               Cửa hàng
             </Link>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="admin-account__link"
+              style={{
+                background: "rgba(239, 68, 68, 0.14)",
+                color: "#fca5a5",
+                border: "1px solid rgba(239, 68, 68, 0.3)",
+                cursor: "pointer"
+              }}
+            >
+              Đăng xuất
+            </button>
           </div>
         </div>
       </header>

@@ -4,7 +4,10 @@
  */
 import { io, Socket } from "socket.io-client";
 
-const SOCKET_URL = import.meta.env.VITE_API_URL?.replace("/api", "") || "http://localhost:4000";
+const RAW_API_URL = String(import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || "").trim();
+const SOCKET_URL = /^https?:\/\//i.test(RAW_API_URL)
+  ? RAW_API_URL.replace(/\/api\/?$/, "")
+  : (typeof window !== "undefined" ? window.location.origin : "http://localhost:4000");
 
 let socket = null;
 

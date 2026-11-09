@@ -116,8 +116,13 @@ export function usePcBuilder(initialBuildName = "Cấu hình của tôi") {
         const variant = variants.find((v) => String(v.variant_id) === String(variantId));
         setGuestBuild((current) => {
           const currentComponents = current?.components || {};
-          const newComponents = { ...currentComponents, [componentType]: { product, variant } };
-          const newTotal = Object.values(newComponents).reduce((sum, item) => sum + Number(item.variant?.price || 0), 0);
+          const prevQuantity = currentComponents[componentType]?.quantity || 1;
+          const newComponents = { ...currentComponents, [componentType]: { product, variant, quantity: prevQuantity } };
+          const newTotal = Object.values(newComponents).reduce((sum, item) => {
+            const unitPrice = Number(item.variant?.price || item.product?.price || 0);
+            const qty = Math.max(1, Number(item.quantity || 1));
+            return sum + unitPrice * qty;
+          }, 0);
           const saved = saveGuestBuild(
             { components: newComponents, totalPrice: newTotal },
             buildName
@@ -135,6 +140,65 @@ export function usePcBuilder(initialBuildName = "Cấu hình của tôi") {
     }
   };
 
+  const updateComponentQuantity = async (componentType, nextQuantity) => {
+    const qty = Math.max(1, Math.min(4, Number(nextQuantity) || 1));
+    if (isAuthenticated && build?.id) {
+      const currentItem = build.components?.[componentType];
+      const variantId = currentItem?.variant?.id || currentItem?.variant?.variant_id || currentItem?.productVariantId || currentItem?.variantId;
+      if (variantId) {
+        try {
+          const resp = await addBuildItem(build.id, {
+            productVariantId: Number(variantId),
+            componentType,
+            quantity: qty
+          });
+          setBuild(resp?.data?.data || resp?.data || resp);
+          return;
+        } catch (err) {
+          console.warn("[usePcBuilder] Failed to sync quantity to server, fallback local state", err);
+        }
+      }
+      setBuild((current) => {
+        if (!current?.components?.[componentType]) return current;
+        const currentComponents = { ...current.components };
+        currentComponents[componentType] = {
+          ...currentComponents[componentType],
+          quantity: qty
+        };
+        const newTotal = Object.values(currentComponents).reduce((sum, item) => {
+          const unitPrice = Number(item.variant?.price || item.product?.price || item.price || 0);
+          const itemQty = Math.max(1, Number(item.quantity || 1));
+          return sum + unitPrice * itemQty;
+        }, 0);
+        return {
+          ...current,
+          components: currentComponents,
+          totalPrice: newTotal
+        };
+      });
+    } else {
+      setGuestBuild((current) => {
+        if (!current?.components?.[componentType]) return current;
+        const currentComponents = { ...current.components };
+        currentComponents[componentType] = {
+          ...currentComponents[componentType],
+          quantity: qty
+        };
+        const newTotal = Object.values(currentComponents).reduce((sum, item) => {
+          const unitPrice = Number(item.variant?.price || item.product?.price || item.price || 0);
+          const itemQty = Math.max(1, Number(item.quantity || 1));
+          return sum + unitPrice * itemQty;
+        }, 0);
+        const saved = saveGuestBuild(
+          { components: currentComponents, totalPrice: newTotal },
+          buildName
+        );
+        setGuestBuildList(listGuestBuilds());
+        return saved;
+      });
+    }
+  };
+
   const batchApplyComponents = useCallback(async (itemsList) => {
     if (!Array.isArray(itemsList) || itemsList.length === 0) return;
     setLoading(true);
@@ -143,32 +207,65 @@ export function usePcBuilder(initialBuildName = "Cấu hình của tôi") {
       if (isAuthenticated) {
         const currentBuild = await ensureBuild();
         const currentComponents = { ...(currentBuild?.components || {}) };
-        itemsList.forEach(({ componentType, product, variant }) => {
+        itemsList.forEach(({ componentType, product, variant, quantity }) => {
           if (componentType && product) {
-            currentComponents[componentType] = { product, variant };
+            const qty = Math.max(1, Number(quantity || product?.quantity || 1));
+            currentComponents[componentType] = { product, variant, quantity: qty };
           }
         });
         const newTotal = Object.values(currentComponents).reduce((sum, item) => {
           const vPrice = Number(item.variant?.price || item.product?.price || 0);
-          return sum + (vPrice > 0 ? vPrice : 1000000);
+          const qty = Math.max(1, Number(item.quantity || 1));
+          return sum + (vPrice > 0 ? vPrice : 1000000) * qty;
         }, 0);
+        // Optimistic UI update first
         setBuild({
           ...(currentBuild || {}),
           components: { ...currentComponents },
           totalPrice: newTotal
         });
+
+        // Persist items to Backend DB sequentially so F5 refresh & Share Build keep all items
+        if (currentBuild?.id) {
+          let latestServerBuild = null;
+          for (const entry of itemsList) {
+            const cType = entry?.componentType;
+            const vId = entry?.variant?.variant_id || entry?.variant?.id || entry?.product?.id;
+            const qty = Math.max(1, Number(entry?.quantity || entry?.product?.quantity || 1));
+            if (cType && vId) {
+              try {
+                const resp = await addBuildItem(currentBuild.id, {
+                  productVariantId: Number(vId),
+                  componentType: cType,
+                  quantity: qty
+                });
+                latestServerBuild = resp?.data?.data || resp?.data || resp;
+              } catch (syncErr) {
+                console.warn(`[usePcBuilder] Failed to sync ${cType} (sku=${vId}) to server:`, syncErr?.message || syncErr);
+              }
+            }
+          }
+          if (latestServerBuild?.id && Object.keys(latestServerBuild.components || {}).length > 0) {
+            setBuild((prev) => ({
+              ...latestServerBuild,
+              components: { ...(prev?.components || {}), ...(latestServerBuild.components || {}) }
+            }));
+          }
+        }
       } else {
         const currentStore = getGuestPcBuildStore();
         const activeId = currentStore.activeBuildId || "default";
         const currentComponents = { ...(currentStore.builds[activeId]?.components || {}) };
-        itemsList.forEach(({ componentType, product, variant }) => {
+        itemsList.forEach(({ componentType, product, variant, quantity }) => {
           if (componentType && product) {
-            currentComponents[componentType] = { product, variant };
+            const qty = Math.max(1, Number(quantity || product?.quantity || 1));
+            currentComponents[componentType] = { product, variant, quantity: qty };
           }
         });
         const newTotal = Object.values(currentComponents).reduce((sum, item) => {
           const vPrice = Number(item.variant?.price || item.product?.price || 0);
-          return sum + (vPrice > 0 ? vPrice : 1000000);
+          const qty = Math.max(1, Number(item.quantity || 1));
+          return sum + (vPrice > 0 ? vPrice : 1000000) * qty;
         }, 0);
         const saved = saveGuestBuild(
           { components: currentComponents, totalPrice: newTotal },
@@ -201,7 +298,11 @@ export function usePcBuilder(initialBuildName = "Cấu hình của tôi") {
         setGuestBuild((current) => {
           const currentComponents = { ...(current?.components || {}) };
           delete currentComponents[componentType];
-          const newTotal = Object.values(currentComponents).reduce((sum, item) => sum + Number(item.variant?.price || 0), 0);
+          const newTotal = Object.values(currentComponents).reduce((sum, item) => {
+            const unitPrice = Number(item.variant?.price || item.product?.price || 0);
+            const qty = Math.max(1, Number(item.quantity || 1));
+            return sum + unitPrice * qty;
+          }, 0);
           const saved = saveGuestBuild(
             { components: currentComponents, totalPrice: newTotal },
             buildName
@@ -339,10 +440,17 @@ export function usePcBuilder(initialBuildName = "Cấu hình của tôi") {
     }
   }, [refreshGuestBuildState, showSuccess, handleError]);
 
-  const clearAll = () => {
+  const clearAll = async () => {
     if (!confirm("Xóa toàn bộ cấu hình?")) return;
     if (isAuthenticated) {
+      const currentBuildId = build?.id;
+      const existingTypes = Object.keys(build?.components || {});
       setBuild((prev) => (prev ? { ...prev, components: {}, totalPrice: 0 } : null));
+      if (currentBuildId && existingTypes.length > 0) {
+        await Promise.allSettled(
+          existingTypes.map((cType) => removeBuildItem(currentBuildId, cType))
+        );
+      }
     } else {
       const store = getGuestPcBuildStore();
       store.builds[store.activeBuildId] = {
@@ -433,6 +541,7 @@ export function usePcBuilder(initialBuildName = "Cấu hình của tôi") {
     actions: {
       activeBuildId,
       applyComponent,
+      updateComponentQuantity,
       batchApplyComponents,
       removeComponent,
       checkCompatibility,

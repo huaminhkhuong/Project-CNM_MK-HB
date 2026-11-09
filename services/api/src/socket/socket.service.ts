@@ -264,3 +264,22 @@ export function emitToUser(userId: string | number, event: string, data: unknown
     // Socket not initialized (e.g. during standalone tests) — silently ignore
   }
 }
+
+/**
+ * Close Socket.io server and disconnect all sockets cleanly during Graceful Shutdown
+ */
+export async function closeSocketIO(): Promise<void> {
+  if (io) {
+    try {
+      await new Promise<void>((resolve) => {
+        io?.close(() => {
+          console.log("[Socket.io] All connections closed cleanly.");
+          resolve();
+        });
+      });
+      io = null;
+    } catch (err) {
+      console.warn("[Socket.io] Error closing server:", err);
+    }
+  }
+}

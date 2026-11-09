@@ -221,7 +221,7 @@ const infoContent = {
         <p>Chào mừng bạn sử dụng dịch vụ của PC Mall. Bằng việc truy cập hoặc mua sắm, bạn mặc nhiên đồng ý với các điều khoản dưới đây.</p>
         
         <h3>1. Giá cả và Hóa đơn</h3>
-        <p>Giá hiển thị trên website đã bao gồm thuế VAT 10% (trừ khi có ghi chú khác). Chúng tôi cam kết bán đúng giá niiyết nhưng có quyền điều chỉnh khi thị trường linh kiện biến động bất thường (ví dụ: giá VGA tăng đột ngột).</p>
+        <p>Giá hiển thị trên website đã bao gồm thuế VAT 10% (trừ khi có ghi chú khác). Chúng tôi cam kết bán đúng giá niêm yết nhưng có quyền điều chỉnh khi thị trường linh kiện biến động bất thường (ví dụ: giá VGA tăng đột ngột).</p>
 
         <h3>2. Quy định thanh toán</h3>
         <p>Bạn phải hoàn thành nghĩa vụ thanh toán trước khi nhận hàng (đối với thanh toán online) hoặc chuẩn bị đủ tiền mặt để thanh toán COD. PC Mall có quyền hủy các đơn hàng ảo hoặc có dấu hiệu gian lận.</p>
@@ -241,7 +241,7 @@ const infoContent = {
         </div>
 
         <h3>Văn hóa tại PC Mall</h3>
-        <p>Chúng tôi không có cấp bậc cứng nhắc. Tại đây, chỉ có sự đam mê với công nghệ. Khương và Bảo luôn sẵn sàng lắng nghe mọi ý tưởng cải tiến hệ thống từ những thành viên mới nhất.</p>
+        <p>Chúng tôi không có cấp bậc cứng nhắc. Tại đây, chỉ có sự đam mê với công nghệ. Khương và Tuyền luôn sẵn sàng lắng nghe mọi ý tưởng cải tiến hệ thống từ những thành viên mới nhất.</p>
 
         <h3>Vị trí đang mở tuyển (Năm 2026):</h3>
         <div style={{ display: 'grid', gap: 15 }}>

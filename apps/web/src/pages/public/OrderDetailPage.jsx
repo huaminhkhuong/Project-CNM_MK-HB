@@ -4,13 +4,16 @@ import axios from "axios";
 
 import { OrderStatusBadge } from "../../components/marketplace/OrderStatusBadge";
 import { useAuth } from "../../hooks/useAuth";
+import { addItemToCart } from "../../services/cart.service";
 import { cancelMyOrder, confirmOrderReceived, createVnpayUrl, getOrderDetail, uploadPaymentProof } from "../../services/order.service";
 import { subscribeToOrderEvents } from "../../services/order-events.service";
 import { routeConfig } from "../../routes/routeConfig";
 import { PAYMENT_STATUS_META, canCustomerCancelOrder, canCustomerConfirmReceived, canCustomerPayOrder } from "../../utils/orderStatus";
 import { resolveProductImage } from "../../utils/productImage";
+import { BANK_ACCOUNT_CONFIG, generateTransferNote } from "../../config/bank-account";
+import { getPublicStoreInfo } from "../../services/store-info.service";
 
-const API_ORIGIN = (import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api").replace(/\/api\/?$/, "");
+const API_ORIGIN = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/api\/?$/, "");
 
 function getErrorMessage(error, fallbackMessage) {
   if (axios.isAxiosError(error)) {
@@ -22,6 +25,24 @@ function getErrorMessage(error, fallbackMessage) {
 
 function normalizeResponse(response) {
   return response?.data?.data || response?.data || response;
+}
+
+function parseSerialNumbers(item) {
+  if (Array.isArray(item?.serialNumbers) && item.serialNumbers.length > 0) {
+    return item.serialNumbers.filter(Boolean);
+  }
+  if (Array.isArray(item?.OrderItemSerial) && item.OrderItemSerial.length > 0) {
+    return item.OrderItemSerial.map((s) => s?.serial_number).filter(Boolean);
+  }
+  if (typeof item?.serial_numbers === "string" && item.serial_numbers.trim()) {
+    try {
+      const parsed = JSON.parse(item.serial_numbers);
+      if (Array.isArray(parsed)) return parsed.filter(Boolean);
+    } catch {
+      return item.serial_numbers.split(",").map((s) => s.trim()).filter(Boolean);
+    }
+  }
+  return [];
 }
 
 function mapDbOrderToUi(dbOrder) {
@@ -48,12 +69,15 @@ function mapDbOrderToUi(dbOrder) {
     finalAmount: dbOrder.final_amount || dbOrder.finalAmount || dbOrder.total_amount || dbOrder.totalAmount || 0,
     items: (dbOrder.OrderItem || dbOrder.items || []).map((item) => ({
       id: item.id,
+      productId: item.product_id || item.productId || item.ProductSku?.product_id || null,
+      productVariantId: item.product_variant_id || item.productVariantId || item.ProductSku?.id || null,
       productName: item.name_snapshot || item.nameSnapshot || item.productName || item.product?.name || "Sản phẩm",
       sku: item.sku_snapshot || item.skuSnapshot || item.sku,
       quantity: item.quantity,
       unitPrice: item.unit_price || item.unitPrice,
       lineTotal: item.line_total || item.lineTotal,
-      imageUrl: item.ProductSku?.image_url || item.ProductSku?.imageUrl || item.imageUrl || item.product?.imageUrl || null
+      imageUrl: item.ProductSku?.image_url || item.ProductSku?.imageUrl || item.imageUrl || item.product?.imageUrl || null,
+      serialNumbers: parseSerialNumbers(item)
     }))
   };
 }
@@ -99,6 +123,21 @@ function formatCurrency(value) {
   return Number(value || 0).toLocaleString("vi-VN");
 }
 
+function formatDate(dateValue) {
+  if (!dateValue) return "—";
+  try {
+    return new Date(dateValue).toLocaleString("vi-VN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric"
+    });
+  } catch {
+    return String(dateValue);
+  }
+}
+
 function getShipmentStatusLabel(status) {
   const labels = {
     CREATED: "Đã tạo vận đơn",
@@ -134,6 +173,25 @@ export function OrderDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [paymentProof, setPaymentProof] = useState(null);
   const [uploadingProof, setUploadingProof] = useState(false);
+  const [storeInfo, setStoreInfo] = useState({
+    bankName: BANK_ACCOUNT_CONFIG.bankName,
+    bankAccountNumber: BANK_ACCOUNT_CONFIG.accountNumber,
+    bankAccountHolder: BANK_ACCOUNT_CONFIG.accountHolder,
+    storeHotline: BANK_ACCOUNT_CONFIG.hotline,
+    storeTaxId: BANK_ACCOUNT_CONFIG.taxId,
+    storeAddress: BANK_ACCOUNT_CONFIG.address,
+    transferNotePrefix: BANK_ACCOUNT_CONFIG.transferNote
+  });
+
+  useEffect(() => {
+    let mounted = true;
+    getPublicStoreInfo().then((info) => {
+      if (mounted && info) {
+        setStoreInfo(info);
+      }
+    }).catch(() => {});
+    return () => { mounted = false; };
+  }, []);
 
   const reloadOrder = useCallback(async ({ silent = true } = {}) => {
     if (!orderId) return;
@@ -186,6 +244,10 @@ export function OrderDetailPage() {
       unsubscribe();
     };
   }, [isAuthenticated, orderId, reloadOrder]);
+
+  async function handlePrintInvoice() {
+    window.print();
+  }
 
   async function handleCancelOrder() {
     if (!confirm(`Hủy đơn hàng #${orderId}?`)) return;
@@ -267,6 +329,40 @@ export function OrderDetailPage() {
     }
   }
 
+  async function handleReorder() {
+    const items = Array.isArray(order?.items) ? order.items : [];
+    const reorderable = items.filter((item) => item.productVariantId || item.productId);
+    if (reorderable.length === 0) {
+      navigate(routeConfig.public.catalog);
+      return;
+    }
+
+    try {
+      setActionLoading(true);
+      setErrorMessage("");
+      let addedCount = 0;
+      for (const item of reorderable) {
+        try {
+          await addItemToCart({
+            ...(item.productId ? { productId: Number(item.productId) } : {}),
+            ...(item.productVariantId ? { productVariantId: Number(item.productVariantId) } : {}),
+            quantity: Math.max(1, Number(item.quantity || 1))
+          });
+          addedCount += 1;
+        } catch {
+          // Skip out of stock items
+        }
+      }
+      if (addedCount > 0) {
+        navigate(routeConfig.public.cart);
+      } else {
+        setErrorMessage("Các sản phẩm trong đơn hàng này hiện đã hết hàng hoặc ngừng kinh doanh.");
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   const itemCount = useMemo(() => (order?.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0), [order]);
   const recipient = useMemo(() => parseRecipientFromShippingAddress(order?.shippingAddress, order?.customer || user), [order, user]);
   const paymentStatusMeta = getPaymentStatusMeta(order?.paymentStatus, order?.paymentMethod);
@@ -313,8 +409,53 @@ export function OrderDetailPage() {
   }
 
   return (
-    <div style={{ display: "grid", gap: 24 }}>
-      <section style={{ padding: "36px 32px", borderRadius: 24, background: "linear-gradient(135deg, #f8fafc, #f1f5f9)", border: "1px solid #e2e8f0", boxShadow: "0 2px 4px rgba(0,0,0,0.02)" }}>
+    <div className="order-detail-container" style={{ display: "grid", gap: 24 }}>
+      <style>{`
+        @media print {
+          body {
+            background: #ffffff !important;
+            color: #000000 !important;
+            font-size: 12pt !important;
+          }
+          nav, header, footer, .no-print, button, a {
+            display: none !important;
+          }
+          .print-only {
+            display: block !important;
+          }
+          .order-detail-container {
+            max-width: 100% !important;
+            margin: 0 !important;
+            padding: 10px !important;
+            box-shadow: none !important;
+          }
+        }
+        @media screen {
+          .print-only {
+            display: none;
+          }
+        }
+      `}</style>
+
+      {/* Invoice Retail Header (Print Only) */}
+      <div className="print-only" style={{ borderBottom: "2px solid #0f172a", paddingBottom: "16px", marginBottom: "16px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: "24px", fontWeight: "900", letterSpacing: "-0.5px" }}>{storeInfo.storeName || "PC MALL VIỆT NAM"}</h1>
+            <p style={{ margin: "4px 0 0", fontSize: "11px", color: "#475569" }}>
+              Hệ thống bán lẻ Linh kiện Máy tính & Dịch vụ PC Chuyên nghiệp<br />
+              Trụ sở: {storeInfo.storeAddress || BANK_ACCOUNT_CONFIG.address} | Hotline: {storeInfo.storeHotline || BANK_ACCOUNT_CONFIG.hotline} | MST: {storeInfo.storeTaxId || BANK_ACCOUNT_CONFIG.taxId}
+            </p>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "#1e293b" }}>HÓA ĐƠN BÁN LẺ</h2>
+            <div style={{ fontSize: "12px", marginTop: "4px" }}>Số: <strong>#{order.id}</strong></div>
+            <div style={{ fontSize: "11px", color: "#64748b" }}>Ngày tạo: {formatDate(order.createdAt)}</div>
+          </div>
+        </div>
+      </div>
+
+      <section className="no-print" style={{ padding: "36px 32px", borderRadius: 24, background: "linear-gradient(135deg, #f8fafc, #f1f5f9)", border: "1px solid #e2e8f0", boxShadow: "0 2px 4px rgba(0,0,0,0.02)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 20, flexWrap: "wrap", alignItems: "end" }}>
           <div style={{ display: "grid", gap: 8 }}>
             <div style={{ fontSize: 13, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)" }}>Chi tiết đơn hàng</div>
@@ -323,9 +464,33 @@ export function OrderDetailPage() {
             <div style={{ color: "var(--muted)", marginTop: 8 }}>Theo dõi đầy đủ trạng thái, vận đơn, thanh toán và thông tin sản phẩm trong đơn.</div>
           </div>
 
-          <div style={{ textAlign: "right", display: "grid", gap: 6 }}>
-            <div style={{ fontSize: 13, color: "var(--muted)" }}>Tổng thanh toán</div>
-            <div style={{ fontWeight: 800, fontSize: 30 }}>{formatCurrency(order.finalAmount)} VND</div>
+          <div style={{ textAlign: "right", display: "grid", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 13, color: "var(--muted)" }}>Tổng thanh toán</div>
+              <div style={{ fontWeight: 800, fontSize: 30 }}>{formatCurrency(order.finalAmount)} VND</div>
+            </div>
+            <div>
+              <button
+                type="button"
+                onClick={handlePrintInvoice}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "8px 16px",
+                  borderRadius: "10px",
+                  border: "1px solid #cbd5e1",
+                  background: "#ffffff",
+                  color: "#0f172a",
+                  fontWeight: "700",
+                  fontSize: "13px",
+                  cursor: "pointer",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
+                }}
+              >
+                🖨️ In hóa đơn (PDF)
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -335,7 +500,7 @@ export function OrderDetailPage() {
       ) : null}
 
       {(canCustomerCancelOrder(order) || canCustomerPayOrder(order) || canConfirmReceived) ? (
-        <section style={{ display: "flex", gap: 12, flexWrap: "wrap", padding: 20, borderRadius: 20, background: "#fff", border: "1px solid var(--border)" }}>
+        <section className="no-print" style={{ display: "flex", gap: 12, flexWrap: "wrap", padding: 20, borderRadius: 20, background: "#fff", border: "1px solid var(--border)" }}>
           {canCustomerPayOrder(order) ? (
             <button type="button" disabled={actionLoading} onClick={handlePayOrder} style={{ padding: "12px 24px", borderRadius: 12, border: "none", background: "#2563eb", color: "#fff", fontWeight: 800, cursor: "pointer" }}>
               {actionLoading ? "Đang mở cổng thanh toán..." : "💳 Thanh toán VNPay ngay"}
@@ -356,7 +521,7 @@ export function OrderDetailPage() {
 
       {/* Bank Transfer Payment Proof Upload */}
       {order?.paymentMethod === "BANK_TRANSFER" ? (
-        <section style={{ padding: 24, borderRadius: 20, background: "linear-gradient(135deg, rgba(59, 130, 246, 0.05), rgba(37, 99, 235, 0.02))", border: "2px dashed rgba(37, 99, 235, 0.3)" }}>
+        <section className="no-print" style={{ padding: 24, borderRadius: 20, background: "linear-gradient(135deg, rgba(59, 130, 246, 0.05), rgba(37, 99, 235, 0.02))", border: "2px dashed rgba(37, 99, 235, 0.3)" }}>
           <div style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: 20 }}>
             <div style={{ width: 48, height: 48, borderRadius: "50%", background: "rgba(37, 99, 235, 0.1)", color: "#2563eb", display: "grid", placeItems: "center", fontSize: 24 }}>💳</div>
             <div>
@@ -432,9 +597,9 @@ export function OrderDetailPage() {
           <div style={{ display: "grid", gap: 8, padding: 16, background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
             <div style={{ fontWeight: 700, color: "#1e293b", fontSize: 14 }}>📋 Hướng dẫn chuyển khoản:</div>
             <div style={{ fontSize: 13, color: "#64748b", lineHeight: 1.6 }}>
-              1. Chuyển khoản vào tài khoản Techcombank: <strong>8686868991</strong> - <strong>HỨA MINH KHƯƠNG</strong><br/>
+              1. Chuyển khoản vào tài khoản {storeInfo.bankName || BANK_ACCOUNT_CONFIG.bankName}: <strong>{storeInfo.bankAccountNumber || BANK_ACCOUNT_CONFIG.accountNumber}</strong> - <strong>{storeInfo.bankAccountHolder || BANK_ACCOUNT_CONFIG.accountHolder}</strong><br/>
               2. Số tiền chuyển: <strong>{formatCurrency(order?.finalAmount)} VND</strong><br/>
-              3. Nội dung chuyển khoản: <strong>DH{user?.phone || "SĐT của bạn"}</strong><br/>
+              3. Nội dung chuyển khoản: <strong>{generateTransferNote(user?.phone || order?.customerPhone || "SĐT của bạn", storeInfo.transferNotePrefix)}</strong><br/>
               4. Chụp screenshot màn hình chuyển khoản và tải lên ở trên
             </div>
           </div>
@@ -562,8 +727,41 @@ export function OrderDetailPage() {
             </div>
           </section>
 
-          <section style={{ display: "grid", gap: 12, padding: 24, borderRadius: 24, background: "#fff", border: "1px solid var(--border)", boxShadow: "var(--shadow)" }}>
+          <section className="no-print" style={{ display: "grid", gap: 12, padding: 24, borderRadius: 24, background: "#fff", border: "1px solid var(--border)", boxShadow: "var(--shadow)" }}>
             <h2 style={{ margin: 0, fontSize: 24 }}>Tiện ích nhanh</h2>
+            <button
+              type="button"
+              onClick={handlePrintInvoice}
+              style={{
+                padding: "10px 14px",
+                borderRadius: 12,
+                border: "1px solid #cbd5e1",
+                background: "#f8fafc",
+                color: "#1e293b",
+                fontWeight: 800,
+                cursor: "pointer",
+                textAlign: "left"
+              }}
+            >
+              🖨️ In hóa đơn bán lẻ (Xuất PDF)
+            </button>
+            <button
+              type="button"
+              disabled={actionLoading}
+              onClick={handleReorder}
+              style={{
+                padding: "10px 14px",
+                borderRadius: 12,
+                border: "1px solid #bfdbfe",
+                background: "#eff6ff",
+                color: "#1d4ed8",
+                fontWeight: 800,
+                cursor: "pointer",
+                textAlign: "left"
+              }}
+            >
+              🛒 Mua lại các sản phẩm trong đơn này
+            </button>
             <Link to={routeConfig.public.warranties} style={{ color: "var(--primary)", fontWeight: 700 }}>Kiểm tra bảo hành điện tử</Link>
             <Link to={routeConfig.public.orders} style={{ color: "var(--primary)", fontWeight: 700 }}>Quay lại lịch sử đơn hàng</Link>
           </section>

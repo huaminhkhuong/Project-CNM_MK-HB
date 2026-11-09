@@ -22,7 +22,11 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     if (revoked) {
       return next(new AppError("Token has been revoked", 401));
     }
-    req.user = payload;
+    req.user = {
+      ...payload,
+      userId: Number(payload.userId) || payload.userId,
+      id: Number(payload.userId) || payload.userId
+    } as any;
     return next();
   } catch (_error) {
     return next(new AppError("Invalid or expired token", 401));
@@ -70,7 +74,11 @@ export function optionalAuthenticate(req: Request, _res: Response, next: NextFun
   const token = authHeader.split(" ")[1];
   try {
     const payload = jwt.verify(token, env.jwtAccessSecret) as AuthTokenPayload;
-    req.user = payload;
+    req.user = {
+      ...payload,
+      userId: Number(payload.userId) || payload.userId,
+      id: Number(payload.userId) || payload.userId
+    } as any;
   } catch (_error) {
     // Non-blocking: continue as guest if token is invalid or expired
   }
@@ -102,10 +110,25 @@ export const PERMISSIONS = {
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
-// requirePermission: pass-through middleware — actual access control is done by requireRole.
-// This exists to support admin.route.js imports without crashing the server.
-export function requirePermission(_permission: Permission | string) {
-  return (_req: Request, _res: Response, next: NextFunction) => next();
+// requirePermission: enforces granular permissions mapped to authenticated roles
+export function requirePermission(permission: Permission | string) {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return next(new AppError("Unauthorized", 401));
+    }
+    const userRole = normalizeAuthRole(req.user.role);
+    if (userRole === ROLES.ADMIN) {
+      return next();
+    }
+    const permStr = String(permission);
+    if (permStr.startsWith("staff:") && userRole === ROLES.SALES_STAFF) {
+      return next();
+    }
+    if (permStr.startsWith("tech:") && userRole === ROLES.TECH_STAFF) {
+      return next();
+    }
+    return next(new AppError(`Forbidden: missing required permission ${permStr}`, 403));
+  };
 }
 
 export { ROLES };

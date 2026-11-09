@@ -112,8 +112,8 @@ export class AiLlmProvider {
     jsonMode: boolean;
     timeoutMs: number;
   }): Promise<LlmResponse | null> {
-    const primaryModel = process.env.GEMINI_MODEL || "gemini-flash-lite-latest";
-    const candidateModels = Array.from(new Set([primaryModel, "gemini-flash-lite-latest", "gemini-3.8-flash", "gemini-flash-latest"]));
+    const primaryModel = process.env.GEMINI_MODEL || process.env.LLM_MODEL || "gemini-3.5-flash-lite";
+    const candidateModels = Array.from(new Set([primaryModel, "gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.8-flash", "gemini-flash-latest"]));
 
     for (const model of candidateModels) {
       const controller = new AbortController();

@@ -7,6 +7,7 @@ const {
   STAFF_VISIBLE_STATUSES,
   toActor,
   canManageOrders,
+  normalizeOrderStatus,
   repairLegacyPaidOrdersForStaff,
   getSchemaConfig,
   baseOrderSelect,

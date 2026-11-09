@@ -60,7 +60,7 @@ describe("Quản trị Serial Number / IMEI cho Linh kiện & Bảo hành (Fulfi
             {
               product_variant_id: testSkuId1,
               name_snapshot: skus[0].Product?.name || "Linh kiện 1",
-              sku_snapshot: skus[0].name,
+              sku_snapshot: skus[0].sku || "SKU-TEST-1",
               unit_price: 1500000,
               quantity: 2,
               line_total: 3000000
@@ -68,7 +68,7 @@ describe("Quản trị Serial Number / IMEI cho Linh kiện & Bảo hành (Fulfi
             {
               product_variant_id: testSkuId2,
               name_snapshot: skus[1].Product?.name || "Linh kiện 2",
-              sku_snapshot: skus[1].name,
+              sku_snapshot: skus[1].sku || "SKU-TEST-2",
               unit_price: 2000000,
               quantity: 1,
               line_total: 2000000

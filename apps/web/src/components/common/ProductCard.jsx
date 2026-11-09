@@ -67,11 +67,10 @@ function getStockMeta(stock) {
 }
 
 /* Quick View overlay component */
-function QuickViewOverlay({ href }) {
+function QuickViewOverlay() {
   const [hov, setHov] = useState(false);
   return (
-    <Link
-      to={href}
+    <div
       style={{
         position: "absolute",
         bottom: 0,
@@ -90,7 +89,6 @@ function QuickViewOverlay({ href }) {
         gap: 8,
         fontSize: 13,
         fontWeight: 700,
-        textDecoration: "none",
         borderRadius: "0 0 12px 12px",
         transform: "translateY(100%)",
         transition: "transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease",
@@ -98,6 +96,7 @@ function QuickViewOverlay({ href }) {
         letterSpacing: "0.02em",
         boxShadow: hov ? "0 -4px 20px rgba(37,99,235,0.4)" : "none",
         borderTop: "1px solid rgba(255,255,255,0.08)",
+        cursor: "pointer"
       }}
       className="v2-quickview"
       onMouseEnter={() => setHov(true)}
@@ -108,7 +107,7 @@ function QuickViewOverlay({ href }) {
         <circle cx="12" cy="12" r="3" />
       </svg>
       Xem nhanh
-    </Link>
+    </div>
   );
 }
 
@@ -232,7 +231,7 @@ export function ProductCard({ product, eager = false }) {
               src={imageSrc}
               alt={productName}
               loading={eager ? "eager" : "lazy"}
-              fetchpriority={eager ? "high" : "auto"}
+              fetchPriority={eager ? "high" : "auto"}
               className="v2-card-img"
               style={{ transition: "transform 0.38s cubic-bezier(0.34, 1.56, 0.64, 1)" }}
               onLoad={() => setImageLoaded(true)}
@@ -260,7 +259,7 @@ export function ProductCard({ product, eager = false }) {
             </div>
 
             {/* Quick View overlay */}
-            <QuickViewOverlay href={href} />
+            <QuickViewOverlay />
           </div>
 
           {/* ── Body ── */}

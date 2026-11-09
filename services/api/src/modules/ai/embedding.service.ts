@@ -22,8 +22,8 @@ export class EmbeddingService {
       return new Array(this.VECTOR_DIMENSION).fill(0);
     }
 
-    // 0. Khi chạy trong môi trường test, ưu tiên Deterministic Vector để đồng bộ với index cục bộ
-    if (process.env.NODE_ENV === "test" && process.env.TEST_LIVE_EMBEDDINGS !== "true") {
+    // 0. Mặc định sử dụng Deterministic Vector để đồng bộ 100% không gian vector với index cục bộ (data/vectors/*.json)
+    if (process.env.USE_LIVE_EMBEDDINGS !== "true" && process.env.TEST_LIVE_EMBEDDINGS !== "true") {
       return this.generateDeterministicVector(cleanText);
     }
 

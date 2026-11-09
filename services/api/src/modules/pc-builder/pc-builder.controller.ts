@@ -80,6 +80,137 @@ export const getAiAdvice = asyncHandler(async (req: Request, res: Response) => {
   return sendSuccess(res, "AI advice generated successfully", result);
 });
 
+export const streamAiSuggestBuild = async (req: Request, res: Response) => {
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  const sendEvent = (data: any) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    // TẦNG 1: Kiểm tra quy tắc lọc đầu vào BUILDER_SUGGEST
+    const { aiRuleService } = require("../ai/ai-rule.service");
+    const userCustomPrompt = String(req.body?.customPrompt || req.body?.rawPrompt || req.body?.promptText || "");
+    const evalResult = aiRuleService.evaluateInput("BUILDER_SUGGEST", userCustomPrompt, { budget: req.body?.budget });
+    if (evalResult.handled && evalResult.action === "BLOCK") {
+      sendEvent({
+        type: "error",
+        error: evalResult.reply || "Yêu cầu cấu hình không hợp lệ."
+      });
+      res.end();
+      return;
+    }
+
+    const rulePromptInjection = Array.isArray(evalResult.promptInjections)
+      ? evalResult.promptInjections.join("\n")
+      : (evalResult.promptInjection || "");
+
+    await pcBuilderService.streamAiSuggestBuild(
+      { ...(req.body || {}), rulePromptInjection },
+      (chunk: string) => sendEvent({ type: "chunk", text: chunk }),
+      sendEvent
+    );
+  } catch (err: any) {
+    sendEvent({ type: "error", error: err.message || "Lỗi xử lý AI suggest stream" });
+  } finally {
+    res.end();
+  }
+};
+
+export const streamAiAuditBuild = async (req: Request, res: Response) => {
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  const sendEvent = (data: any) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    const { aiRuleService } = require("../ai/ai-rule.service");
+    const auditContextText = JSON.stringify(req.body?.buildItems || []);
+    const evalResult = aiRuleService.evaluateInput("BUILDER_AUDIT_CHAT", auditContextText, req.body || {});
+    const rulePromptInjection = Array.isArray(evalResult.promptInjections)
+      ? evalResult.promptInjections.join("\n")
+      : (evalResult.promptInjection || "");
+
+    await pcBuilderService.streamAiAuditBuild(
+      { ...(req.body || {}), rulePromptInjection },
+      (chunk: string) => sendEvent({ type: "chunk", text: chunk }),
+      sendEvent
+    );
+  } catch (err: any) {
+    sendEvent({ type: "error", error: err.message || "Lỗi xử lý AI audit stream" });
+  } finally {
+    res.end();
+  }
+};
+
+export const streamAiChatBuild = async (req: Request, res: Response) => {
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  const sendEvent = (data: any) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    // TẦNG 1: Kiểm tra quy tắc lọc đầu vào BUILDER_AUDIT_CHAT (kèm fallback FAQ / Guardrail từ GENERAL_CHAT)
+    const { aiRuleService } = require("../ai/ai-rule.service");
+    let evalResult = aiRuleService.evaluateInput("BUILDER_AUDIT_CHAT", req.body?.userMessage || "", req.body || {});
+    if (!evalResult.handled) {
+      const generalEval = aiRuleService.evaluateInput("GENERAL_CHAT", req.body?.userMessage || "", req.body || {});
+      if (generalEval.handled) {
+        evalResult = generalEval;
+      }
+    }
+    if (evalResult.handled && evalResult.action === "DIRECT_REPLY") {
+      sendEvent({ type: "chunk", text: evalResult.reply });
+      sendEvent({
+        type: "done",
+        reply: evalResult.reply,
+        replacements: [],
+        model: "system-local-faq"
+      });
+      res.end();
+      return;
+    }
+    if (evalResult.handled && evalResult.action === "BLOCK") {
+      sendEvent({
+        type: "error",
+        error: evalResult.reply || "Yêu cầu không thuộc phạm vi giám định."
+      });
+      res.end();
+      return;
+    }
+
+    const rulePromptInjection = Array.isArray(evalResult.promptInjections)
+      ? evalResult.promptInjections.join("\n")
+      : (evalResult.promptInjection || "");
+
+    await pcBuilderService.streamAiChatBuild(
+      { ...(req.body || {}), rulePromptInjection },
+      (chunk: string) => sendEvent({ type: "chunk", text: chunk }),
+      sendEvent
+    );
+  } catch (err: any) {
+    sendEvent({ type: "error", error: err.message || "Lỗi xử lý AI chat stream" });
+  } finally {
+    res.end();
+  }
+};
+
+export const getRules = asyncHandler(async (_req: Request, res: Response) => {
+  const result = pcBuilderService.getCentralizedRules();
+  return sendSuccess(res, "Centralized rules fetched successfully", result);
+});
+
 export default {
   createBuild,
   getCurrentBuild,
@@ -93,5 +224,9 @@ export default {
   publishBuild,
   getSharedBuild,
   cloneBuild,
-  getAiAdvice
+  getAiAdvice,
+  streamAiSuggestBuild,
+  streamAiAuditBuild,
+  streamAiChatBuild,
+  getRules
 };

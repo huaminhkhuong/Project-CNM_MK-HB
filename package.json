@@ -9,7 +9,7 @@
     "packages/*"
   ],
   "scripts": {
-    "start": "node scripts/bootstrap-master.js",
+    "start": "node scripts/dev.js",
     "setup": "node scripts/bootstrap-master.js",
     "bootstrap": "node scripts/bootstrap-master.js",
     "dev": "node scripts/dev.js",
@@ -22,6 +22,7 @@
     "lint": "npm run lint -ws",
     "test": "npm test -w services/api",
     "test:api": "npm test -w services/api",
+    "test:web": "npm test -w apps/web",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "seed": "npm run seed -w services/api",

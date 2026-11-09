@@ -4,6 +4,7 @@ export interface RawCheckResult {
   key: string;
   ok: boolean;
   detail: string;
+  applicable?: boolean;
   meta?: Record<string, any>;
 }
 
@@ -20,6 +21,7 @@ export interface EnrichedCheckResult extends RawCheckResult {
   ruleId: string;
   severity: SeverityLevel;
   explanation: XaiExplanation;
+  applicable?: boolean;
 }
 
 export interface PerformanceEstimate {
@@ -39,6 +41,7 @@ export interface FiveDimensionalScorecard {
   powerThermalScore: number;     // 0 - 100
   upgradeScore: number;          // 0 - 100
   requirementMatchScore: number; // 0 - 100
+  isPartial?: boolean;
 }
 
 export type BuildReadiness = "READY" | "WARNINGS_ACKNOWLEDGED" | "BLOCKED";
@@ -47,6 +50,11 @@ export interface XaiSummary {
   passedChecks: number;
   failedChecks: number;
   warningChecks: number;
+  pendingChecks?: number;
+  evaluatedChecks?: number;
+  totalChecks?: number;
+  selectedCount?: number;
+  isCompleteBuild?: boolean;
   blockerCount: number;
   warningCount: number;
   advisoryCount: number;
@@ -117,9 +125,40 @@ class XaiExplanationService {
         return { ruleId: "COMP-002", severity: ok ? "INFO" : "BLOCKER" };
       case "bottleneck":
         return { ruleId: "COMP-003", severity: ok ? "INFO" : "ADVISORY" };
+      case "multi_cpu_mb_vrm":
+        return { ruleId: "COMP-MULTI-001", severity: ok ? "INFO" : "WARNING" };
+      case "multi_gpu_psu_case":
+        return { ruleId: "COMP-MULTI-002", severity: ok ? "INFO" : "BLOCKER" };
+      case "multi_cpu_cooling_case":
+        return { ruleId: "COMP-MULTI-003", severity: ok ? "INFO" : "WARNING" };
       default:
         return { ruleId: "COMP-000", severity: ok ? "INFO" : "ADVISORY" };
     }
+  }
+
+  getFriendlyRuleName(key: string, meta?: Record<string, any>): string {
+    if (meta?.ruleName) return meta.ruleName;
+    const ruleNames: Record<string, string> = {
+      socket: "Socket CPU & Bo mạch chủ",
+      ram: "Chuẩn bộ nhớ RAM (DDR4 / DDR5)",
+      psu: "Công suất bộ nguồn (PSU)",
+      gpu_clearance: "Khoảng trống Card đồ họa (GPU)",
+      cooling_required: "Yêu cầu tản nhiệt rời cho CPU",
+      cooling_socket: "Ngàm gắn socket của Tản nhiệt",
+      cooling_tdp: "Hiệu suất giải nhiệt tản nhiệt (TDP)",
+      radiator_fit: "Kích thước két nước AIO với Vỏ Case",
+      cooler_height: "Chiều cao tản nhiệt khí với Vỏ Case",
+      ram_slots: "Số thanh RAM và khe cắm Mainboard",
+      psu_connectors: "Cổng cấp nguồn phụ PCIe / EPS",
+      storage_m2: "Khe cắm ổ cứng SSD M.2 NVMe",
+      storage_m2_gen: "Chuẩn tốc độ PCIe SSD M.2 Gen 4 / Gen 5",
+      case_form_factor: "Kích thước Bo mạch chủ & Vỏ Case",
+      bottleneck: "Cân đối hiệu năng giữa CPU và Card đồ họa",
+      multi_cpu_mb_vrm: "Pha nguồn VRM Mainboard & Công suất CPU",
+      multi_gpu_psu_case: "Tổ hợp GPU công suất cao, Nguồn & Vỏ Case",
+      multi_cpu_cooling_case: "Giải pháp tản nhiệt cho CPU hiệu năng cao"
+    };
+    return ruleNames[key] || key;
   }
 
   /**
@@ -130,6 +169,17 @@ class XaiExplanationService {
     const ok = check.ok;
     const detail = check.detail || "";
     const meta = this.resolveRuleMeta(key, ok, check.meta);
+
+    if (check.applicable === false) {
+      const friendlyName = this.getFriendlyRuleName(key, check.meta);
+      return {
+        ruleId: meta.ruleId,
+        severity: "INFO",
+        short: `Chưa đánh giá: ${friendlyName}`,
+        long: `Quy tắc này sẽ tự động kiểm tra ngay sau khi bạn chọn thêm linh kiện liên quan vào cấu hình.`,
+        level: "info"
+      };
+    }
 
     if (key.startsWith("rule_")) {
       const ruleName = check.meta?.ruleName || `Quy tắc #${key.replace("rule_", "")}`;
@@ -439,6 +489,63 @@ class XaiExplanationService {
           level: "info"
         };
 
+      case "multi_cpu_mb_vrm":
+        if (ok) {
+          return {
+            ruleId: meta.ruleId,
+            severity: "INFO",
+            short: "✅ [COMP-MULTI-001] Pha nguồn VRM bo mạch chủ & CPU đồng bộ",
+            long: `Bo mạch chủ trang bị dàn phase VRM đủ khỏe và tản nhiệt nhôm để duy trì xung nhịp ổn định cho CPU (${detail}).`,
+            level: "success"
+          };
+        }
+        return {
+          ruleId: meta.ruleId,
+          severity: "WARNING",
+          short: "⚠️ [COMP-MULTI-001] [WARNING] Bo mạch chủ phổ thông VRM yếu đi cùng CPU công suất lớn",
+          long: `Tổ hợp CPU TDP cao kết hợp Mainboard giá rẻ không có heatsink VRM sẽ khiến mạch nguồn quá nhiệt, gây sụt xung (thermal throttling) và tụt hiệu năng đột ngột (${detail}).`,
+          suggestion: "Nâng cấp Mainboard lên chipset B760/Z790 (Intel) hoặc B650/X670 (AMD) có dàn VRM từ 10+2 phase trở lên.",
+          level: "warning"
+        };
+
+      case "multi_gpu_psu_case":
+        if (ok) {
+          return {
+            ruleId: meta.ruleId,
+            severity: "INFO",
+            short: "✅ [COMP-MULTI-002] Tổ hợp GPU + Nguồn PSU + Vỏ Case tối ưu hoàn chỉnh",
+            long: `Bộ nguồn dư tải bảo vệ chống sụt áp và thùng máy đảm bảo lưu thông gió thông thoáng cho GPU (${detail}).`,
+            level: "success"
+          };
+        }
+        return {
+          ruleId: meta.ruleId,
+          severity: "BLOCKER",
+          short: "❌ [COMP-MULTI-002] [BLOCKER] Xung đột tổ hợp Nguồn / Vỏ case với Card đồ họa cao cấp",
+          long: `Card đồ họa công suất lớn đòi hỏi nguồn chuẩn ATX 3.0 chịu dòng xung kích (transient spikes) và không gian vỏ máy đối lưu gió tốt (${detail}).`,
+          suggestion: "Nâng cấp bộ nguồn lên 850W+ ATX 3.0 và sử dụng vỏ case chuẩn Mid-Tower/Full-Tower có tối thiểu 3 quạt hút gió.",
+          level: "error"
+        };
+
+      case "multi_cpu_cooling_case":
+        if (ok) {
+          return {
+            ruleId: meta.ruleId,
+            severity: "INFO",
+            short: "✅ [COMP-MULTI-003] Tổ hợp CPU + Tản nhiệt + Thùng máy giải nhiệt xuất sắc",
+            long: `Giải pháp tản nhiệt và hướng gió trong thùng máy phối hợp hoàn hảo giúp CPU luôn chạy hết công suất mà không bị quá nhiệt (${detail}).`,
+            level: "success"
+          };
+        }
+        return {
+          ruleId: meta.ruleId,
+          severity: "WARNING",
+          short: "⚠️ [COMP-MULTI-003] [WARNING] CPU đầu bảng cần tản nhiệt nước AIO 360mm",
+          long: `Dòng CPU đầu bảng (TDP >200W) sinh nhiệt lượng cực lớn, tản nhiệt khí phổ thông trong thùng máy kín sẽ không kịp giải nhiệt (${detail}).`,
+          suggestion: "Trang bị tản nhiệt nước AIO 360mm gắn nóc thùng case để thoát nhiệt trực tiếp ra ngoài.",
+          level: "warning"
+        };
+
       default:
         return {
           ruleId: meta.ruleId,
@@ -457,14 +564,15 @@ class XaiExplanationService {
     checks: EnrichedCheckResult[],
     performanceScore: number
   ): FiveDimensionalScorecard {
-    const blockers = checks.filter((c) => c.severity === "BLOCKER");
-    const warnings = checks.filter((c) => c.severity === "WARNING");
-    const advisories = checks.filter((c) => c.severity === "ADVISORY");
+    const applicableChecks = checks.filter((c) => c.applicable !== false);
+    const blockers = applicableChecks.filter((c) => c.severity === "BLOCKER");
+    const warnings = applicableChecks.filter((c) => c.severity === "WARNING");
+    const advisories = applicableChecks.filter((c) => c.severity === "ADVISORY");
 
     const compatibilityScore = blockers.length > 0 ? 0 : Math.max(20, Math.round(100 - warnings.length * 15 - advisories.length * 5));
     const perfScore = Math.min(100, Math.max(30, performanceScore));
     const valueScore = Math.min(98, Math.round(perfScore * 0.95 + (compatibilityScore > 80 ? 8 : 0)));
-    const powerThermalFailures = checks.filter((c) => (c.key === "psu" || c.key.startsWith("cooling") || c.key === "radiator_fit" || c.key === "cooler_height") && !c.ok).length;
+    const powerThermalFailures = applicableChecks.filter((c) => (c.key === "psu" || c.key.startsWith("cooling") || c.key === "radiator_fit" || c.key === "cooler_height") && !c.ok).length;
     const powerThermalScore = Math.max(25, Math.round(100 - powerThermalFailures * 25));
     const upgradeScore = Math.min(95, Math.max(40, Math.round(compatibilityScore * 0.4 + perfScore * 0.5 + 10)));
     const requirementMatchScore = blockers.length > 0 ? 30 : Math.round((compatibilityScore + perfScore) / 2);
@@ -519,18 +627,24 @@ class XaiExplanationService {
   ): CompleteXaiReport {
     const enrichedChecks: EnrichedCheckResult[] = checks.map((c) => {
       const meta = this.resolveRuleMeta(c.key, c.ok, c.meta);
+      const applicable = c.applicable !== false;
       return {
         ...c,
         ruleId: meta.ruleId,
         severity: meta.severity,
+        applicable,
         explanation: this.generateCheckExplanation(c)
       };
     });
 
-    const blockerCount = enrichedChecks.filter((c) => c.severity === "BLOCKER").length;
-    const warningCount = enrichedChecks.filter((c) => c.severity === "WARNING").length;
-    const advisoryCount = enrichedChecks.filter((c) => c.severity === "ADVISORY").length;
-    const passedCount = enrichedChecks.filter((c) => c.ok).length;
+    const applicableChecks = enrichedChecks.filter((c) => c.applicable !== false);
+    const pendingChecks = enrichedChecks.filter((c) => c.applicable === false);
+
+    const blockerCount = applicableChecks.filter((c) => c.severity === "BLOCKER").length;
+    const warningCount = applicableChecks.filter((c) => c.severity === "WARNING").length;
+    const advisoryCount = applicableChecks.filter((c) => c.severity === "ADVISORY").length;
+    const passedCount = applicableChecks.filter((c) => c.ok).length;
+    const pendingCount = pendingChecks.length;
 
     let buildReadiness: BuildReadiness = "READY";
     if (blockerCount > 0) buildReadiness = "BLOCKED";
@@ -539,11 +653,19 @@ class XaiExplanationService {
     const performanceEstimate = this.estimatePerformance(checks, componentsMap);
     const scores = this.calculateFiveDimensionalScorecard(enrichedChecks, performanceEstimate.score);
 
+    const selectedCount = Object.values(componentsMap).filter(
+      (c: any) => c && (c.productName || c.name || c.id || c.productId)
+    ).length;
+    const isCompleteBuild = selectedCount >= 6;
+    scores.isPartial = !isCompleteBuild;
+
     let overallMessage = "🎉 Cấu hình đạt trạng thái BUILD READY! Tương thích hoàn hảo và sẵn sàng đặt hàng.";
     if (blockerCount > 0) {
-      overallMessage = `❌ Trạng thái BLOCKED: Phát hiện ${blockerCount} lỗi xung đột nghiêm trọng cần sửa trước khi mua.`;
+      overallMessage = `❌ Phát hiện ${blockerCount} lỗi xung đột nghiêm trọng cần sửa trước khi tiếp tục.`;
     } else if (warningCount > 0) {
-      overallMessage = `⚠️ Trạng thái WARNINGS: Cấu hình hoạt động được nhưng có ${warningCount} điểm lưu ý cần tối ưu.`;
+      overallMessage = `⚠️ Có ${warningCount} điểm lưu ý cần cân nhắc tối ưu cấu hình.`;
+    } else if (pendingCount > 0) {
+      overallMessage = `✅ Các linh kiện hiện tại hoàn toàn tương thích! Hãy tiếp tục chọn các món còn lại.`;
     }
 
     return {
@@ -556,6 +678,11 @@ class XaiExplanationService {
         passedChecks: passedCount,
         failedChecks: blockerCount,
         warningChecks: warningCount,
+        pendingChecks: pendingCount,
+        evaluatedChecks: applicableChecks.length,
+        totalChecks: enrichedChecks.length,
+        selectedCount,
+        isCompleteBuild,
         blockerCount,
         warningCount,
         advisoryCount,
