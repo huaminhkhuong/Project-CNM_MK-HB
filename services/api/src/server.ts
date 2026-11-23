@@ -4,6 +4,7 @@ import { env } from "./config/env";
 import { initSocketIO } from "./socket/socket.service";
 import { verifyEmailConnection } from "./services/email.service";
 import { startPaymentTimeoutWorker, stopPaymentTimeoutWorker } from "./workers/payment-timeout.worker";
+import { startSepaySyncWorker, stopSepaySyncWorker } from "./workers/sepay-sync.worker";
 import { logger } from "./utils/logger";
 
 import { pcBuilderService } from "./modules/pc-builder/pc-builder.service";
@@ -35,11 +36,15 @@ httpServer.listen(env.port, () => {
 
   // Start Payment Timeout Worker to sweep expired pending gateway orders and release inventory
   startPaymentTimeoutWorker();
+
+  // Start SePay Pull Reconciliation Worker (auto-approves real VietQR payments even without a public tunnel)
+  startSepaySyncWorker();
 });
 
 // Graceful shutdown handling
 async function gracefulShutdown(signal: string) {
   stopPaymentTimeoutWorker();
+  stopSepaySyncWorker();
   logger.info(`[Server] Received ${signal}. Closing HTTP server, Socket.io, and database pools...`);
   
   try {

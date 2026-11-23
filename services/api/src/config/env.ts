@@ -3,6 +3,15 @@ import { z } from "zod";
 
 dotenv.config();
 
+export function parseBooleanEnv(val: unknown): boolean {
+  if (typeof val === "boolean") return val;
+  if (val === undefined || val === null) return false;
+  const normalized = String(val).trim().toLowerCase();
+  return normalized === "true" || normalized === "1" || normalized === "yes";
+}
+
+const booleanEnvSchema = z.preprocess((val) => parseBooleanEnv(val), z.boolean());
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(4000),
@@ -15,8 +24,8 @@ const envSchema = z.object({
   VNPAY_TMN_CODE: z.string().optional(),
   VNPAY_HASH_SECRET: z.string().optional(),
   VNPAY_URL: z.string().optional(),
-  PAYMENT_MOCK_MODE: z.coerce.boolean().default(false),
-  SHIPPING_MOCK_MODE: z.coerce.boolean().default(false),
+  PAYMENT_MOCK_MODE: booleanEnvSchema.default(false),
+  SHIPPING_MOCK_MODE: booleanEnvSchema.default(false),
   SHIPPING_PROVIDER: z.string().default("manual"),
   CHAT_STORAGE_PATH: z.string().default("./data/chat-sessions.json"),
   // Email (Nodemailer / Gmail SMTP) — optional, server works without it
@@ -28,6 +37,15 @@ const envSchema = z.object({
   MOMO_ACCESS_KEY: z.string().optional(),
   MOMO_SECRET_KEY: z.string().optional(),
   MOMO_API_URL: z.string().optional(),
+  // SePay Auto-VietQR Webhook & Pull Sync API Configuration
+  SEPAY_WEBHOOK_API_KEY: z.string().optional(),
+  SEPAY_API_TOKEN: z.string().optional(),
+  SEPAY_API_URL: z.string().default("https://my.sepay.vn/userapi/transactions/list"),
+  SEPAY_SYNC_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  SEPAY_BANK_CODE: z.string().optional(),
+  SEPAY_ACCOUNT_NUMBER: z.string().optional(),
+  SEPAY_ACCOUNT_NAME: z.string().optional(),
+  SEPAY_TRANSFER_PREFIX: z.string().default("PCMALL"),
   // Unified LLM Engine Settings (Provider-Agnostic)
   LLM_PROVIDER: z.string().default("gemini"),
   LLM_API_KEY: z.string().optional(),
@@ -97,6 +115,14 @@ export const env = {
   momoAccessKey: parsedEnv.data.MOMO_ACCESS_KEY,
   momoSecretKey: parsedEnv.data.MOMO_SECRET_KEY,
   momoApiUrl: parsedEnv.data.MOMO_API_URL,
+  sepayWebhookApiKey: parsedEnv.data.SEPAY_WEBHOOK_API_KEY,
+  sepayApiToken: parsedEnv.data.SEPAY_API_TOKEN,
+  sepayApiUrl: parsedEnv.data.SEPAY_API_URL,
+  sepaySyncIntervalMs: parsedEnv.data.SEPAY_SYNC_INTERVAL_MS,
+  sepayBankCode: parsedEnv.data.SEPAY_BANK_CODE,
+  sepayAccountNumber: parsedEnv.data.SEPAY_ACCOUNT_NUMBER,
+  sepayAccountName: parsedEnv.data.SEPAY_ACCOUNT_NAME,
+  sepayTransferPrefix: parsedEnv.data.SEPAY_TRANSFER_PREFIX || "PCMALL",
   llmProvider: parsedEnv.data.LLM_PROVIDER || "gemini",
   llmApiKey: parsedEnv.data.LLM_API_KEY || parsedEnv.data.GEMINI_API_KEY || parsedEnv.data.GROQ_API_KEY || parsedEnv.data.OPENAI_API_KEY || "",
   llmModel: parsedEnv.data.LLM_MODEL || parsedEnv.data.GEMINI_MODEL || "gemini-1.5-flash",
@@ -111,3 +137,6 @@ export const env = {
   apiBaseUrl: parsedEnv.data.API_BASE_URL || parsedEnv.data.BACKEND_URL || `http://localhost:${parsedEnv.data.PORT}`,
   paymentTimeoutMinutes: parsedEnv.data.PAYMENT_TIMEOUT_MINUTES
 };
+
+// Expose parsed env singleton so CommonJS modules (e.g., payments.service.js) share the exact same instance
+(globalThis as any).__CNM_ENV__ = env;

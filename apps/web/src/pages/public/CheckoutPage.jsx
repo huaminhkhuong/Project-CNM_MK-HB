@@ -58,6 +58,30 @@ const QrIcon = () => (
   </svg>
 );
 
+const BankVaultIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 21h18" />
+    <path d="M5 21V10" />
+    <path d="M9 21V10" />
+    <path d="M15 21V10" />
+    <path d="M19 21V10" />
+    <path d="M2 10l10-7 10 7H2z" />
+  </svg>
+);
+
+const CopySmallIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="9" y="9" width="13" height="13" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+);
+
+const CheckSmallIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 6 9 17l-5-5" />
+  </svg>
+);
+
 const SpinnerIcon = () => (
   <svg className="checkout-spinner" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
     <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.25" />
@@ -108,8 +132,7 @@ const STORAGE_KEYS = {
 
 const PAYMENT_METHOD_OPTIONS = [
   { value: "COD", label: "Thanh toán khi nhận hàng (COD)" },
-  { value: "VNPAY", label: "Chuyển khoản trực tuyến (VNPAY)" },
-  { value: "BANK_TRANSFER", label: "Chuyển khoản ngân hàng (QR Code)" }
+  { value: "BANK_TRANSFER", label: "Chuyển khoản VietQR tự động (SePay)" }
 ];
 
 const PAYMENT_METHOD_CARDS = [
@@ -117,41 +140,39 @@ const PAYMENT_METHOD_CARDS = [
     value: "COD",
     label: "Thanh toán khi nhận hàng",
     shortLabel: "COD",
-    description: "Kiểm tra hàng và thanh toán trực tiếp cho nhân viên giao hàng.",
-    badge: "Phổ biến",
+    description: "Kiểm tra hàng và thanh toán tiền mặt trực tiếp cho nhân viên giao hàng.",
+    badge: "Tiền mặt",
     icon: CashIcon,
     tone: "#059669"
   },
   {
-    value: "VNPAY",
-    label: "Thanh toán qua VNPay",
-    shortLabel: "VNPay",
-    description: "Chuyển sang cổng VNPay an toàn sau khi tạo đơn hàng.",
-    badge: "Online",
-    icon: ShieldCardIcon,
-    tone: "#2563eb"
-  },
-  {
     value: "BANK_TRANSFER",
-    label: "QR Banking",
-    shortLabel: "QR",
-    description: "Quét QR chuyển khoản, sau đó tải chứng từ ở chi tiết đơn hàng.",
-    badge: "Xác minh",
+    label: "Chuyển khoản VietQR tự động",
+    shortLabel: "VietQR",
+    description: "Quét mã VietQR trên ứng dụng ngân hàng thật, hệ thống tự động đối soát tiền vào qua SePay và duyệt đơn trong 2–5 giây.",
+    badge: "Tự động 24/7",
     icon: QrIcon,
-    tone: "#7c3aed"
+    tone: "#2563eb"
   }
 ];
 
 const PAYMENT_METHOD_GUIDANCE = {
-  COD: "Bạn sẽ thanh toán khi nhận hàng cho nhân viên giao hàng.",
-  VNPAY: "Bạn sẽ được chuyển sang cổng thanh toán VNPay Sandbox để hoàn tất giao dịch.",
-  BANK_TRANSFER: "Bạn sẽ quét mã QR hoặc chuyển khoản và tải minh chứng để admin xác nhận."
+  COD: "Bạn sẽ kiểm tra sản phẩm và thanh toán tiền mặt trực tiếp khi nhận hàng.",
+  BANK_TRANSFER: "Sau khi bấm Đặt hàng, hệ thống tạo mã VietQR kèm nội dung riêng PCMALL<Mã đơn>. Ngay khi tiền vào tài khoản, SePay tự động xác nhận và duyệt đơn trong 2–5 giây — không cần gửi ảnh biên lai."
 };
 
 const VALID_PAYMENT_METHODS = PAYMENT_METHOD_CARDS.map((option) => option.value);
 
 function formatCurrency(value) {
   return Number(value || 0).toLocaleString("vi-VN");
+}
+
+function formatBankAccountDisplay(accountNumber) {
+  const digits = String(accountNumber || "").replace(/\s+/g, "");
+  if (digits.length === 10) {
+    return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+  }
+  return digits.replace(/(.{4})/g, "$1 ").trim();
 }
 
 function getUserFullName(user) {
@@ -219,11 +240,15 @@ export function CheckoutPage() {
     return saved ? Math.min(Math.max(Number(saved), 1), 4) : 1;
   });
 
-  const [formValues, setFormValues] = useState({
-    addressId: localStorage.getItem(STORAGE_KEYS.addressId) || "",
-    paymentMethod: localStorage.getItem(STORAGE_KEYS.paymentMethod) || "",
-    shippingFee: "0",
-    note: localStorage.getItem(STORAGE_KEYS.note) || ""
+  const [formValues, setFormValues] = useState(() => {
+    const savedMethod = localStorage.getItem(STORAGE_KEYS.paymentMethod) || "";
+    const validSavedMethod = VALID_PAYMENT_METHODS.includes(savedMethod) ? savedMethod : "BANK_TRANSFER";
+    return {
+      addressId: localStorage.getItem(STORAGE_KEYS.addressId) || "",
+      paymentMethod: validSavedMethod,
+      shippingFee: "0",
+      note: localStorage.getItem(STORAGE_KEYS.note) || ""
+    };
   });
 
   const [errors, setErrors] = useState({});
@@ -253,6 +278,28 @@ export function CheckoutPage() {
   // Step 1 inline phone editing state
   const [phoneInput, setPhoneInput] = useState(() => getUserPhone(authState?.user));
   const [isUpdatingPhone, setIsUpdatingPhone] = useState(false);
+
+  // Step 3 bank account quick copy feedback
+  const [copiedBankAccount, setCopiedBankAccount] = useState(false);
+
+  const handleCopyBankAccount = async (rawAccountNumber) => {
+    const text = String(rawAccountNumber || "").trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
+    setCopiedBankAccount(true);
+    setTimeout(() => setCopiedBankAccount(false), 2000);
+  };
 
   // Step 2 address form state
   const [showAddressForm, setShowAddressForm] = useState(false);
@@ -731,7 +778,7 @@ export function CheckoutPage() {
       }
 
       if (formValues.paymentMethod === "BANK_TRANSFER") {
-        navigate(routeConfig.public.orderDetail.replace(":orderId", String(order.id)), {
+        navigate(routeConfig.public.paymentVietQr.replace(":orderId", String(order.id)), {
           replace: true,
           state: { createdOrderId: order.id, paymentMethod: formValues.paymentMethod }
         });
@@ -991,33 +1038,46 @@ export function CheckoutPage() {
 
         .payment-method-grid {
           display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 18px;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 20px;
         }
         .payment-method-card {
           position: relative;
-          display: grid;
-          grid-template-columns: auto 1fr auto;
+          display: flex;
+          flex-direction: column;
           gap: 16px;
-          align-items: flex-start;
-          padding: 22px 20px;
-          border-radius: 24px;
-          border: 1.5px solid #dbe4ef;
-          background: linear-gradient(180deg, #ffffff, #f8fafc);
+          padding: 24px;
+          border-radius: 22px;
+          border: 1.5px solid #e2e8f0;
+          background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
           cursor: pointer;
-          transition: all 0.25s ease;
-          box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
-          min-height: 164px;
+          transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.22s ease, box-shadow 0.22s ease, background 0.22s ease;
+          box-shadow: 0 6px 20px rgba(15, 23, 42, 0.04);
+          min-height: 176px;
+          overflow: hidden;
+        }
+        .payment-method-card::before {
+          content: "";
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 3px;
+          background: transparent;
+          transition: background 0.22s ease;
         }
         .payment-method-card:hover {
-          border-color: rgba(37, 99, 235, 0.35);
-          box-shadow: 0 16px 36px rgba(37, 99, 235, 0.08);
+          border-color: color-mix(in srgb, var(--payment-tone) 45%, #cbd5e1);
+          box-shadow: 0 14px 32px rgba(15, 23, 42, 0.08);
           transform: translateY(-2px);
         }
         .payment-method-card.selected {
           border-color: var(--payment-tone);
-          background: linear-gradient(135deg, rgba(255,255,255,0.98), color-mix(in srgb, var(--payment-tone) 10%, white));
-          box-shadow: 0 18px 42px color-mix(in srgb, var(--payment-tone) 22%, transparent);
+          background: linear-gradient(145deg, #ffffff 0%, color-mix(in srgb, var(--payment-tone) 8%, #ffffff) 100%);
+          box-shadow: 0 16px 36px color-mix(in srgb, var(--payment-tone) 18%, transparent), 0 0 0 1px color-mix(in srgb, var(--payment-tone) 25%, transparent);
+        }
+        .payment-method-card.selected::before {
+          background: linear-gradient(90deg, var(--payment-tone), color-mix(in srgb, var(--payment-tone) 55%, #ffffff));
         }
         .payment-method-card.disabled {
           opacity: 0.72;
@@ -1029,84 +1089,405 @@ export function CheckoutPage() {
           opacity: 0;
           pointer-events: none;
         }
+        .payment-method-card__top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .payment-method-card__top-left {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          min-width: 0;
+        }
         .payment-method-card__icon {
-          width: 56px;
-          height: 56px;
-          border-radius: 18px;
+          width: 48px;
+          height: 48px;
+          border-radius: 14px;
           display: grid;
           place-items: center;
-          background: color-mix(in srgb, var(--payment-tone) 14%, white);
+          background: color-mix(in srgb, var(--payment-tone) 12%, #ffffff);
+          border: 1px solid color-mix(in srgb, var(--payment-tone) 18%, transparent);
           color: var(--payment-tone);
           flex-shrink: 0;
+          transition: transform 0.22s ease, background 0.22s ease;
+        }
+        .payment-method-card.selected .payment-method-card__icon {
+          background: var(--payment-tone);
+          color: #ffffff;
+          box-shadow: 0 8px 18px color-mix(in srgb, var(--payment-tone) 32%, transparent);
         }
         .payment-method-card__icon svg {
-          width: 24px;
-          height: 24px;
+          width: 22px;
+          height: 22px;
+        }
+        .payment-method-card__badge {
+          display: inline-flex;
+          align-items: center;
+          padding: 5px 11px;
+          border-radius: 999px;
+          background: color-mix(in srgb, var(--payment-tone) 11%, #ffffff);
+          border: 1px solid color-mix(in srgb, var(--payment-tone) 20%, transparent);
+          color: var(--payment-tone);
+          font-size: 11.5px;
+          font-weight: 800;
+          letter-spacing: 0.01em;
+          white-space: nowrap;
         }
         .payment-method-card__content {
           display: grid;
-          gap: 10px;
+          gap: 8px;
           min-width: 0;
         }
-        .payment-method-card__head {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-        .payment-method-card__head strong {
-          font-size: 16px;
-          line-height: 1.35;
+        .payment-method-card__title {
+          font-size: 17px;
+          font-weight: 850;
+          line-height: 1.3;
+          letter-spacing: -0.02em;
           color: #0f172a;
         }
-        .payment-method-card__head span {
-          width: fit-content;
-          padding: 6px 10px;
-          border-radius: 999px;
-          background: color-mix(in srgb, var(--payment-tone) 12%, white);
-          color: var(--payment-tone);
-          font-size: 11px;
-          font-weight: 900;
-        }
         .payment-method-card__content small {
-          color: #64748b;
-          font-size: 13px;
-          line-height: 1.55;
+          color: #475569;
+          font-size: 13.5px;
+          line-height: 1.6;
+          font-weight: 500;
         }
         .payment-method-card__check {
-          width: 28px;
-          height: 28px;
+          width: 26px;
+          height: 26px;
           border-radius: 999px;
-          border: 1.5px solid #cbd5e1;
+          border: 2px solid #cbd5e1;
           display: grid;
           place-items: center;
           color: transparent;
-          background: #fff;
-          font-size: 15px;
+          background: #ffffff;
+          font-size: 14px;
           font-weight: 900;
-          transition: all 0.25s ease;
-          margin-left: auto;
+          flex-shrink: 0;
+          transition: all 0.22s ease;
         }
         .payment-method-card.selected .payment-method-card__check {
           border-color: var(--payment-tone);
           background: var(--payment-tone);
-          color: #fff;
+          color: #ffffff;
           box-shadow: 0 0 0 4px color-mix(in srgb, var(--payment-tone) 18%, transparent);
         }
-        .payment-method-guidance {
-          padding: 18px 20px;
-          border-radius: 20px;
-          border: 1px solid rgba(37, 99, 235, 0.14);
-          background: linear-gradient(135deg, rgba(239, 246, 255, 0.95), rgba(248, 250, 252, 0.95));
-          color: #1e3a8a;
-          font-size: 14px;
-          font-weight: 700;
-          line-height: 1.6;
+        /* Executive VietQR Vault Panel */
+        @keyframes vaultPulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.45; transform: scale(0.82); }
         }
-        .payment-method-guidance strong {
+        .vietqr-vault {
+          border-radius: 24px;
+          overflow: hidden;
+          border: 1px solid rgba(15, 23, 42, 0.1);
+          background: #ffffff;
+          box-shadow: 0 22px 48px -14px rgba(15, 23, 42, 0.16), 0 4px 12px rgba(15, 23, 42, 0.04);
+          animation: fadeInUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .vietqr-vault__card {
+          position: relative;
+          padding: 26px 28px;
+          color: #f8fafc;
+          background:
+            radial-gradient(circle at 90% 10%, rgba(59, 130, 246, 0.32) 0%, transparent 48%),
+            radial-gradient(circle at 8% 95%, rgba(16, 185, 129, 0.2) 0%, transparent 45%),
+            linear-gradient(135deg, #090f1d 0%, #132240 54%, #0f172a 100%);
+          overflow: hidden;
+        }
+        .vietqr-vault__card::before {
+          content: "";
+          position: absolute;
+          top: -70px;
+          right: -70px;
+          width: 220px;
+          height: 220px;
+          border-radius: 999px;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          pointer-events: none;
+        }
+        .vietqr-vault__card::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(115deg, rgba(255, 255, 255, 0.07) 0%, transparent 38%, transparent 62%, rgba(255, 255, 255, 0.03) 100%);
+          pointer-events: none;
+        }
+        .vietqr-vault__header {
+          position: relative;
+          z-index: 1;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          flex-wrap: wrap;
+          padding-bottom: 20px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+        }
+        .vietqr-vault__bank-brand {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .vietqr-vault__bank-icon {
+          width: 42px;
+          height: 42px;
+          border-radius: 13px;
+          display: grid;
+          place-items: center;
+          background: linear-gradient(145deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.05));
+          border: 1px solid rgba(255, 255, 255, 0.16);
+          color: #93c5fd;
+          flex-shrink: 0;
+        }
+        .vietqr-vault__bank-name {
+          font-size: 16px;
+          font-weight: 850;
+          letter-spacing: -0.01em;
+          color: #ffffff;
+          line-height: 1.25;
+        }
+        .vietqr-vault__bank-sub {
+          font-size: 12px;
+          font-weight: 500;
+          color: #94a3b8;
+          margin-top: 2px;
+        }
+        .vietqr-vault__live-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 13px;
+          border-radius: 999px;
+          background: rgba(16, 185, 129, 0.14);
+          border: 1px solid rgba(52, 211, 153, 0.32);
+          color: #6ee7b7;
+          font-size: 11.5px;
+          font-weight: 800;
+          letter-spacing: 0.01em;
+          white-space: nowrap;
+        }
+        .vietqr-vault__pulse {
+          width: 7px;
+          height: 7px;
+          border-radius: 999px;
+          background: #34d399;
+          box-shadow: 0 0 10px #34d399;
+          animation: vaultPulse 2s ease-in-out infinite;
+        }
+        .vietqr-vault__body {
+          position: relative;
+          z-index: 1;
+          display: grid;
+          grid-template-columns: minmax(0, 1.3fr) minmax(220px, 1fr);
+          gap: 22px;
+          align-items: stretch;
+          margin-top: 22px;
+        }
+        .vietqr-vault__credentials {
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          gap: 16px;
+          min-width: 0;
+        }
+        .vietqr-vault__label {
           display: block;
+          font-size: 10.5px;
+          font-weight: 700;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: #94a3b8;
           margin-bottom: 6px;
+        }
+        .vietqr-vault__account-row {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 10px;
+        }
+        .vietqr-vault__account-number {
+          font-size: 24px;
+          font-weight: 850;
+          letter-spacing: 0.07em;
+          font-variant-numeric: tabular-nums;
+          color: #ffffff;
+          line-height: 1.2;
+        }
+        .vietqr-vault__copy-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 5px 10px;
+          border-radius: 9px;
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          background: rgba(255, 255, 255, 0.08);
+          color: #cbd5e1;
+          font-size: 11.5px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        .vietqr-vault__copy-btn:hover {
+          background: rgba(255, 255, 255, 0.16);
+          color: #ffffff;
+          border-color: rgba(255, 255, 255, 0.28);
+        }
+        .vietqr-vault__copy-btn.copied {
+          background: rgba(16, 185, 129, 0.2);
+          border-color: rgba(52, 211, 153, 0.45);
+          color: #6ee7b7;
+        }
+        .vietqr-vault__holder {
+          font-size: 14.5px;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: #e2e8f0;
+        }
+        .vietqr-vault__amount-box {
+          padding: 16px 18px;
+          border-radius: 16px;
+          background: rgba(255, 255, 255, 0.06);
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          backdrop-filter: blur(12px);
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .vietqr-vault__amount-value {
+          font-size: 26px;
+          font-weight: 900;
+          letter-spacing: -0.02em;
+          font-variant-numeric: tabular-nums;
+          color: #ffffff;
+          line-height: 1.15;
+        }
+        .vietqr-vault__syntax-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          flex-wrap: wrap;
+          padding-top: 11px;
+          border-top: 1px solid rgba(255, 255, 255, 0.1);
+          font-size: 11.5px;
+          color: #94a3b8;
+          font-weight: 600;
+        }
+        .vietqr-vault__syntax-chip {
+          padding: 3px 9px;
+          border-radius: 7px;
+          background: rgba(56, 189, 248, 0.14);
+          border: 1px solid rgba(56, 189, 248, 0.3);
+          color: #7dd3fc;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+          font-size: 11.5px;
+          font-weight: 800;
+          letter-spacing: 0.02em;
+        }
+        .vietqr-vault__steps {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 16px;
+          padding: 20px 26px;
+          background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+          border-top: 1px solid #e2e8f0;
+        }
+        .vietqr-vault__step {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+          min-width: 0;
+        }
+        .vietqr-vault__step-num {
+          width: 24px;
+          height: 24px;
+          border-radius: 8px;
+          background: #eff6ff;
+          border: 1px solid #bfdbfe;
+          color: #1d4ed8;
+          font-size: 11px;
+          font-weight: 900;
+          display: grid;
+          place-items: center;
+          flex-shrink: 0;
+          margin-top: 1px;
+        }
+        .vietqr-vault__step-title {
+          font-size: 12.5px;
+          font-weight: 800;
           color: #0f172a;
-          font-size: 15px;
+          line-height: 1.35;
+          margin-bottom: 2px;
+        }
+        .vietqr-vault__step-desc {
+          font-size: 12px;
+          color: #64748b;
+          line-height: 1.45;
+          font-weight: 500;
+        }
+
+        /* Executive COD Trust Panel */
+        .cod-trust-panel {
+          padding: 22px 24px;
+          border-radius: 22px;
+          border: 1px solid rgba(5, 150, 105, 0.2);
+          background: linear-gradient(135deg, #ffffff 0%, #ecfdf5 100%);
+          box-shadow: 0 12px 30px -12px rgba(5, 150, 105, 0.14);
+          display: grid;
+          gap: 16px;
+          animation: fadeInUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .cod-trust-panel__head {
+          display: flex;
+          align-items: flex-start;
+          gap: 14px;
+        }
+        .cod-trust-panel__icon {
+          width: 42px;
+          height: 42px;
+          border-radius: 13px;
+          background: linear-gradient(135deg, #059669, #10b981);
+          color: #ffffff;
+          display: grid;
+          place-items: center;
+          flex-shrink: 0;
+          box-shadow: 0 8px 18px rgba(5, 150, 105, 0.25);
+        }
+        .cod-trust-panel__title {
+          font-size: 15.5px;
+          font-weight: 850;
+          color: #064e3b;
+          margin: 0 0 4px;
+        }
+        .cod-trust-panel__desc {
+          font-size: 13px;
+          color: #047857;
+          line-height: 1.55;
+          font-weight: 500;
+          margin: 0;
+        }
+        .cod-trust-panel__pills {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          padding-top: 14px;
+          border-top: 1px solid rgba(5, 150, 105, 0.14);
+        }
+        .cod-trust-panel__pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 12px;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.9);
+          border: 1px solid rgba(5, 150, 105, 0.2);
+          color: #065f46;
+          font-size: 12px;
+          font-weight: 700;
         }
         .field-error-inline {
           color: #dc2626;
@@ -1214,6 +1595,16 @@ export function CheckoutPage() {
           }
           .payment-method-grid {
             grid-template-columns: 1fr;
+          }
+          .vietqr-vault__card {
+            padding: 20px;
+          }
+          .vietqr-vault__body,
+          .vietqr-vault__steps {
+            grid-template-columns: 1fr;
+          }
+          .vietqr-vault__account-number {
+            font-size: 20px;
           }
           .responsive-two-cols,
           .responsive-three-cols {
@@ -1608,15 +1999,17 @@ export function CheckoutPage() {
                             disabled={isSubmitting}
                             onChange={() => handlePaymentMethodChange(option.value)}
                           />
-                          <span className="payment-method-card__icon"><Icon /></span>
-                          <span className="payment-method-card__content">
-                            <span className="payment-method-card__head">
-                              <strong>{option.label}</strong>
-                              <span>{option.badge}</span>
+                          <span className="payment-method-card__top">
+                            <span className="payment-method-card__top-left">
+                              <span className="payment-method-card__icon"><Icon /></span>
+                              <span className="payment-method-card__badge">{option.badge}</span>
                             </span>
+                            <span className="payment-method-card__check" aria-hidden="true">{selected ? "✓" : ""}</span>
+                          </span>
+                          <span className="payment-method-card__content">
+                            <strong className="payment-method-card__title">{option.label}</strong>
                             <small>{option.description}</small>
                           </span>
-                          <span className="payment-method-card__check" aria-hidden="true">{selected ? "✓" : ""}</span>
                         </label>
                       );
                     })}
@@ -1624,65 +2017,116 @@ export function CheckoutPage() {
                   {errors.paymentMethod && <div className="field-error-inline">{errors.paymentMethod}</div>}
                 </div>
 
-                {selectedPaymentOption && (
-                  <div className="payment-method-guidance">
-                    <strong>Hướng dẫn thanh toán</strong>
-                    {PAYMENT_METHOD_GUIDANCE[selectedPaymentOption.value]}
-                  </div>
-                )}
-
-                {formValues.paymentMethod === "BANK_TRANSFER" && (
-                  <div style={{ padding: 24, background: "rgba(37, 99, 235, 0.04)", borderRadius: 20, border: "2px dashed rgba(37, 99, 235, 0.3)", animation: "fadeInUp 0.4s ease" }}>
-                    <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
-                      <div style={{ flex: 1, minWidth: 280 }}>
-                        <h3 style={{ fontSize: 17, fontWeight: 900, marginBottom: 16, color: "#1e293b" }}>Thông tin tài khoản nhận</h3>
-                        <div style={{ display: "grid", gap: 10 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
-                            <span style={{ color: "#64748b", fontWeight: 700, fontSize: "13px" }}>Ngân hàng:</span>
-                            <span style={{ fontWeight: 800, color: "#1e293b", fontSize: "13px" }}>{storeInfo.bankName || BANK_ACCOUNT_CONFIG.bankName}</span>
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
-                            <span style={{ color: "#64748b", fontWeight: 700, fontSize: "13px" }}>Số tài khoản:</span>
-                            <span style={{ fontWeight: 800, color: "var(--market-primary)", fontSize: "15px" }}>{storeInfo.bankAccountNumber || BANK_ACCOUNT_CONFIG.accountNumber}</span>
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
-                            <span style={{ color: "#64748b", fontWeight: 700, fontSize: "13px" }}>Chủ tài khoản:</span>
-                            <span style={{ fontWeight: 800, color: "#1e293b", fontSize: "13px" }}>{storeInfo.bankAccountHolder || BANK_ACCOUNT_CONFIG.accountHolder}</span>
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
-                            <span style={{ color: "#64748b", fontWeight: 700, fontSize: "13px" }}>Số tiền chuyển:</span>
-                            <span style={{ fontWeight: 900, color: "var(--market-primary)", fontSize: "15px" }}>{formatCurrency(finalAmount)} đ</span>
-                          </div>
-                          <div style={{ padding: "12px", background: "#fffbeb", borderRadius: 12, border: "1px solid #fef3c7", fontSize: "12.5px", fontWeight: 700, color: "#b45309" }}>
-                            💡 Cú pháp: {generateTransferNote(currentUser?.phone || "SĐT của bạn", storeInfo.transferNotePrefix)}
-                          </div>
-                        </div>
+                {formValues.paymentMethod === "COD" && (
+                  <div className="cod-trust-panel">
+                    <div className="cod-trust-panel__head">
+                      <div className="cod-trust-panel__icon">
+                        <ShieldCardIcon />
                       </div>
-                      <div style={{ width: 160, margin: "0 auto" }}>
-                        <div style={{ background: "#fff", padding: 12, borderRadius: 16, border: "1px solid #e2e8f0", textAlign: "center" }}>
-                          <div style={{ width: 130, height: 130, background: "#f8fafc", margin: "0 auto", display: "grid", placeItems: "center", borderRadius: 10, border: "1px dashed #cbd5e1", overflow: "hidden" }}>
-                            <img
-                              src={generateVietQrUrl({
-                                bankName: storeInfo.bankName || BANK_ACCOUNT_CONFIG.bankName,
-                                accountNumber: storeInfo.bankAccountNumber || BANK_ACCOUNT_CONFIG.accountNumber,
-                                accountHolder: storeInfo.bankAccountHolder || BANK_ACCOUNT_CONFIG.accountHolder,
-                                amount: finalAmount,
-                                memo: generateTransferNote(currentUser?.phone || "", storeInfo.transferNotePrefix)
-                              })}
-                              alt="QR Code"
-                              style={{ width: "100%", height: "100%", objectFit: "contain" }}
-                              onError={(e) => {
-                                e.currentTarget.onerror = null;
-                                e.currentTarget.src = BANK_ACCOUNT_CONFIG.qrCodeImage;
-                              }}
-                            />
-                          </div>
-                          <div style={{ marginTop: 8, fontSize: "11px", fontWeight: 750, color: "#64748b" }}>Quét mã chuyển nhanh</div>
-                        </div>
+                      <div>
+                        <h3 className="cod-trust-panel__title">Thanh toán trực tiếp khi nhận hàng</h3>
+                        <p className="cod-trust-panel__desc">
+                          {PAYMENT_METHOD_GUIDANCE.COD} Đơn hàng sẽ được xác nhận ngay sau khi bạn hoàn tất đặt hàng ở bước tiếp theo.
+                        </p>
                       </div>
+                    </div>
+                    <div className="cod-trust-panel__pills">
+                      <span className="cod-trust-panel__pill"><CheckSmallIcon /> Đồng kiểm ngoại quan linh kiện</span>
+                      <span className="cod-trust-panel__pill"><CheckSmallIcon /> Không thu phụ phí COD</span>
+                      <span className="cod-trust-panel__pill"><CheckSmallIcon /> Bảo hành chính hãng PC Mall</span>
                     </div>
                   </div>
                 )}
+
+                {formValues.paymentMethod === "BANK_TRANSFER" && (() => {
+                  const bankName = storeInfo.bankName || BANK_ACCOUNT_CONFIG.bankName;
+                  const accountNumber = storeInfo.bankAccountNumber || BANK_ACCOUNT_CONFIG.accountNumber;
+                  const accountHolder = storeInfo.bankAccountHolder || BANK_ACCOUNT_CONFIG.accountHolder;
+                  const prefix = storeInfo.transferNotePrefix || "PCMALL";
+
+                  return (
+                    <div className="vietqr-vault">
+                      <div className="vietqr-vault__card">
+                        <div className="vietqr-vault__header">
+                          <div className="vietqr-vault__bank-brand">
+                            <div className="vietqr-vault__bank-icon">
+                              <BankVaultIcon />
+                            </div>
+                            <div>
+                              <div className="vietqr-vault__bank-name">{bankName}</div>
+                              <div className="vietqr-vault__bank-sub">Tài khoản thụ hưởng chính thức · VietQR 24/7</div>
+                            </div>
+                          </div>
+                          <span className="vietqr-vault__live-pill">
+                            <span className="vietqr-vault__pulse" aria-hidden="true" />
+                            SePay Auto · 2–5 giây
+                          </span>
+                        </div>
+
+                        <div className="vietqr-vault__body">
+                          <div className="vietqr-vault__credentials">
+                            <div>
+                              <span className="vietqr-vault__label">Số tài khoản thụ hưởng</span>
+                              <div className="vietqr-vault__account-row">
+                                <span className="vietqr-vault__account-number">
+                                  {formatBankAccountDisplay(accountNumber)}
+                                </span>
+                                <button
+                                  type="button"
+                                  className={`vietqr-vault__copy-btn ${copiedBankAccount ? "copied" : ""}`}
+                                  onClick={() => handleCopyBankAccount(accountNumber)}
+                                >
+                                  {copiedBankAccount ? <CheckSmallIcon /> : <CopySmallIcon />}
+                                  {copiedBankAccount ? "Đã chép" : "Sao chép"}
+                                </button>
+                              </div>
+                            </div>
+
+                            <div>
+                              <span className="vietqr-vault__label">Chủ tài khoản</span>
+                              <div className="vietqr-vault__holder">{accountHolder}</div>
+                            </div>
+                          </div>
+
+                          <div className="vietqr-vault__amount-box">
+                            <div>
+                              <span className="vietqr-vault__label">Số tiền cần thanh toán</span>
+                              <div className="vietqr-vault__amount-value">{formatCurrency(finalAmount)} đ</div>
+                            </div>
+                            <div className="vietqr-vault__syntax-row">
+                              <span>Cú pháp tự động</span>
+                              <span className="vietqr-vault__syntax-chip">{prefix}&#60;Mã đơn&#62;</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="vietqr-vault__steps">
+                        <div className="vietqr-vault__step">
+                          <span className="vietqr-vault__step-num">01</span>
+                          <div>
+                            <div className="vietqr-vault__step-title">Tạo mã QR riêng</div>
+                            <div className="vietqr-vault__step-desc">Mã VietQR gắn sẵn cú pháp {prefix}&#60;Mã đơn&#62; hiện ngay sau khi đặt hàng.</div>
+                          </div>
+                        </div>
+                        <div className="vietqr-vault__step">
+                          <span className="vietqr-vault__step-num">02</span>
+                          <div>
+                            <div className="vietqr-vault__step-title">Quét trên App ngân hàng</div>
+                            <div className="vietqr-vault__step-desc">Tự động điền chính xác số tiền và nội dung chuyển khoản.</div>
+                          </div>
+                        </div>
+                        <div className="vietqr-vault__step">
+                          <span className="vietqr-vault__step-num">03</span>
+                          <div>
+                            <div className="vietqr-vault__step-title">Tự động duyệt đơn</div>
+                            <div className="vietqr-vault__step-desc">SePay đối soát tiền vào tức thì, không cần gửi ảnh biên lai.</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="step-actions-footer">

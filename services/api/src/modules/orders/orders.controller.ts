@@ -6,13 +6,17 @@ import { AppError } from "../../errors/app-error";
 import { asyncHandler } from "../../utils/async-handler";
 import {
   completeDeliveredOrder,
+  createOrderPaymentRecord,
   getOrderById,
   getOrdersByUser,
   listOrders,
   markOrderPaymentCancelled,
+  markOrderPaymentFailed,
   markOrderPaid,
   normalizeOrderRecord,
   saveOrderPaymentProof,
+  syncGatewayPaymentOnRedirect,
+  updateOrderPaymentProofDecision,
   updateOrderStatus
 } from "./orders.repository";
 import { checkoutSchema, updateOrderStatusSchema } from "./orders.validator";
@@ -28,6 +32,10 @@ import { createWarrantyRecordsForDeliveredOrder } from "../warranties/warranty-s
 import { publishOrderEvent, subscribeOrderEvents } from "../../services/order-events";
 import { validateAndCalculateCoupon } from "../coupons/coupons.service";
 import { sendOrderStatusNotification } from "../notifications/notifications.service";
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { recordAuditLog } = require("../../services/audit-log.service");
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { isMockPaymentEnabled } = require("../../services/payment-mode.service");
 
 type UploadedPaymentProofFile = {
   filename: string;
@@ -203,6 +211,10 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
       }
     });
 
+    await createOrderPaymentRecord(tx, order, {
+      note: "Initial payment record created on checkout"
+    });
+
     if (appliedCoupon && discountAmount > 0) {
       await tx.couponUsage.create({
         data: {
@@ -273,47 +285,55 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
 
   const normalizedOrder = await normalizeOrderRecord(result);
 
+  const createdMethod = String((result as any)?.payment_method || "COD").toUpperCase();
+  const createdPaymentStatus = String((result as any)?.payment_status || (createdMethod === "COD" ? "UNPAID" : "PENDING_GATEWAY")).toUpperCase();
+
   if (result?.id && currentUser.userId) {
     sendOrderStatusNotification({
       userId: Number(currentUser.userId),
       orderId: result.id,
-      status: "PENDING"
+      status: "PENDING",
+      paymentMethod: createdMethod,
+      paymentStatus: createdPaymentStatus
     }).catch((err: Error) => console.warn("[Notification] Order created notification failed:", err.message));
   }
 
-  // 📧 Email: Gửi xác nhận đặt hàng cho khách (bất đồng bộ - không block response)
-  try {
-    const user = await prisma.user.findUnique({
-      where: { id: Number(currentUser.userId) },
-      select: { email: true, full_name: true }
-    });
-    if (user?.email && result) {
-      const { buildOrderConfirmEmail: buildConfirm } = require("../../templates/email-order-confirm");
-      const { sendEmailAsync: sendAsync } = require("../../services/email.service");
-      const items = (result as any).OrderItem?.map((item: any) => ({
-        name: item.name_snapshot || item.sku_snapshot || "Sản phẩm",
-        sku: item.sku_snapshot,
-        quantity: Number(item.quantity),
-        unitPrice: Number(item.unit_price),
-        lineTotal: Number(item.line_total)
-      })) || [];
-      const { subject, html } = buildConfirm({
-        customerName: (user as any).full_name || (user as any).name || user.email,
-        customerEmail: user.email,
-        orderId: result.id,
-        orderDate: (result as any).created_at || new Date(),
-        items,
-        totalAmount: Number((result as any).total_amount || (result as any).total_price || 0),
-        shippingFee: Number((result as any).shipping_fee || 0),
-        finalAmount: Number((result as any).final_amount || (result as any).total_amount || 0),
-        paymentMethod: (result as any).payment_method || "COD",
-        shippingAddress: (result as any).shipping_address
+  // 📧 Email: Chỉ gửi xác nhận đặt hàng thành công ngay lập tức với đơn COD.
+  // Với đơn VNPay / VietQR, email xác nhận chỉ gửi sau khi thanh toán thực sự thành công.
+  if (createdMethod === "COD") {
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: Number(currentUser.userId) },
+        select: { email: true, full_name: true }
       });
-      sendAsync({ to: user.email, subject, html });
+      if (user?.email && result) {
+        const { buildOrderConfirmEmail: buildConfirm } = require("../../templates/email-order-confirm");
+        const { sendEmailAsync: sendAsync } = require("../../services/email.service");
+        const items = (result as any).OrderItem?.map((item: any) => ({
+          name: item.name_snapshot || item.sku_snapshot || "Sản phẩm",
+          sku: item.sku_snapshot,
+          quantity: Number(item.quantity),
+          unitPrice: Number(item.unit_price),
+          lineTotal: Number(item.line_total)
+        })) || [];
+        const { subject, html } = buildConfirm({
+          customerName: (user as any).full_name || (user as any).name || user.email,
+          customerEmail: user.email,
+          orderId: result.id,
+          orderDate: (result as any).created_at || new Date(),
+          items,
+          totalAmount: Number((result as any).total_amount || (result as any).total_price || 0),
+          shippingFee: Number((result as any).shipping_fee || 0),
+          finalAmount: Number((result as any).final_amount || (result as any).total_amount || 0),
+          paymentMethod: createdMethod,
+          shippingAddress: (result as any).shipping_address
+        });
+        sendAsync({ to: user.email, subject, html });
+      }
+    } catch (emailErr) {
+      // Email errors never block order creation
+      console.warn("[Email] Order confirm email failed:", (emailErr as Error).message);
     }
-  } catch (emailErr) {
-    // Email errors never block order creation
-    console.warn("[Email] Order confirm email failed:", (emailErr as Error).message);
   }
 
   res.status(201).json({
@@ -449,6 +469,14 @@ export const patchOrderStatus = asyncHandler(async (req: Request, res: Response)
             where: { order_id: orderId }
           }).catch(() => {});
         }
+
+        await tx.payment.updateMany({
+          where: {
+            order_id: orderId,
+            status: { in: ["PENDING_GATEWAY", "UNPAID", "AWAITING_ADMIN_CONFIRMATION"] }
+          },
+          data: { status: "CANCELED", updated_at: new Date() }
+        }).catch(() => {});
       }
     }
 
@@ -523,13 +551,27 @@ export const confirmOrderReceived = asyncHandler(async (req: Request, res: Respo
   });
 });
 
+async function assertMockPaymentAllowed() {
+  const mockEnabled = await isMockPaymentEnabled();
+  if (!mockEnabled) {
+    throw new AppError("Mock payment is disabled", 403);
+  }
+}
+
 export const payOrderMock = asyncHandler(async (req: Request, res: Response) => {
   const current = await getOrderById(req.params.id);
   if (!current) {
     throw new AppError("Order not found", 404);
   }
 
-  const paid = await markOrderPaid(req.params.id);
+  if (String(current.status || "").toUpperCase() === "CANCELED") {
+    throw new AppError("Cannot mark a canceled order as paid", 400);
+  }
+
+  const paid = await markOrderPaid(req.params.id, {
+    transactionCode: `ADMIN-PAID-${current.id}-${Date.now()}`,
+    note: "Manually marked paid by staff/admin"
+  });
 
   res.status(200).json({
     success: true,
@@ -544,18 +586,31 @@ export const createVnpayUrl = asyncHandler(async (req: Request, res: Response) =
     throw new AppError("Order not found", 404);
   }
 
-  if (order.payment_status === "PAID") {
+  if (String(order.payment_method || "").toUpperCase() !== "VNPAY") {
+    throw new AppError("Order payment method must be VNPAY", 400);
+  }
+
+  if (String(order.status || "").toUpperCase() === "CANCELED") {
+    throw new AppError("Cannot pay for a canceled order", 400);
+  }
+
+  if (String(order.payment_status || "").toUpperCase() === "PAID") {
     throw new AppError("Order already paid", 400);
   }
 
   const tmnCode = env.vnpayTmnCode || process.env?.VNPAY_TMN_CODE;
-  const secretKey = env.vnpayHashSecret || process.env?.VNPAY_HASH_SECRET;
+  const hashSecret = env.vnpayHashSecret || process.env?.VNPAY_HASH_SECRET;
   const frontendUrl = env.frontendUrl || process.env.FRONTEND_URL || "http://localhost:5173";
-  const shouldUseMockPayment = env.paymentMockMode || (!tmnCode && !process.env.VNPAY_TMN_CODE);
+  const shouldUseMockPayment = (await isMockPaymentEnabled()) || !tmnCode || !hashSecret;
 
   if (shouldUseMockPayment) {
     const payAmount = Number(order.final_amount || order.total_amount || 0);
     const mockUrl = `${frontendUrl}/payment/mock?orderId=${order.id}&amount=${payAmount}`;
+    await syncGatewayPaymentOnRedirect(order, {
+      redirectUrl: mockUrl,
+      provider: "VNPAY_SANDBOX_MOCK",
+      note: "Mock VNPay URL generated"
+    });
     res.status(200).json({
       success: true,
       data: { paymentUrl: mockUrl, isMock: true }
@@ -568,8 +623,14 @@ export const createVnpayUrl = asyncHandler(async (req: Request, res: Response) =
     ipAddr,
     String(order.id),
     Number(order.final_amount || order.total_amount || 0),
-    `Thanh toan don hang #${order.id}`
+    `Thanh toan don hang ${order.id}`
   );
+
+  await syncGatewayPaymentOnRedirect(order, {
+    redirectUrl: url,
+    provider: "VNPAY_SANDBOX",
+    note: "VNPay sandbox URL generated"
+  });
 
   res.status(200).json({
     success: true,
@@ -583,7 +644,11 @@ export const createMomoUrl = asyncHandler(async (req: Request, res: Response) =>
     throw new AppError("Order not found", 404);
   }
 
-  if (order.payment_status === "PAID") {
+  if (String(order.status || "").toUpperCase() === "CANCELED") {
+    throw new AppError("Cannot pay for a canceled order", 400);
+  }
+
+  if (String(order.payment_status || "").toUpperCase() === "PAID") {
     throw new AppError("Order already paid", 400);
   }
 
@@ -592,6 +657,11 @@ export const createMomoUrl = asyncHandler(async (req: Request, res: Response) =>
 
   try {
     const { payUrl, requestId } = await generateMomoUrl(String(order.id), amount, orderInfo);
+    await syncGatewayPaymentOnRedirect(order, {
+      redirectUrl: payUrl,
+      provider: "MOMO_SANDBOX",
+      note: "MoMo sandbox URL generated"
+    });
     res.status(200).json({
       success: true,
       data: { paymentUrl: payUrl, requestId, provider: "MOMO" }
@@ -600,6 +670,11 @@ export const createMomoUrl = asyncHandler(async (req: Request, res: Response) =>
     // Fallback to Mock Payment Mode if MoMo sandbox is unreachable
     const frontendUrl = env.frontendUrl || process.env.FRONTEND_URL || "http://localhost:5173";
     const mockUrl = `${frontendUrl}/payment/mock?orderId=${order.id}&amount=${amount}&provider=MOMO`;
+    await syncGatewayPaymentOnRedirect(order, {
+      redirectUrl: mockUrl,
+      provider: "MOMO_SANDBOX_MOCK",
+      note: "Mock MoMo URL generated"
+    });
     res.status(200).json({
       success: true,
       data: { paymentUrl: mockUrl, isMock: true, provider: "MOMO" }
@@ -608,16 +683,41 @@ export const createMomoUrl = asyncHandler(async (req: Request, res: Response) =>
 });
 
 export const confirmMockPayment = asyncHandler(async (req: Request, res: Response) => {
+  await assertMockPaymentAllowed();
+
   const order = await getOrderById(req.params.id);
   if (!order || order.user_id !== Number(req.user?.userId)) {
     throw new AppError("Order not found", 404);
   }
 
-  await markOrderPaid(req.params.id);
+  if (String(order.status || "").toUpperCase() !== "PENDING") {
+    throw new AppError("Order is not pending", 400);
+  }
+
+  if (String(order.payment_status || "").toUpperCase() === "PAID") {
+    throw new AppError("Order already paid", 400);
+  }
+
+  await markOrderPaid(req.params.id, {
+    transactionCode: `MOCKTXN-${order.id}-${Date.now()}`,
+    provider: "VNPAY_SANDBOX_MOCK",
+    note: "Mock payment confirmed"
+  });
+
+  if (order.user_id) {
+    publishOrderEvent(order.user_id, {
+      orderId: order.id,
+      status: "PROCESSING",
+      paymentStatus: "PAID"
+    });
+  }
+
   sendOrderStatusNotification({
     userId: Number(order.user_id),
     orderId: order.id,
-    status: "PROCESSING"
+    status: "PROCESSING",
+    paymentMethod: order.payment_method,
+    paymentStatus: "PAID"
   }).catch(() => {});
 
   res.status(200).json({
@@ -628,16 +728,37 @@ export const confirmMockPayment = asyncHandler(async (req: Request, res: Respons
 });
 
 export const cancelMockPayment = asyncHandler(async (req: Request, res: Response) => {
+  await assertMockPaymentAllowed();
+
   const order = await getOrderById(req.params.id);
   if (!order || order.user_id !== Number(req.user?.userId)) {
     throw new AppError("Order not found", 404);
   }
 
-  if (order.payment_status === "PAID") {
+  if (String(order.status || "").toUpperCase() !== "PENDING") {
+    throw new AppError("Order is not pending", 400);
+  }
+
+  if (String(order.payment_status || "").toUpperCase() === "PAID") {
     throw new AppError("Order already paid", 400);
   }
 
-  await markOrderPaymentCancelled(req.params.id);
+  await markOrderPaymentCancelled(req.params.id, "Cancelled by user on mock payment page");
+  if (order.user_id) {
+    publishOrderEvent(order.user_id, {
+      orderId: order.id,
+      status: order.status,
+      paymentStatus: "PAYMENT_CANCELLED"
+    });
+    sendOrderStatusNotification({
+      userId: Number(order.user_id),
+      orderId: order.id,
+      status: "PENDING",
+      paymentMethod: order.payment_method,
+      paymentStatus: "PAYMENT_CANCELLED",
+      reason: "Bạn đã hủy giao dịch thanh toán"
+    }).catch(() => {});
+  }
 
   res.status(200).json({
     success: true,
@@ -656,6 +777,10 @@ export const uploadPaymentProof = asyncHandler(async (req: Request, res: Respons
 
   if (order.payment_method !== "BANK_TRANSFER") {
     throw new AppError("Payment proof upload is only available for QR Banking orders", 400);
+  }
+
+  if (String(order.status || "").toUpperCase() === "CANCELED") {
+    throw new AppError("Cannot upload payment proof for a canceled order", 400);
   }
 
   if (order.payment_status === "PAID") {
@@ -700,30 +825,33 @@ export const approvePaymentProof = asyncHandler(async (req: Request, res: Respon
     throw new AppError("Payment approval is only available for QR Banking orders", 400);
   }
 
-  const approved = Boolean(req.body?.approved);
-  if (approved) {
-    await prisma.$executeRawUnsafe(
-      `
-        UPDATE orders
-        SET payment_status = 'PAID',
-            status = 'PROCESSING',
-            updated_at = NOW()
-        WHERE id = ?
-      `,
-      Number(req.params.id)
-    );
-  } else {
-    await prisma.$executeRawUnsafe(
-      `
-        UPDATE orders
-        SET payment_status = 'REJECTED',
-            status = 'PENDING',
-            updated_at = NOW()
-        WHERE id = ?
-      `,
-      Number(req.params.id)
-    );
+  if (String(order.status || "").toUpperCase() === "CANCELED") {
+    throw new AppError("Cannot approve or reject payment for a canceled order", 400);
   }
+
+  const approved = Boolean(req.body?.approved);
+  const rejectionReason = String(
+    req.body?.reason || req.body?.rejectionReason || "Ảnh hóa đơn không hợp lệ hoặc không rõ ràng."
+  ).trim();
+
+  await updateOrderPaymentProofDecision(req.params.id, approved, {
+    reason: approved ? null : rejectionReason
+  });
+
+  await recordAuditLog({
+    actorUserId: req.user?.userId,
+    actorRole: req.user?.role,
+    action: approved ? "PAYMENT_PROOF_APPROVED" : "PAYMENT_PROOF_REJECTED",
+    entityType: "ORDER",
+    entityId: req.params.id,
+    description: approved
+      ? `Approved payment proof for order #${req.params.id}`
+      : `Rejected payment proof for order #${req.params.id}`,
+    metadata: {
+      approved,
+      reason: approved ? null : rejectionReason
+    }
+  });
 
   const updatedOrder = await getOrderById(req.params.id);
   if (updatedOrder?.user_id) {
@@ -736,7 +864,9 @@ export const approvePaymentProof = asyncHandler(async (req: Request, res: Respon
       userId: Number(updatedOrder.user_id),
       orderId: updatedOrder.id,
       status: approved ? "PROCESSING" : "PENDING",
-      reason: !approved ? (req.body?.reason || req.body?.rejectionReason || "Ảnh minh chứng chuyển khoản không hợp lệ") : undefined
+      paymentMethod: "BANK_TRANSFER",
+      paymentStatus: approved ? "PAID" : "REJECTED",
+      reason: !approved ? rejectionReason : undefined
     }).catch((err: Error) => console.warn("[Notification] Payment approval notification failed:", err.message));
   }
 
@@ -754,7 +884,7 @@ export const approvePaymentProof = asyncHandler(async (req: Request, res: Respon
         customerEmail: customer.email,
         orderId: updatedOrder.id,
         approved,
-        rejectionReason: !approved ? (req.body?.reason || "Ảnh hóa đơn không hợp lệ hoặc không rõ ràng.") : undefined,
+        rejectionReason: !approved ? rejectionReason : undefined,
         finalAmount: Number((updatedOrder as any).final_amount || (updatedOrder as any).total_amount || 0),
         reviewedAt: new Date()
       });
@@ -771,57 +901,119 @@ export const approvePaymentProof = asyncHandler(async (req: Request, res: Respon
   });
 });
 
-export const vnpayReturn = asyncHandler(async (req: Request, res: Response) => {
-  const vnp_Params = req.query;
-  const isSecure = verifyVnpayReturn(vnp_Params);
+function getVnpayFailureReason(responseCode: string): string {
+  const map: Record<string, string> = {
+    "07": "Giao dịch bị nghi ngờ gian lận",
+    "09": "Thẻ/Tài khoản chưa đăng ký dịch vụ InternetBanking",
+    "10": "Xác thực thông tin thẻ/tài khoản quá 3 lần",
+    "11": "Đã hết hạn chờ thanh toán",
+    "12": "Thẻ/Tài khoản bị khóa",
+    "13": "Sai mật khẩu xác thực OTP",
+    "24": "Bạn đã hủy giao dịch",
+    "51": "Tài khoản không đủ số dư",
+    "65": "Tài khoản vượt quá hạn mức giao dịch trong ngày",
+    "75": "Ngân hàng thanh toán đang bảo trì",
+    "79": "Nhập sai mật khẩu thanh toán quá số lần quy định"
+  };
+  return map[responseCode] || (responseCode ? `Mã lỗi VNPay ${responseCode}` : "Giao dịch không thành công");
+}
 
-  const frontendBase = (env.frontendUrl || process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, "");
-  if (isSecure) {
-    const responseCode = vnp_Params["vnp_ResponseCode"];
-    res.redirect(`${frontendBase}/payment/result?success=${responseCode === "00"}&orderId=${vnp_Params["vnp_TxnRef"]}`);
-  } else {
-    res.redirect(`${frontendBase}/payment/result?success=false&reason=invalid_signature`);
-  }
-});
-
-export const vnpayIpn = asyncHandler(async (req: Request, res: Response) => {
-  const vnp_Params = req.query;
+async function processVnpayCallback(vnp_Params: Record<string, any>) {
   const isSecure = verifyVnpayReturn(vnp_Params);
+  const rawOrderId = String(vnp_Params["vnp_TxnRef"] || "").trim();
 
   if (!isSecure) {
-    console.error("[VNPay IPN] Invalid checksum for params:", vnp_Params);
-    res.status(200).json({ RspCode: "97", Message: "Invalid checksum" });
-    return;
+    return {
+      ok: false,
+      rspCode: "97",
+      rspMessage: "Invalid checksum",
+      reason: "invalid_signature",
+      orderId: rawOrderId
+    };
   }
 
-  const orderId = vnp_Params["vnp_TxnRef"] as string;
-  const responseCode = vnp_Params["vnp_ResponseCode"];
-  const vnpTxnNo = vnp_Params["vnp_TransactionNo"] as string;
+  const parsedOrderId = parseInt(rawOrderId, 10);
+  if (!Number.isInteger(parsedOrderId) || parsedOrderId <= 0) {
+    return {
+      ok: false,
+      rspCode: "01",
+      rspMessage: "Order not found",
+      reason: "order_not_found",
+      orderId: rawOrderId
+    };
+  }
 
-  console.log(`[VNPay IPN] Order: ${orderId}, Code: ${responseCode}, TxnNo: ${vnpTxnNo}`);
+  const order = await getOrderById(parsedOrderId);
+  if (!order) {
+    return {
+      ok: false,
+      rspCode: "01",
+      rspMessage: "Order not found",
+      reason: "order_not_found",
+      orderId: rawOrderId
+    };
+  }
+
+  const vnpAmountRaw = Number(vnp_Params["vnp_Amount"]);
+  const vnpAmountVnd = Math.round(vnpAmountRaw / 100);
+  const expectedAmountVnd = Math.round(Number(order.final_amount ?? order.total_amount ?? 0));
+  if (!Number.isFinite(vnpAmountRaw) || vnpAmountVnd !== expectedAmountVnd) {
+    return {
+      ok: false,
+      rspCode: "04",
+      rspMessage: "Invalid amount",
+      reason: "invalid_amount",
+      orderId: String(order.id)
+    };
+  }
+
+  const normalizedOrderStatus = String(order.status || "").toUpperCase();
+  const normalizedPaymentStatus = String(order.payment_status || "").toUpperCase();
+  if (normalizedOrderStatus === "CANCELED" || normalizedPaymentStatus === "EXPIRED") {
+    return {
+      ok: false,
+      rspCode: "02",
+      rspMessage: "Order already canceled or expired",
+      reason: "order_canceled",
+      orderId: String(order.id)
+    };
+  }
+
+  const responseCode = String(vnp_Params["vnp_ResponseCode"] || "").trim();
+  const vnpTxnNo = String(vnp_Params["vnp_TransactionNo"] || "").trim();
 
   if (responseCode === "00") {
-    const order = await getOrderById(orderId);
-    if (!order) {
-      console.error(`[VNPay IPN] Order not found: ${orderId}`);
-      res.status(200).json({ RspCode: "01", Message: "Order not found" });
-      return;
+    if (normalizedPaymentStatus === "PAID") {
+      return {
+        ok: true,
+        alreadyPaid: true,
+        rspCode: "00",
+        rspMessage: "Confirm Success (Already Paid)",
+        reason: "",
+        orderId: String(order.id)
+      };
     }
 
-    if (order.payment_status === "PAID") {
-      console.log(`[VNPay IPN] Order already paid: ${orderId}, idempotent`);
-      res.status(200).json({ RspCode: "00", Message: "Confirm Success (Already Paid)" });
-      return;
-    }
+    await markOrderPaid(order.id, {
+      transactionCode: vnpTxnNo || `VNPAY-${order.id}-${Date.now()}`,
+      provider: "VNPAY_SANDBOX",
+      note: "Confirmed via VNPay"
+    });
 
-    await markOrderPaid(orderId);
-    const updatedOrder = await getOrderById(orderId);
+    const updatedOrder = await getOrderById(order.id);
     if (updatedOrder?.user_id) {
       publishOrderEvent(updatedOrder.user_id, {
         orderId: updatedOrder.id,
         status: updatedOrder.status,
         paymentStatus: updatedOrder.payment_status
       });
+      sendOrderStatusNotification({
+        userId: Number(updatedOrder.user_id),
+        orderId: updatedOrder.id,
+        status: "PROCESSING",
+        paymentMethod: "VNPAY",
+        paymentStatus: "PAID"
+      }).catch((err: Error) => console.warn("[Notification] VNPay payment notification failed:", err.message));
 
       // 📧 Email: Gửi email kết quả thanh toán thành công
       try {
@@ -843,13 +1035,81 @@ export const vnpayIpn = asyncHandler(async (req: Request, res: Response) => {
           sendAsync({ to: customer.email, subject, html });
         }
       } catch (e) {
-        console.warn("[VNPay IPN Email Error]", (e as Error).message);
+        console.warn("[VNPay Callback Email Error]", (e as Error).message);
       }
     }
-    console.log(`[VNPay IPN] Order marked as paid: ${orderId}`);
+
+    return {
+      ok: true,
+      alreadyPaid: false,
+      rspCode: "00",
+      rspMessage: "Confirm Success",
+      reason: "",
+      orderId: String(order.id)
+    };
   }
 
-  res.status(200).json({ RspCode: "00", Message: "Confirm Success" });
+  if (normalizedPaymentStatus !== "PAID") {
+    await markOrderPaymentFailed(order.id, {
+      transactionCode: vnpTxnNo || null,
+      provider: "VNPAY_SANDBOX",
+      note: `VNPay failed with code ${responseCode || "UNKNOWN"}`
+    });
+    if (order.user_id) {
+      publishOrderEvent(order.user_id, {
+        orderId: order.id,
+        status: order.status,
+        paymentStatus: "FAILED"
+      });
+      if (normalizedPaymentStatus !== "FAILED") {
+        sendOrderStatusNotification({
+          userId: Number(order.user_id),
+          orderId: order.id,
+          status: "PENDING",
+          paymentMethod: "VNPAY",
+          paymentStatus: "FAILED",
+          reason: getVnpayFailureReason(responseCode)
+        }).catch((err: Error) => console.warn("[Notification] VNPay failure notification failed:", err.message));
+      }
+    }
+  }
+
+  return {
+    ok: false,
+    rspCode: "00",
+    rspMessage: "Confirm Success",
+    reason: `vnpay_${responseCode || "failed"}`,
+    orderId: String(order.id)
+  };
+}
+
+export const vnpayReturn = asyncHandler(async (req: Request, res: Response) => {
+  const result = await processVnpayCallback(req.query as Record<string, any>);
+  const frontendBase = (env.frontendUrl || process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, "");
+
+  if (result.ok) {
+    res.redirect(`${frontendBase}/payment/result?success=true&orderId=${encodeURIComponent(result.orderId)}`);
+    return;
+  }
+
+  const params = new URLSearchParams({ success: "false" });
+  if (result.orderId) {
+    params.set("orderId", result.orderId);
+  }
+  if (result.reason) {
+    params.set("reason", result.reason);
+  }
+  res.redirect(`${frontendBase}/payment/result?${params.toString()}`);
+});
+
+export const vnpayIpn = asyncHandler(async (req: Request, res: Response) => {
+  const result = await processVnpayCallback(req.query as Record<string, any>);
+  if (!result.ok && result.rspCode !== "00") {
+    console.error(`[VNPay IPN] Rejected (${result.rspCode} - ${result.rspMessage}) for order:`, result.orderId);
+  } else {
+    console.log(`[VNPay IPN] Processed (${result.rspCode} - ${result.rspMessage}) for order:`, result.orderId);
+  }
+  res.status(200).json({ RspCode: result.rspCode, Message: result.rspMessage });
 });
 
 export const momoIpn = asyncHandler(async (req: Request, res: Response) => {
@@ -877,7 +1137,11 @@ export const momoIpn = asyncHandler(async (req: Request, res: Response) => {
       return;
     }
 
-    await markOrderPaid(orderId);
+    await markOrderPaid(orderId, {
+      transactionCode: transId ? String(transId) : undefined,
+      provider: "MOMO_SANDBOX",
+      note: "Confirmed via MoMo IPN"
+    });
     const updatedOrder = await getOrderById(orderId);
     if (updatedOrder?.user_id) {
       publishOrderEvent(updatedOrder.user_id, {
@@ -976,6 +1240,14 @@ export const cancelMyOrder = asyncHandler(async (req: Request, res: Response) =>
         where: { order_id: order.id }
       });
     }
+
+    await tx.payment.updateMany({
+      where: {
+        order_id: order.id,
+        status: { in: ["PENDING_GATEWAY", "UNPAID", "AWAITING_ADMIN_CONFIRMATION"] }
+      },
+      data: { status: "CANCELED", updated_at: new Date() }
+    }).catch(() => {});
 
     return updatedOrder;
   });

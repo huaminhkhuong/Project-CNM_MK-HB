@@ -46,6 +46,7 @@ const NotFoundPage = load(() => import("../pages/public/NotFoundPage").then((m) 
 const OrderDetailPage = load(() => import("../pages/public/OrderDetailPage").then((m) => ({ default: m.OrderDetailPage })));
 const OrdersPage = load(() => import("../pages/public/OrdersPage").then((m) => ({ default: m.OrdersPage })));
 const PaymentResultPage = load(() => import("../pages/public/PaymentResultPage").then((m) => ({ default: m.PaymentResultPage })));
+const VietQrPaymentPage = load(() => import("../pages/public/VietQrPaymentPage").then((m) => ({ default: m.VietQrPaymentPage })));
 const MockPaymentPage = load(() => import("../pages/public/MockPaymentPage").then((m) => ({ default: m.MockPaymentPage })));
 const PcBuilderPage = load(() => import("../pages/public/PcBuilderPage").then((m) => ({ default: m.PcBuilderPage })));
 const SharedBuildPage = load(() => import("../pages/public/SharedBuildPage").then((m) => ({ default: m.SharedBuildPage })));
@@ -86,6 +87,7 @@ export function AppRouter() {
         { path: routeConfig.public.checkout.replace(/^\//, ""), element: <CheckoutPage /> },
         { path: "thanh-toan", element: <CheckoutPage /> },
         { path: "thanhtoan", element: <Navigate to="/checkout" replace /> },
+        { path: routeConfig.public.paymentVietQr.replace(/^\//, ""), element: <VietQrPaymentPage /> },
         { path: routeConfig.public.paymentResult.replace(/^\//, ""), element: <PaymentResultPage /> },
         { path: "payment/mock", element: <MockPaymentPage /> },
         { path: routeConfig.public.orders.replace(/^\//, ""), element: <OrdersPage /> },

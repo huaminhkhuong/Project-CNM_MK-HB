@@ -25,6 +25,13 @@ function getProductionSecret(key, defaultValue) {
   return value;
 }
 
+function parseBooleanEnv(val) {
+  if (typeof val === "boolean") return val;
+  if (val === undefined || val === null) return false;
+  const normalized = String(val).trim().toLowerCase();
+  return normalized === "true" || normalized === "1" || normalized === "yes";
+}
+
 const isProduction = process.env.NODE_ENV === "production";
 
 if (isProduction) {
@@ -66,8 +73,8 @@ const env = {
   groqApiKey: process.env.GROQ_API_KEY || "",
   openaiApiKey: process.env.OPENAI_API_KEY || "",
   openaiModel: process.env.OPENAI_MODEL || "gpt-5.2",
-  paymentMockMode: process.env.PAYMENT_MOCK_MODE === "true",
-  shippingMockMode: process.env.SHIPPING_MOCK_MODE === "true",
+  paymentMockMode: parseBooleanEnv(process.env.PAYMENT_MOCK_MODE),
+  shippingMockMode: parseBooleanEnv(process.env.SHIPPING_MOCK_MODE),
   shippingProvider: process.env.SHIPPING_PROVIDER || "manual",
   vnpayTmnCode: process.env.VNPAY_TMN_CODE || "",
   vnpayHashSecret: process.env.VNPAY_HASH_SECRET || "",
@@ -76,6 +83,14 @@ const env = {
   momoAccessKey: process.env.MOMO_ACCESS_KEY || "",
   momoSecretKey: process.env.MOMO_SECRET_KEY || "",
   momoApiUrl: process.env.MOMO_API_URL || "",
+  sepayWebhookApiKey: process.env.SEPAY_WEBHOOK_API_KEY || "",
+  sepayApiToken: process.env.SEPAY_API_TOKEN || "",
+  sepayApiUrl: process.env.SEPAY_API_URL || "https://my.sepay.vn/userapi/transactions/list",
+  sepaySyncIntervalMs: Number(process.env.SEPAY_SYNC_INTERVAL_MS || 5000),
+  sepayBankCode: process.env.SEPAY_BANK_CODE || "",
+  sepayAccountNumber: process.env.SEPAY_ACCOUNT_NUMBER || "",
+  sepayAccountName: process.env.SEPAY_ACCOUNT_NAME || "",
+  sepayTransferPrefix: process.env.SEPAY_TRANSFER_PREFIX || "PCMALL",
   mailUser: process.env.MAIL_USER || "",
   mailPass: process.env.MAIL_PASS || "",
   mailFrom: process.env.MAIL_FROM || "",

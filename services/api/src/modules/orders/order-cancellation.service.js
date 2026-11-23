@@ -166,7 +166,7 @@ async function cancelExpiredPendingOrders(options = {}) {
         o.${config.orders.createdAt} AS createdAt
       FROM ${config.orders.table} o
       WHERE o.${config.orders.status} = 'PENDING'
-        AND ${config.orders.paymentStatus ? `(o.${config.orders.paymentStatus} IN ('PENDING_GATEWAY', 'PAYMENT_CANCELLED') OR (o.${config.orders.paymentStatus} = 'UNPAID' AND ${config.orders.paymentMethod ? `UPPER(COALESCE(o.${config.orders.paymentMethod}, '')) NOT IN ('COD')` : "1=1"}))` : "1=1"}
+        AND ${config.orders.paymentStatus ? `(o.${config.orders.paymentStatus} IN ('PENDING_GATEWAY', 'PAYMENT_CANCELLED', 'FAILED') OR (o.${config.orders.paymentStatus} = 'UNPAID' AND ${config.orders.paymentMethod ? `UPPER(COALESCE(o.${config.orders.paymentMethod}, '')) NOT IN ('COD')` : "1=1"}))` : "1=1"}
         AND o.${config.orders.createdAt} <= (NOW() - INTERVAL ${safeMinutes} MINUTE)
       ORDER BY o.${config.orders.id} ASC
       LIMIT ${batchLimit}
@@ -211,7 +211,7 @@ async function cancelExpiredPendingOrders(options = {}) {
       const currentPaymentStatus = String(currentOrder.paymentStatus || "").toUpperCase();
       const candidateMethod = String(candidate.paymentMethod || "").toUpperCase();
       const isGatewayPending = !config.orders.paymentStatus ||
-        ["PENDING_GATEWAY", "PAYMENT_CANCELLED"].includes(currentPaymentStatus) ||
+        ["PENDING_GATEWAY", "PAYMENT_CANCELLED", "FAILED"].includes(currentPaymentStatus) ||
         (currentPaymentStatus === "UNPAID" && candidateMethod !== "COD");
 
       if (!isPending || !isGatewayPending) {
@@ -298,7 +298,7 @@ async function cancelExpiredPendingOrders(options = {}) {
               SET status = 'CANCELED',
                   note = CONCAT(COALESCE(note, ''), ' [Hết hạn thời gian thanh toán]')
               WHERE order_id = ?
-                AND status = 'PENDING_GATEWAY'
+                AND status IN ('PENDING_GATEWAY', 'FAILED')
             `,
             [candidate.id]
           );
@@ -332,6 +332,12 @@ async function cancelExpiredPendingOrders(options = {}) {
         status: "CANCELED",
         paymentStatus: "EXPIRED"
       });
+      sendOrderStatusNotification({
+        userId: candidate.userId,
+        orderId: candidate.id,
+        status: "CANCELED",
+        reason: `Quá hạn thanh toán ${safeMinutes} phút`
+      }).catch(() => {});
 
     } catch (err) {
       await connection.rollback();

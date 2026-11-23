@@ -95,6 +95,42 @@ describe("Hệ thống Thông báo In-App & Real-Time Notification Center", () =
     assert.ok(notifDelivered);
     assert.equal(notifDelivered.type, "ORDER");
     assert.ok(notifDelivered.title.includes("giao thành công"));
+
+    // Đơn VNPay mới tạo phải báo "chờ thanh toán", KHÔNG báo "Đặt hàng thành công"
+    const notifVnpayPending = await sendOrderStatusNotification({
+      userId: testUserId,
+      orderId: 9902,
+      status: "PENDING",
+      paymentMethod: "VNPAY",
+      paymentStatus: "PENDING_GATEWAY"
+    });
+    assert.ok(notifVnpayPending);
+    assert.ok(notifVnpayPending.title.includes("đang chờ thanh toán"));
+    assert.ok(!notifVnpayPending.title.includes("Đặt hàng thành công"));
+
+    // Đơn VNPay thanh toán thất bại -> thông báo "Thanh toán thất bại"
+    const notifVnpayFailed = await sendOrderStatusNotification({
+      userId: testUserId,
+      orderId: 9902,
+      status: "PENDING",
+      paymentMethod: "VNPAY",
+      paymentStatus: "FAILED",
+      reason: "Bạn đã hủy giao dịch"
+    });
+    assert.ok(notifVnpayFailed);
+    assert.ok(notifVnpayFailed.title.includes("Thanh toán thất bại"));
+    assert.ok(notifVnpayFailed.message.includes("Bạn đã hủy giao dịch"));
+
+    // Đơn VNPay thanh toán thành công -> thông báo "Thanh toán & đặt hàng thành công"
+    const notifVnpayPaid = await sendOrderStatusNotification({
+      userId: testUserId,
+      orderId: 9902,
+      status: "PROCESSING",
+      paymentMethod: "VNPAY",
+      paymentStatus: "PAID"
+    });
+    assert.ok(notifVnpayPaid);
+    assert.ok(notifVnpayPaid.title.includes("Thanh toán & đặt hàng thành công"));
   });
 
   test("3. Gửi thông báo tiến độ Ticket hỗ trợ kỹ thuật (sendTicketNotification)", async () => {

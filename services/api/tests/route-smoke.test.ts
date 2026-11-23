@@ -72,9 +72,10 @@ describe("API route smoke coverage", () => {
     assert.equal(response.status, 200);
     assert.equal(response.body.success, true);
     assert.ok(response.body.data);
-    assert.equal(response.body.data.bankName, "Techcombank");
-    assert.equal(response.body.data.bankAccountNumber, "8686868991");
-    assert.equal(response.body.data.bankAccountHolder, "HỨA MINH KHƯƠNG");
+    assert.equal(response.body.data.bankName, process.env.SEPAY_BANK_CODE || "Techcombank");
+    assert.equal(response.body.data.bankAccountNumber, process.env.SEPAY_ACCOUNT_NUMBER || "8686868991");
+    assert.equal(response.body.data.bankAccountHolder, process.env.SEPAY_ACCOUNT_NAME || "HỨA MINH KHƯƠNG");
+    assert.ok(response.body.data.transferNotePrefix);
     assert.ok(response.body.data.storeHotline);
     assert.ok(response.body.data.storeAddress);
     assert.ok(response.body.data.storeTaxId);

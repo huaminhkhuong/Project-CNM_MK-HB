@@ -186,28 +186,53 @@ export async function sendOrderStatusNotification(params: {
   userId: number;
   orderId: number | string;
   status: string;
+  paymentMethod?: string | null;
+  paymentStatus?: string | null;
   carrier?: string | null;
   trackingCode?: string | null;
   reason?: string | null;
 }) {
-  const { userId, orderId, status, carrier, trackingCode, reason } = params;
+  const { userId, orderId, status, paymentMethod, paymentStatus, carrier, trackingCode, reason } = params;
   if (!userId || !orderId) return null;
 
   const parsedUserId = Number(userId);
   const parsedOrderId = Number(orderId);
   const normalizedStatus = String(status || "").trim().toUpperCase();
+  const normalizedMethod = String(paymentMethod || "").trim().toUpperCase();
+  const normalizedPaymentStatus = String(paymentStatus || "").trim().toUpperCase();
 
   let title = `Đơn hàng #${parsedOrderId}: Cập nhật trạng thái`;
   let message = `Đơn hàng #${parsedOrderId} vừa chuyển sang trạng thái ${normalizedStatus}.`;
 
   switch (normalizedStatus) {
     case "PENDING":
-      title = `Đặt hàng thành công #${parsedOrderId}`;
-      message = `Đơn hàng #${parsedOrderId} đã được tạo thành công và đang chờ xác nhận.`;
+      if (normalizedPaymentStatus === "FAILED" || normalizedPaymentStatus === "PAYMENT_CANCELLED") {
+        title = `Thanh toán thất bại #${parsedOrderId}`;
+        message = `Giao dịch thanh toán cho đơn hàng #${parsedOrderId} chưa thành công${reason ? ` (${reason})` : ""}. Bạn có thể thử thanh toán lại trong 30 phút hoặc hủy đơn.`;
+      } else if (normalizedPaymentStatus === "REJECTED") {
+        title = `Minh chứng thanh toán bị từ chối #${parsedOrderId}`;
+        message = `Ảnh biên lai chuyển khoản của đơn hàng #${parsedOrderId} chưa được duyệt.${reason ? ` Lý do: ${reason}` : ""} Vui lòng kiểm tra và tải lại minh chứng.`;
+      } else if (normalizedMethod === "VNPAY" || normalizedMethod === "MOMO") {
+        const gatewayLabel = normalizedMethod === "MOMO" ? "MoMo" : "VNPay";
+        title = `Đơn hàng #${parsedOrderId} đang chờ thanh toán`;
+        message = `Đơn hàng #${parsedOrderId} đã được khởi tạo và giữ tồn kho tạm thời. Vui lòng hoàn tất thanh toán ${gatewayLabel} trong 30 phút để xác nhận đơn hàng.`;
+      } else if (normalizedMethod === "BANK_TRANSFER") {
+        const prefix = String(process.env.SEPAY_TRANSFER_PREFIX || "PCMALL").trim() || "PCMALL";
+        title = `Đơn hàng #${parsedOrderId} đang chờ chuyển khoản VietQR`;
+        message = `Đơn hàng #${parsedOrderId} đã được khởi tạo. Vui lòng quét mã VietQR với nội dung ${prefix}${parsedOrderId} trong 30 phút — hệ thống sẽ tự động xác nhận ngay khi tiền vào tài khoản.`;
+      } else {
+        title = `Đặt hàng thành công #${parsedOrderId}`;
+        message = `Đơn hàng #${parsedOrderId} đã được tạo thành công và đang chờ xác nhận.`;
+      }
       break;
     case "PROCESSING":
-      title = `Đơn hàng #${parsedOrderId} đã được xác nhận`;
-      message = `Đơn hàng #${parsedOrderId} đã được nhân viên xác nhận và đang đóng gói linh kiện.`;
+      if (normalizedPaymentStatus === "PAID") {
+        title = `Thanh toán & đặt hàng thành công #${parsedOrderId}`;
+        message = `Đơn hàng #${parsedOrderId} đã thanh toán thành công và đang được cửa hàng chuẩn bị đóng gói linh kiện.`;
+      } else {
+        title = `Đơn hàng #${parsedOrderId} đã được xác nhận`;
+        message = `Đơn hàng #${parsedOrderId} đã được nhân viên xác nhận và đang đóng gói linh kiện.`;
+      }
       break;
     case "SHIPPED":
       title = `Đơn hàng #${parsedOrderId} đang trên đường giao`;

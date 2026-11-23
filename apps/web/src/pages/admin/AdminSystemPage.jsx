@@ -33,10 +33,27 @@ const FIELD_LABELS = {
 };
 
 const SELECT_OPTIONS = {
-  online_payment_mode: ["sandbox", "live"],
-  shipping_mode: ["mock", "live"],
-  maintenance_mode: ["off", "on"]
+  online_payment_mode: [
+    { value: "sandbox", label: "VNPay Sandbox thật (sandbox)" },
+    { value: "mock", label: "Cổng mô phỏng dự phòng Offline (mock)" },
+    { value: "live", label: "Sản xuất (live)" }
+  ],
+  shipping_mode: [
+    { value: "mock", label: "Mô phỏng vận chuyển (mock)" },
+    { value: "live", label: "Đối tác vận chuyển thật (live)" }
+  ],
+  maintenance_mode: [
+    { value: "off", label: "Tắt bảo trì (off)" },
+    { value: "on", label: "Bật bảo trì (on)" }
+  ]
 };
+
+function getSettingDisplayValue(key, value) {
+  const options = SELECT_OPTIONS[key];
+  if (!options) return String(value ?? "");
+  const matched = options.find((opt) => opt.value === String(value ?? "").trim().toLowerCase());
+  return matched ? matched.label : String(value ?? "");
+}
 
 function SettingLabel({ label, settingKey }) {
   return (
@@ -163,8 +180,8 @@ export function AdminSystemPage() {
                       {SELECT_OPTIONS[key] ? (
                         <select id={key} name={key} value={formState[key] || ""} onChange={handleChange} className="admin-input">
                           {SELECT_OPTIONS[key].map((option) => (
-                            <option key={option} value={option}>
-                              {option}
+                            <option key={option.value} value={option.value}>
+                              {option.label}
                             </option>
                           ))}
                         </select>
@@ -188,7 +205,7 @@ export function AdminSystemPage() {
                   <div key={item.key} className="admin-setting-item">
                     <strong>{FIELD_LABELS[item.key] || item.key}</strong>
                     <code style={{ color: "#2563eb", fontSize: 13, fontWeight: 800 }}>{item.key}</code>
-                    <div>{String(item.value ?? "")}</div>
+                    <div>{getSettingDisplayValue(item.key, item.value)}</div>
                     <small style={{ color: "#64748b" }}>{item.description || "—"}</small>
                   </div>
                 ))}

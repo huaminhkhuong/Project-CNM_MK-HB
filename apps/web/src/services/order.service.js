@@ -18,7 +18,6 @@ export async function getOrderDetail(orderId) {
 export async function uploadPaymentProof(orderId, file) {
   const formData = new FormData();
   formData.append("paymentProof", file);
-  formData.append("proof_image", file);
 
   const response = await httpClient.post(`/orders/${orderId}/payment-proof`, formData, {
     headers: { "Content-Type": "multipart/form-data" }
@@ -69,5 +68,10 @@ export async function cancelMyOrder(orderId) {
 
 export async function confirmOrderReceived(orderId) {
   const response = await httpClient.post(`/orders/${orderId}/confirm-received`);
+  return response.data;
+}
+
+export async function getSepayOrderPaymentInfo(orderId) {
+  const response = await httpClient.get(`/payments/sepay/order/${orderId}`);
   return response.data;
 }

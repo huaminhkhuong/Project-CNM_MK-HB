@@ -10,7 +10,7 @@ const DEFAULT_SETTINGS = [
   { key: "store_name", value: "PC Mall", description: "Tên hiển thị của hệ thống" },
   { key: "support_email", value: "support@pcmall.vn", description: "Email hỗ trợ khách hàng" },
   { key: "support_phone", value: "0900000000", description: "Số điện thoại hỗ trợ" },
-  { key: "online_payment_mode", value: "sandbox", description: "Chế độ thanh toán online: sandbox/live" },
+  { key: "online_payment_mode", value: "sandbox", description: "Chế độ thanh toán online: sandbox/mock/live" },
   { key: "shipping_mode", value: "mock", description: "Chế độ vận chuyển: mock/live" },
   { key: "maintenance_mode", value: "off", description: "Bật/tắt chế độ bảo trì" },
   { key: "bank_name", value: "Techcombank", description: "Tên ngân hàng nhận chuyển khoản" },
@@ -108,6 +108,17 @@ async function runCanonicalMigrations() {
     if (!(await hasColumn(connection, "orders", "discount_amount"))) {
       await connection.query("ALTER TABLE orders ADD COLUMN discount_amount DECIMAL(12, 2) DEFAULT 0.00");
       console.log("✅ [Migration] Added discount_amount to orders.");
+    }
+
+    // 2b. Ensure payments columns support long gateway URLs (VNPay > 500 chars) & proof image URLs
+    if (await hasColumn(connection, "payments", "redirect_url")) {
+      await connection.query("ALTER TABLE payments MODIFY COLUMN redirect_url TEXT NULL");
+    }
+    if (!(await hasColumn(connection, "payments", "proof_image_url"))) {
+      await connection.query("ALTER TABLE payments ADD COLUMN proof_image_url VARCHAR(500) NULL");
+    }
+    if (await hasColumn(connection, "orders", "payment_proof")) {
+      await connection.query("ALTER TABLE orders MODIFY COLUMN payment_proof VARCHAR(500) NULL");
     }
 
     // 3. Ensure order_items serial_numbers column

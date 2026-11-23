@@ -197,4 +197,59 @@ describe("Tickets RMA & Customer Support Authorization", () => {
     assert.equal(replyRes.status, 201);
     assert.equal(replyRes.body.data.status, "IN_PROGRESS", "Ticket phải tự động chuyển từ RESOLVED về IN_PROGRESS khi khách phản hồi");
   });
+
+  test("9. POST /api/tickets/:id/messages: Chặn HTTP 400 khi gửi phản hồi vào Ticket đã CLOSED", async () => {
+    const closeRes = await request(app)
+      .patch(`/api/tickets/${createdTicketId}`)
+      .set("Authorization", `Bearer ${techToken}`)
+      .send({ status: "CLOSED" });
+
+    assert.equal(closeRes.status, 200);
+    assert.equal(closeRes.body.data.status, "CLOSED");
+
+    const replyRes = await request(app)
+      .post(`/api/tickets/${createdTicketId}/messages`)
+      .set("Authorization", `Bearer ${customerToken}`)
+      .send({
+        message: "Gửi phản hồi vào ticket đã đóng"
+      });
+
+    assert.equal(replyRes.status, 400);
+    assert.equal(replyRes.body.success, false);
+    assert.equal(replyRes.body.message, "Ticket đã đóng, bạn không thể gửi thêm phản hồi.");
+  });
+
+  test("10. Upload tệp đính kèm Ticket: Chặn HTTP 400 khi tệp sai định dạng MIME hoặc vượt quá 20MB", async () => {
+    const invalidMimeRes = await request(app)
+      .post("/api/tickets")
+      .set("Authorization", `Bearer ${customerToken}`)
+      .field("title", "Kiểm thử upload sai định dạng")
+      .field("description", "Mô tả chi tiết lỗi đủ tối thiểu 10 ký tự hợp lệ")
+      .attach("attachments", Buffer.from("fake zip payload"), {
+        filename: "archive.zip",
+        contentType: "application/zip"
+      });
+
+    assert.equal(invalidMimeRes.status, 400);
+    assert.equal(invalidMimeRes.body.success, false);
+    assert.equal(
+      invalidMimeRes.body.message,
+      "Chỉ hỗ trợ định dạng JPG, PNG, GIF, MP4, WEBM, MOV hoặc PDF"
+    );
+
+    const oversizeBuffer = Buffer.alloc(20 * 1024 * 1024 + 1024, 0);
+    const oversizeRes = await request(app)
+      .post("/api/tickets")
+      .set("Authorization", `Bearer ${customerToken}`)
+      .field("title", "Kiểm thử upload vượt quá 20MB")
+      .field("description", "Mô tả chi tiết lỗi đủ tối thiểu 10 ký tự hợp lệ")
+      .attach("attachments", oversizeBuffer, {
+        filename: "oversize.pdf",
+        contentType: "application/pdf"
+      });
+
+    assert.equal(oversizeRes.status, 400);
+    assert.equal(oversizeRes.body.success, false);
+    assert.equal(oversizeRes.body.message, "Mỗi tệp đính kèm phải nhỏ hơn hoặc bằng 20MB");
+  });
 });

@@ -3,6 +3,7 @@ import multer from "multer";
 import path from "path";
 import { NextFunction, Request, Response, Router } from "express";
 
+import { AppError } from "../../errors/app-error";
 import { authenticate, authorize } from "../../middlewares/auth.middleware";
 import {
   getAllTickets,
@@ -53,11 +54,31 @@ const ticketAttachmentUpload = multer({
   },
   fileFilter: (_req: Request, file: any, cb: (error: Error | null, acceptFile?: boolean) => void) => {
     if (!allowedAttachmentTypes.has(file.mimetype)) {
-      return cb(new Error("Tệp đính kèm không được hỗ trợ. Chỉ nhận JPG, PNG, GIF, MP4, WEBM, MOV hoặc PDF."));
+      return cb(new AppError("Chỉ hỗ trợ định dạng JPG, PNG, GIF, MP4, WEBM, MOV hoặc PDF", 400));
     }
     return cb(null, true);
   }
 });
+
+const uploadTicketAttachmentsMiddleware = ticketAttachmentUpload.array("attachments", 5);
+
+function handleTicketAttachmentUpload(req: Request, res: Response, next: NextFunction) {
+  uploadTicketAttachmentsMiddleware(req, res, (error: any) => {
+    if (!error) {
+      next();
+      return;
+    }
+    if (error?.code === "LIMIT_FILE_SIZE") {
+      next(new AppError("Mỗi tệp đính kèm phải nhỏ hơn hoặc bằng 20MB", 400));
+      return;
+    }
+    if (error instanceof multer.MulterError) {
+      next(new AppError(error.message || "Tải tệp đính kèm thất bại", 400));
+      return;
+    }
+    next(error);
+  });
+}
 
 function getUploadedFiles(req: Request) {
   const files = (req as any).files;
@@ -97,10 +118,10 @@ function appendMessageAttachments(req: Request, _res: Response, next: NextFuncti
   next();
 }
 
-ticketsRouter.post("/", ticketAttachmentUpload.array("attachments", 5), appendCreateAttachments, postMyTicket);
+ticketsRouter.post("/", handleTicketAttachmentUpload, appendCreateAttachments, postMyTicket);
 ticketsRouter.get("/my", getMyTickets);
 ticketsRouter.get("/stats", authorize(ticketManageRoles), getTicketStats);
 ticketsRouter.get("/", authorize(ticketManageRoles), getAllTickets);
-ticketsRouter.post("/:id/messages", ticketAttachmentUpload.array("attachments", 5), appendMessageAttachments, postTicketMessage);
+ticketsRouter.post("/:id/messages", handleTicketAttachmentUpload, appendMessageAttachments, postTicketMessage);
 ticketsRouter.get("/:id", getTicketDetail);
 ticketsRouter.patch("/:id", authorize(ticketManageRoles), patchTicket);

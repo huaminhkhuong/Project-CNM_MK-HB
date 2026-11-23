@@ -84,6 +84,10 @@ ordersRouter.post("/:id/payment-proof", (req: Request, res: Response, next: Next
       next(new AppError("Payment proof image must be 5MB or smaller", 400));
       return;
     }
+    if (error instanceof multer.MulterError) {
+      next(new AppError(error.message || "Invalid payment proof upload", 400));
+      return;
+    }
     next(error);
   });
 }, uploadPaymentProof);

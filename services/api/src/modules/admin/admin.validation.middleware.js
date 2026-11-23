@@ -292,6 +292,20 @@ function validateSystemSettings(req, res, next) {
     return sendValidationError(res, [{ field: "body", message: "At least one system setting is required" }]);
   }
 
+  if (Object.prototype.hasOwnProperty.call(body, "online_payment_mode")) {
+    const allowedModes = ["sandbox", "mock", "live"];
+    const normalizedMode = String(body.online_payment_mode || "").trim().toLowerCase();
+    if (!allowedModes.includes(normalizedMode)) {
+      return sendValidationError(res, [
+        {
+          field: "online_payment_mode",
+          message: `online_payment_mode must be one of: ${allowedModes.join(", ")}`
+        }
+      ]);
+    }
+    req.body.online_payment_mode = normalizedMode;
+  }
+
   return next();
 }
 

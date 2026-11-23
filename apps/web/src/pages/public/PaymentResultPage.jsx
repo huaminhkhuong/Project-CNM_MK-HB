@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 
 import { createVnpayUrl } from "../../services/order.service";
@@ -12,16 +12,48 @@ function getErrorMessage(error, fallbackMessage) {
   return error.message || fallbackMessage;
 }
 
+function getReasonMessage(reason) {
+  const normalized = String(reason || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized === "invalid_signature") {
+    return "Chữ ký xác thực từ cổng thanh toán không hợp lệ. Giao dịch không được ghi nhận để đảm bảo an toàn.";
+  }
+  if (normalized === "invalid_amount") {
+    return "Số tiền thanh toán không khớp với giá trị đơn hàng. Vui lòng liên hệ bộ phận hỗ trợ PC Mall.";
+  }
+  if (normalized === "user_cancelled" || normalized === "vnpay_24") {
+    return "Bạn đã hủy giao dịch thanh toán. Đơn hàng vẫn đang chờ thanh toán và bạn có thể thử lại bất cứ lúc nào.";
+  }
+  if (normalized === "order_canceled") {
+    return "Đơn hàng đã bị hủy hoặc đã hết hạn thanh toán.";
+  }
+  if (normalized === "order_not_found") {
+    return "Không tìm thấy đơn hàng tương ứng trên hệ thống.";
+  }
+  if (normalized.startsWith("vnpay_")) {
+    const code = normalized.replace("vnpay_", "").toUpperCase();
+    return `Giao dịch VNPay chưa hoàn tất (Mã phản hồi: ${code}). Bạn có thể thử thanh toán lại.`;
+  }
+  return `Lý do: ${reason}`;
+}
+
 export function PaymentResultPage() {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const success = searchParams.get("success") === "true";
   const orderId = searchParams.get("orderId");
   const reason = searchParams.get("reason");
+  const method = String(searchParams.get("method") || "").toUpperCase();
+  const reasonMessage = getReasonMessage(reason);
   const [payLoading, setPayLoading] = useState(false);
   const [payError, setPayError] = useState("");
 
   async function handleRetryPay() {
     if (!orderId) return;
+    if (method === "BANK_TRANSFER" || !reason?.startsWith("vnpay_")) {
+      navigate(routeConfig.public.paymentVietQr.replace(":orderId", String(orderId)));
+      return;
+    }
     try {
       setPayLoading(true);
       setPayError("");
@@ -40,11 +72,37 @@ export function PaymentResultPage() {
 
   if (!orderId) {
     return (
-      <div style={{ padding: 24, borderRadius: 24, background: "var(--surface)", border: "1px solid var(--border)" }}>
-        Không tìm thấy thông tin giao dịch hợp lệ.
+      <div style={{ display: "grid", gap: 20 }}>
+        <section
+          style={{
+            padding: "30px 28px",
+            borderRadius: 32,
+            background: "linear-gradient(135deg, rgba(238,77,45,0.08), rgba(255,247,237,0.95))",
+            border: "1px solid var(--border)",
+            boxShadow: "var(--shadow)"
+          }}
+        >
+          <h1 style={{ margin: "0 0 8px", fontSize: 38, lineHeight: 1.1, letterSpacing: "-0.04em", color: "#ee4d2d" }}>
+            Thanh toán chưa hoàn tất
+          </h1>
+          <p style={{ margin: 0, color: "var(--muted)", fontSize: 17 }}>
+            {reasonMessage || "Không tìm thấy thông tin mã đơn hàng từ cổng thanh toán. Vui lòng kiểm tra trạng thái trong danh sách đơn hàng của bạn."}
+          </p>
+        </section>
+
+        <section style={{ display: "flex", gap: 12, flexWrap: "wrap", padding: 24, borderRadius: 24, background: "var(--surface)", border: "1px solid var(--border)" }}>
+          <Link to="/orders" style={{ padding: "12px 20px", borderRadius: 16, background: "var(--primary)", color: "#fff", fontWeight: 700, textDecoration: "none" }}>
+            Danh sách đơn hàng
+          </Link>
+          <Link to="/" style={{ padding: "12px 20px", borderRadius: 16, border: "1px solid var(--border)", background: "#fff", fontWeight: 700, textDecoration: "none", color: "var(--text)" }}>
+            Về trang chủ
+          </Link>
+        </section>
       </div>
     );
   }
+
+  const canRetry = !success && !["order_canceled", "order_not_found"].includes(String(reason || "").toLowerCase());
 
   return (
     <div style={{ display: "grid", gap: 24 }}>
@@ -64,8 +122,10 @@ export function PaymentResultPage() {
         </h1>
         <p style={{ margin: 0, color: "var(--muted)", fontSize: 18 }}>
           {success
-            ? "Cảm ơn bạn. Đơn hàng đã được ghi nhận thanh toán (VNPay sandbox hoặc mock demo)."
-            : "Giao dịch bị hủy hoặc thất bại. Bạn có thể thử lại từ trang đơn hàng."}
+            ? method === "BANK_TRANSFER"
+              ? "Giao dịch chuyển khoản VietQR đã được SePay xác nhận tự động. Đơn hàng của bạn đang được chuẩn bị và đóng gói."
+              : "Cảm ơn bạn. Đơn hàng đã được ghi nhận thanh toán và đang chuyển sang xử lý."
+            : (reasonMessage || "Giao dịch chưa hoàn tất. Bạn có thể thử thanh toán lại từ trang đơn hàng.")}
         </p>
       </section>
 
@@ -73,7 +133,7 @@ export function PaymentResultPage() {
         <div>
           <div style={{ fontSize: 14, color: "var(--muted)" }}>Mã đơn hàng</div>
           <div style={{ fontSize: 32, fontWeight: 800 }}>#{orderId}</div>
-          {reason ? <div style={{ color: "var(--danger)", marginTop: 8 }}>Lý do: {reason}</div> : null}
+          {reasonMessage ? <div style={{ color: "var(--danger)", marginTop: 8, fontWeight: 600 }}>{reasonMessage}</div> : null}
         </div>
 
         {payError ? (
@@ -90,7 +150,7 @@ export function PaymentResultPage() {
           <Link to="/orders" style={{ padding: "12px 20px", borderRadius: 16, border: "1px solid var(--border)", background: "#fff", fontWeight: 700, textDecoration: "none", color: "var(--text)" }}>
             Danh sách đơn hàng
           </Link>
-          {!success ? (
+          {canRetry ? (
             <button
               type="button"
               disabled={payLoading}

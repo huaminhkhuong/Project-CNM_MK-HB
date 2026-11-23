@@ -10,9 +10,9 @@ export const ORDER_STATUS_META = {
 
 export const PAYMENT_STATUS_META = {
   UNPAID: { label: "Chưa thanh toán", tone: "#b45309" },
-  PENDING_GATEWAY: { label: "Đang chờ cổng thanh toán", tone: "#1d4ed8" },
-  AWAITING_ADMIN_CONFIRMATION: { label: "Chờ admin xác nhận", tone: "#1d4ed8" },
-  PENDING_VERIFICATION: { label: "Chờ admin xác nhận", tone: "#1d4ed8" },
+  PENDING_GATEWAY: { label: "Chờ thanh toán", tone: "#1d4ed8" },
+  AWAITING_ADMIN_CONFIRMATION: { label: "Chờ xác nhận thanh toán", tone: "#1d4ed8" },
+  PENDING_VERIFICATION: { label: "Chờ xác nhận thanh toán", tone: "#1d4ed8" },
   PAID: { label: "Đã thanh toán", tone: "#047857" },
   REJECTED: { label: "Thanh toán bị từ chối", tone: "#b91c1c" },
   FAILED: { label: "Thanh toán thất bại", tone: "#b91c1c" },
@@ -43,6 +43,13 @@ export function canCustomerPayOrder(order) {
   const paymentStatus = String(order?.paymentStatus || order?.payment_status || "").toUpperCase();
   const method = String(order?.paymentMethod || order?.payment_method || "").toUpperCase();
   return status === "PENDING" && method === "VNPAY" && paymentStatus !== "PAID";
+}
+
+export function canCustomerPayVietQr(order) {
+  const status = String(order?.status || "").toUpperCase();
+  const paymentStatus = String(order?.paymentStatus || order?.payment_status || "").toUpperCase();
+  const method = String(order?.paymentMethod || order?.payment_method || "").toUpperCase();
+  return status === "PENDING" && method === "BANK_TRANSFER" && paymentStatus !== "PAID";
 }
 
 export function canCustomerConfirmReceived(order) {

@@ -10,6 +10,7 @@ export const routeConfig = {
     gioHang: "/gio-hang",
     checkout: "/checkout",
     thanhToan: "/thanh-toan",
+    paymentVietQr: "/payment/vietqr/:orderId",
     paymentResult: "/payment/result",
     orders: "/orders",
     orderDetail: "/orders/:orderId",

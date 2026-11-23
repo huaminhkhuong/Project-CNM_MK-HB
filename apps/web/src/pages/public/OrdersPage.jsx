@@ -8,14 +8,105 @@ import { addItemToCart } from "../../services/cart.service";
 import { cancelMyOrder, confirmOrderReceived, createVnpayUrl, getMyOrders } from "../../services/order.service";
 import { subscribeToOrderEvents } from "../../services/order-events.service";
 import { routeConfig } from "../../routes/routeConfig";
-import { PAYMENT_STATUS_META, canCustomerCancelOrder, canCustomerConfirmReceived, canCustomerPayOrder } from "../../utils/orderStatus";
+import {
+  PAYMENT_STATUS_META,
+  canCustomerCancelOrder,
+  canCustomerConfirmReceived,
+  canCustomerPayOrder,
+  canCustomerPayVietQr
+} from "../../utils/orderStatus";
 import { resolveProductImage } from "../../utils/productImage";
 
+/* ── Crisp SVG Icons (Unified with OrderDetailPage) ──────────────────────── */
+const SearchIcon = () => (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="11" cy="11" r="8" />
+    <path d="m21 21-4.3-4.3" />
+  </svg>
+);
+
+const StoreIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7" />
+    <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+    <path d="M2 7h20" />
+  </svg>
+);
+
+const PackageIcon = ({ size = 18 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m16.5 9.4-9-5.19" />
+    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+    <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+    <line x1="12" y1="22.08" x2="12" y2="12" />
+  </svg>
+);
+
+const TruckIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="1" y="3" width="15" height="13" rx="1" />
+    <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
+    <circle cx="5.5" cy="18.5" r="2.5" />
+    <circle cx="18.5" cy="18.5" r="2.5" />
+  </svg>
+);
+
+const ShieldCheckIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    <path d="m9 12 2 2 4-4" />
+  </svg>
+);
+
+const QrIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="6" height="6" rx="1" />
+    <rect x="15" y="3" width="6" height="6" rx="1" />
+    <rect x="3" y="15" width="6" height="6" rx="1" />
+    <path d="M15 15h2v2h-2zM19 15h2M15 19h6M11 3v6M3 11h6M11 15v6" />
+  </svg>
+);
+
+const CartIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="8" cy="21" r="1" />
+    <circle cx="19" cy="21" r="1" />
+    <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12" />
+  </svg>
+);
+
+const CopyIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="9" y="9" width="13" height="13" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+);
+
+const CheckIcon = ({ size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 6 9 17l-5-5" />
+  </svg>
+);
+
+const ChevronRightIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m9 18 6-6-6-6" />
+  </svg>
+);
+
+const LockIcon = () => (
+  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="11" width="18" height="11" rx="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
+/* ── Data Normalizers & Helpers ──────────────────────────────────────────── */
 function getErrorMessage(error, fallbackMessage) {
   if (axios.isAxiosError(error)) {
     return error.response?.data?.message || fallbackMessage;
   }
-  return error.message || fallbackMessage;
+  return error?.message || fallbackMessage;
 }
 
 function normalizeOrdersResponse(response) {
@@ -27,14 +118,34 @@ function mapOrderItemToUi(item) {
     id: item.id,
     productId: item.product_id || item.productId || item.ProductSku?.product_id || item.product?.id || null,
     productVariantId: item.product_variant_id || item.productVariantId || item.ProductSku?.id || null,
-    product_name: item.product_name || item.name_snapshot || item.nameSnapshot || item.productName || item.product?.name || item.ProductSku?.Product?.name || "Sản phẩm",
-    name: item.name || item.name_snapshot || item.nameSnapshot || item.productName || item.product?.name || item.ProductSku?.Product?.name || "Sản phẩm",
+    product_name:
+      item.product_name ||
+      item.name_snapshot ||
+      item.nameSnapshot ||
+      item.productName ||
+      item.product?.name ||
+      item.ProductSku?.Product?.name ||
+      "Sản phẩm",
+    name:
+      item.name ||
+      item.name_snapshot ||
+      item.nameSnapshot ||
+      item.productName ||
+      item.product?.name ||
+      item.ProductSku?.Product?.name ||
+      "Sản phẩm",
     sku: item.sku || item.sku_snapshot || item.skuSnapshot || item.ProductSku?.sku,
     quantity: Number(item.quantity || 0),
     price: Number(item.price || item.unit_price || item.unitPrice || 0),
     unit_price: Number(item.unit_price || item.unitPrice || item.price || 0),
-    line_total: Number(item.line_total || item.lineTotal || 0),
-    image_url: item.image_url || item.imageUrl || item.ProductSku?.image_url || item.ProductSku?.imageUrl || item.product?.imageUrl || null
+    line_total: Number(item.line_total || item.lineTotal || Number(item.unit_price || item.price || 0) * Number(item.quantity || 1)),
+    image_url:
+      item.image_url ||
+      item.imageUrl ||
+      item.ProductSku?.image_url ||
+      item.ProductSku?.imageUrl ||
+      item.product?.imageUrl ||
+      null
   };
 }
 
@@ -62,11 +173,19 @@ function formatCurrency(value) {
   return Number(value || 0).toLocaleString("vi-VN");
 }
 
-function getPaymentStatusMeta(status) {
-  return PAYMENT_STATUS_META[String(status || "").toUpperCase()] || {
-    label: status || "Chưa thanh toán",
-    tone: "#64748b"
-  };
+function formatDate(dateValue) {
+  if (!dateValue) return "—";
+  try {
+    return new Date(dateValue).toLocaleString("vi-VN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric"
+    });
+  } catch {
+    return String(dateValue);
+  }
 }
 
 function normalizeStatus(status) {
@@ -84,14 +203,26 @@ function isDeliveredStatus(status) {
 function getPaymentMethodLabel(method) {
   const normalized = normalizePaymentMethod(method);
   if (normalized === "VNPAY") return "VNPay";
-  if (normalized === "BANK_TRANSFER" || normalized === "QR_BANKING") return "QR Banking";
-  if (normalized === "COD") return "COD";
-  return method || "COD";
+  if (normalized === "BANK_TRANSFER" || normalized === "QR_BANKING") return "VietQR (SePay)";
+  return "Thanh toán COD";
+}
+
+function getPaymentStatusMeta(status, method) {
+  const normalized = normalizeStatus(status);
+  if (normalizePaymentMethod(method) === "BANK_TRANSFER" && ["PENDING_GATEWAY", "UNPAID", ""].includes(normalized)) {
+    return { label: "Chờ chuyển khoản VietQR", tone: "#1d4ed8" };
+  }
+  return (
+    PAYMENT_STATUS_META[normalized] || {
+      label: status || "Chưa thanh toán",
+      tone: "#64748b"
+    }
+  );
 }
 
 function getCustomerName(authState) {
   const user = authState?.user || {};
-  return user.fullName || user.name || user.email || "bạn";
+  return user.fullName || user.full_name || user.name || user.email || "bạn";
 }
 
 function getOrderSearchText(order) {
@@ -100,6 +231,7 @@ function getOrderSearchText(order) {
     .join(" ");
   return [
     order.id,
+    `#${order.id}`,
     order.shippingAddress,
     order.receiverName,
     order.receiverPhone,
@@ -113,97 +245,161 @@ function getOrderSearchText(order) {
     .toLowerCase();
 }
 
+function isAwaitingOnlinePayment(order) {
+  const status = normalizeStatus(order?.status);
+  const method = normalizePaymentMethod(order?.paymentMethod);
+  const payStatus = normalizeStatus(order?.paymentStatus);
+  return status === "PENDING" && method !== "COD" && payStatus !== "PAID";
+}
+
+function getOrderAccentColor(order) {
+  const status = normalizeStatus(order?.status);
+  const payStatus = normalizeStatus(order?.paymentStatus);
+  if (status === "CANCELED") return "#dc2626";
+  if (status === "COMPLETED") return "#059669";
+  if (status === "DELIVERED") return "#0f766e";
+  if (status === "SHIPPED") return "#6d28d9";
+  if (status === "PROCESSING" || status === "PAID") return "#2563eb";
+  if (isAwaitingOnlinePayment(order) && ["FAILED", "PAYMENT_CANCELLED", "REJECTED"].includes(payStatus)) {
+    return "#dc2626";
+  }
+  return "#d97706";
+}
+
 function getTrackingText(order) {
   const status = normalizeStatus(order.status);
-  if (order.shipment?.trackingCode) return `Mã vận đơn ${order.shipment.trackingCode}`;
-  if (status === "PENDING") return "Đơn hàng đang chờ xác nhận từ cửa hàng.";
-  if (status === "PROCESSING" || status === "PAID") return "Đơn hàng đang được chuẩn bị và đóng gói.";
-  if (status === "SHIPPED") return "Đơn hàng đang trên đường giao đến bạn.";
-  if (status === "DELIVERED") return "Đơn hàng đã giao thành công. Vui lòng xác nhận khi bạn đã nhận đủ hàng.";
-  if (status === "COMPLETED") return "Đơn hàng đã hoàn tất.";
-  if (status === "CANCELED") return "Đơn hàng đã được hủy.";
+  const method = normalizePaymentMethod(order.paymentMethod);
+  const payStatus = normalizeStatus(order.paymentStatus);
+
+  if (order.shipment?.trackingCode) {
+    return `Đang vận chuyển · Mã vận đơn ${order.shipment.trackingCode}`;
+  }
+  if (status === "PENDING") {
+    if (method !== "COD" && payStatus !== "PAID") {
+      if (payStatus === "FAILED" || payStatus === "PAYMENT_CANCELLED") {
+        return "Giao dịch thanh toán chưa hoàn tất — giữ tồn kho trong 30 phút, bạn có thể thanh toán lại hoặc hủy đơn.";
+      }
+      if (method === "BANK_TRANSFER") {
+        return `Chờ chuyển khoản VietQR (cú pháp PCMALL${order.id}) — tự động đối soát qua SePay trong 2–5 giây.`;
+      }
+      return "Đang chờ hoàn tất thanh toán trực tuyến trước khi kho PC Mall đóng gói.";
+    }
+    return "Đơn hàng đã tiếp nhận, đang chờ bộ phận bán hàng xác nhận.";
+  }
+  if (status === "PROCESSING" || status === "PAID") {
+    return payStatus === "PAID"
+      ? "Đã xác nhận thanh toán tự động — Kho PC Mall đang chuẩn bị & đóng gói linh kiện."
+      : "Đơn hàng đang được chuẩn bị và đóng gói xuất kho.";
+  }
+  if (status === "SHIPPED") return "Đơn hàng đã bàn giao đơn vị vận chuyển và đang trên đường tới bạn.";
+  if (status === "DELIVERED") return "Đơn hàng đã giao thành công — hãy kiểm tra linh kiện và xác nhận đã nhận hàng.";
+  if (status === "COMPLETED") return "Đơn hàng đã hoàn tất · Hỗ trợ bảo hành điện tử chính hãng PC Mall.";
+  if (status === "CANCELED") {
+    return payStatus === "EXPIRED"
+      ? "Đơn hàng tự động hủy do quá thời hạn thanh toán."
+      : "Đơn hàng đã hủy. Bạn có thể bấm Mua lại bất cứ lúc nào.";
+  }
   return "Trạng thái vận chuyển sẽ được cập nhật sớm.";
 }
 
-function getProgressStep(status) {
-  const normalized = normalizeStatus(status);
+function getProgressStep(order) {
+  const normalized = normalizeStatus(order?.status);
   if (normalized === "COMPLETED") return 4;
-  if (normalized === "DELIVERED") return 3;
+  if (normalized === "DELIVERED") return 4;
   if (normalized === "SHIPPED") return 3;
   if (normalized === "PROCESSING" || normalized === "PAID") return 2;
   if (normalized === "CANCELED") return 0;
+  if (isAwaitingOnlinePayment(order)) return 1;
   return 1;
 }
 
 const FILTER_TABS = [
-  { id: "ALL", label: "Tất cả", icon: "📦" },
-  { id: "PENDING", label: "Chờ xác nhận", icon: "⏳" },
-  { id: "PROCESSING", label: "Đang xử lý", icon: "⚙️" },
-  { id: "SHIPPED", label: "Đang giao", icon: "🚚" },
-  { id: "DELIVERED", label: "Đã giao", icon: "✅" },
-  { id: "COMPLETED", label: "Hoàn tất", icon: "✓" },
-  { id: "CANCELED", label: "Đã hủy", icon: "✕" }
+  { id: "ALL", label: "Tất cả" },
+  { id: "PENDING", label: "Chờ xác nhận" },
+  { id: "PROCESSING", label: "Đang xử lý" },
+  { id: "SHIPPED", label: "Đang giao" },
+  { id: "DELIVERED", label: "Đã giao" },
+  { id: "COMPLETED", label: "Hoàn tất" },
+  { id: "CANCELED", label: "Đã hủy" }
 ];
 
-const PAYMENT_FILTERS = [
-  { id: "ALL", label: "Tất cả thanh toán" },
-  { id: "COD", label: "COD" },
-  { id: "VNPAY", label: "VNPay" },
-  { id: "BANK_TRANSFER", label: "QR Banking" }
-];
+const PROGRESS_STEPS = ["Đặt hàng", "Xử lý", "Vận chuyển", "Hoàn tất"];
 
-const PROGRESS_STEPS = ["Xác nhận", "Xử lý", "Vận chuyển", "Hoàn tất"];
+function InlineOrderProgress({ order }) {
+  const status = normalizeStatus(order?.status);
+  const payStatus = normalizeStatus(order?.paymentStatus);
+  const activeStep = getProgressStep(order);
+  const trackingText = getTrackingText(order);
 
-function OrderProgress({ status }) {
-  const normalized = normalizeStatus(status);
-  const activeStep = getProgressStep(status);
+  const isAlertState =
+    status === "CANCELED" ||
+    (isAwaitingOnlinePayment(order) && ["FAILED", "PAYMENT_CANCELLED", "REJECTED"].includes(payStatus));
 
-  if (normalized === "CANCELED") {
+  if (isAlertState) {
     return (
-      <div className="order-tracking order-tracking--cancelled">
-        <span className="order-tracking__dot" />
-        <div>
-          <strong>Đơn hàng đã hủy</strong>
-          <p>Đơn này không tiếp tục xử lý. Bạn có thể mua lại sản phẩm khi cần.</p>
-        </div>
+      <div className="ord-strip ord-strip--danger">
+        <span className="ord-strip__dot ord-strip__dot--danger" />
+        <span className="ord-strip__text">{trackingText}</span>
       </div>
     );
   }
 
+  const isDoneAll = status === "COMPLETED";
+
   return (
-    <div className="order-progress" aria-label="Tiến trình đơn hàng">
-      {PROGRESS_STEPS.map((step, index) => {
-        const isActive = index + 1 <= activeStep;
-        return (
-          <div className={`order-progress__step ${isActive ? "is-active" : ""}`} key={step}>
-            <span className="order-progress__marker">{isActive ? "✓" : index + 1}</span>
-            <span>{step}</span>
-          </div>
-        );
-      })}
+    <div className={`ord-strip ${isDoneAll ? "ord-strip--success" : ""}`}>
+      <div className="ord-strip__status">
+        <span className="ord-strip__icon">
+          {status === "SHIPPED" ? <TruckIcon /> : <ShieldCheckIcon />}
+        </span>
+        <span className="ord-strip__text">{trackingText}</span>
+      </div>
+
+      <div className="ord-mini-stepper" aria-label="Tiến độ xử lý đơn hàng">
+        {PROGRESS_STEPS.map((label, idx) => {
+          const stepNum = idx + 1;
+          const isDone = isDoneAll || stepNum < activeStep;
+          const isCurrent = !isDoneAll && stepNum === activeStep;
+          return (
+            <div key={label} className={`ord-mini-step ${isDone ? "is-done" : ""} ${isCurrent ? "is-current" : ""}`}>
+              <span className="ord-mini-step__dot">{isDone ? <CheckIcon size={10} /> : stepNum}</span>
+              <span className="ord-mini-step__label">{label}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-function EmptyOrdersState({ hasFilters }) {
+function EmptyOrdersState({ hasFilters, onResetFilters }) {
   return (
-    <div className="orders-empty">
-      <div className="orders-empty__art" aria-hidden="true">
-        <svg viewBox="0 0 180 140" role="img">
-          <rect x="28" y="38" width="124" height="78" rx="18" fill="#eff6ff" />
-          <path d="M55 58h70l-8 50H63L55 58Z" fill="#ffffff" stroke="#2563eb" strokeWidth="4" />
-          <path d="M73 58c0-18 34-18 34 0" fill="none" stroke="#111827" strokeWidth="6" strokeLinecap="round" />
-          <circle cx="132" cy="38" r="16" fill="#f59e0b" />
-          <path d="M126 38h12M132 32v12" stroke="#fff" strokeWidth="4" strokeLinecap="round" />
+    <div className="ord-empty">
+      <div className="ord-empty__art" aria-hidden="true">
+        <svg viewBox="0 0 140 110" width="128" height="100">
+          <rect x="20" y="26" width="100" height="66" rx="16" fill="#eff6ff" />
+          <path d="M44 44h52l-6 38H50l-6-38Z" fill="#ffffff" stroke="#2563eb" strokeWidth="3.5" strokeLinejoin="round" />
+          <path d="M58 44c0-14 24-14 24 0" fill="none" stroke="#0f172a" strokeWidth="4.5" strokeLinecap="round" />
+          <circle cx="106" cy="28" r="13" fill="#10b981" />
+          <path d="M101 28h10M106 23v10" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" />
         </svg>
       </div>
-      <div>
-        <h2>{hasFilters ? "Không tìm thấy đơn phù hợp" : "Bạn chưa có đơn hàng nào"}</h2>
-        <p>{hasFilters ? "Thử đổi từ khóa, trạng thái hoặc phương thức thanh toán để xem thêm đơn hàng." : "Khám phá linh kiện PC, lưu cấu hình và đặt hàng để theo dõi mọi thứ tại đây."}</p>
+      <h2>{hasFilters ? "Không tìm thấy đơn hàng phù hợp" : "Bạn chưa có đơn hàng nào"}</h2>
+      <p>
+        {hasFilters
+          ? "Hãy thử thay đổi bộ lọc trạng thái, phương thức thanh toán hoặc từ khóa tìm kiếm."
+          : "Khám phá linh kiện PC chính hãng tại PC Mall và theo dõi toàn bộ đơn hàng của bạn ngay tại đây."}
+      </p>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+        {hasFilters ? (
+          <button type="button" onClick={onResetFilters} className="ord-btn ord-btn--secondary">
+            Đặt lại bộ lọc
+          </button>
+        ) : null}
+        <Link to={routeConfig.public.catalog} className="ord-btn ord-btn--primary">
+          Khám phá linh kiện PC
+        </Link>
       </div>
-      <Link to={routeConfig.public.catalog} className="orders-empty__cta">
-        Tiếp tục mua sắm
-      </Link>
     </div>
   );
 }
@@ -220,6 +416,7 @@ export function OrdersPage() {
   const [paymentFilter, setPaymentFilter] = useState("ALL");
   const [searchKeyword, setSearchKeyword] = useState("");
   const [actionOrderId, setActionOrderId] = useState(null);
+  const [copiedOrderId, setCopiedOrderId] = useState(null);
 
   const createdOrderId = useMemo(() => location.state?.createdOrderId || null, [location.state]);
   const buildsMigrated = useMemo(() => location.state?.buildsMigrated || 0, [location.state]);
@@ -270,17 +467,49 @@ export function OrdersPage() {
       (acc, order) => {
         const status = normalizeStatus(order.status);
         acc.total += 1;
+        if (status !== "CANCELED") {
+          acc.totalSpent += Number(order.finalAmount || 0);
+        }
         if (status === "PENDING") acc.pending += 1;
         if (status === "PROCESSING" || status === "PAID") acc.processing += 1;
         if (status === "SHIPPED") acc.shipped += 1;
         if (isDeliveredStatus(status)) acc.delivered += 1;
         if (status === "COMPLETED") acc.completed += 1;
         if (status === "CANCELED") acc.canceled += 1;
+        if (["PENDING", "PROCESSING", "PAID", "SHIPPED", "DELIVERED"].includes(status)) {
+          acc.active += 1;
+        }
+        if (normalizePaymentMethod(order.paymentMethod) === "VNPAY") {
+          acc.hasVnpay = true;
+        }
         return acc;
       },
-      { total: 0, pending: 0, processing: 0, shipped: 0, delivered: 0, completed: 0, canceled: 0 }
+      {
+        total: 0,
+        active: 0,
+        totalSpent: 0,
+        pending: 0,
+        processing: 0,
+        shipped: 0,
+        delivered: 0,
+        completed: 0,
+        canceled: 0,
+        hasVnpay: false
+      }
     );
   }, [orders]);
+
+  const paymentFilterOptions = useMemo(() => {
+    const base = [
+      { id: "ALL", label: "Tất cả" },
+      { id: "BANK_TRANSFER", label: "VietQR (SePay)" },
+      { id: "COD", label: "COD" }
+    ];
+    if (stats.hasVnpay) {
+      base.push({ id: "VNPAY", label: "VNPay" });
+    }
+    return base;
+  }, [stats.hasVnpay]);
 
   const filteredOrders = useMemo(() => {
     const keyword = searchKeyword.trim().toLowerCase();
@@ -313,6 +542,26 @@ export function OrdersPage() {
     }),
     [stats]
   );
+
+  async function handleCopyOrderId(orderId) {
+    const text = `#${orderId}`;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    setCopiedOrderId(orderId);
+    window.setTimeout(() => {
+      setCopiedOrderId((prev) => (prev === orderId ? null : prev));
+    }, 1800);
+  }
 
   async function handleCancelOrder(orderId) {
     if (!confirm(`Bạn chắc chắn muốn hủy đơn hàng #${orderId}?`)) return;
@@ -383,7 +632,7 @@ export function OrdersPage() {
           });
           addedCount += 1;
         } catch {
-          // Skip out-of-stock or inactive items and continue adding remaining items
+          // Skip out-of-stock or inactive items
         }
       }
       if (addedCount > 0) {
@@ -396,228 +645,359 @@ export function OrdersPage() {
     }
   }
 
+  function handleResetFilters() {
+    setStatusFilter("ALL");
+    setPaymentFilter("ALL");
+    setSearchKeyword("");
+  }
+
   if (!isAuthenticated) {
     return (
-      <div className="orders-dashboard">
+      <div className="ord-page">
         <style>{ordersStyles}</style>
-        <section className="orders-auth-card">
-          <span className="orders-auth-card__icon">🔐</span>
+        <section className="ord-auth-card">
+          <span className="ord-auth-card__icon">
+            <LockIcon />
+          </span>
           <h1>Đơn hàng của tôi</h1>
-          <p>Bạn cần đăng nhập để xem lịch sử mua hàng, thanh toán và theo dõi vận chuyển.</p>
-          <Link to={routeConfig.public.login} className="order-action order-action--primary">
-            Đi đến trang đăng nhập
+          <p>Đăng nhập để xem toàn bộ lịch sử mua sắm, trạng thái giao nhận và tra cứu bảo hành linh kiện.</p>
+          <Link to={routeConfig.public.login} className="ord-btn ord-btn--primary">
+            Đăng nhập ngay
           </Link>
         </section>
       </div>
     );
   }
 
+  const hasFilters = Boolean(searchKeyword.trim() || paymentFilter !== "ALL" || statusFilter !== "ALL");
+
   return (
-    <div className="orders-dashboard">
+    <div className="ord-page">
       <style>{ordersStyles}</style>
 
-      <section className="orders-hero">
-        <div>
-          <span className="orders-hero__eyebrow">PC Mall Account</span>
-          <h1>Xin chào, {getCustomerName(authState)}</h1>
-          <p>Quản lý đơn hàng, thanh toán, vận chuyển và thao tác nhanh trong một dashboard gọn gàng.</p>
+      {/* Top Breadcrumb */}
+      <div className="ord-crumb" aria-label="Đường dẫn">
+        <Link to={routeConfig.public.root}>Trang chủ</Link>
+        <span>/</span>
+        <span className="ord-crumb__current">Đơn hàng của tôi</span>
+      </div>
+
+      {/* Compact Executive Marketplace Header */}
+      <section className="ord-header-card">
+        <div className="ord-header-card__left">
+          <span className="ord-header-card__eyebrow">PC Mall Member</span>
+          <h1 className="ord-header-card__title">Đơn hàng của tôi</h1>
+          <p className="ord-header-card__sub">
+            Xin chào <strong>{getCustomerName(authState)}</strong> — theo dõi trạng thái xử lý, thanh toán VietQR tự động và bảo hành điện tử.
+          </p>
         </div>
-        <div className="orders-hero__summary">
-          <span>Tổng chi tiêu</span>
-          <strong>{formatCurrency(orders.reduce((sum, order) => sum + Number(order.finalAmount || 0), 0))} đ</strong>
-          <small>{stats.total} đơn hàng đã ghi nhận</small>
+
+        <div className="ord-header-card__metrics">
+          <div className="ord-metric-box">
+            <span className="ord-metric-box__label">Tổng đơn hàng</span>
+            <strong className="ord-metric-box__value">{stats.total}</strong>
+            <span className="ord-metric-box__hint">
+              {stats.active > 0 ? `${stats.active} đơn đang xử lý` : "Tất cả đã hoàn tất"}
+            </span>
+          </div>
+          <div className="ord-metric-box ord-metric-box--accent">
+            <span className="ord-metric-box__label">Tổng chi tiêu</span>
+            <strong className="ord-metric-box__value">{formatCurrency(stats.totalSpent)} đ</strong>
+            <span className="ord-metric-box__hint">Không tính đơn đã hủy</span>
+          </div>
         </div>
       </section>
 
-      <section className="orders-stats" aria-label="Thống kê đơn hàng">
-        <div className="orders-stat-card orders-stat-card--total">
-          <span>Tổng đơn</span>
-          <strong>{stats.total}</strong>
-        </div>
-        <div className="orders-stat-card">
-          <span>Chờ xác nhận</span>
-          <strong>{stats.pending}</strong>
-        </div>
-        <div className="orders-stat-card">
-          <span>Đang xử lý</span>
-          <strong>{stats.processing}</strong>
-        </div>
-        <div className="orders-stat-card">
-          <span>Đã giao</span>
-          <strong>{stats.delivered}</strong>
-        </div>
-        <div className="orders-stat-card orders-stat-card--danger">
-          <span>Đã hủy</span>
-          <strong>{stats.canceled}</strong>
-        </div>
-      </section>
-
+      {/* Contextual Alerts */}
       {createdOrderId ? (
-        <div className="orders-alert orders-alert--success">
-          Đơn hàng mới <strong>#{createdOrderId}</strong> đã được tạo thành công.
+        <div className="ord-alert ord-alert--success">
+          <CheckIcon size={16} />
+          <span>
+            Đơn hàng mới <strong>#{createdOrderId}</strong> đã được tạo thành công.
+          </span>
         </div>
       ) : null}
 
       {buildsMigrated > 0 ? (
-        <div className="orders-alert orders-alert--info">
-          Đã đồng bộ <strong>{buildsMigrated}</strong> cấu hình PC từ chế độ khách lên tài khoản. Xem tại{" "}
-          <Link to={routeConfig.public.pcBuilder}>PC Builder</Link>.
+        <div className="ord-alert ord-alert--info">
+          <span>
+            Đã đồng bộ <strong>{buildsMigrated}</strong> cấu hình PC từ chế độ khách lên tài khoản. Xem tại{" "}
+            <Link to={routeConfig.public.pcBuilder}>PC Builder</Link>.
+          </span>
         </div>
       ) : null}
 
-      {successMessage ? <div className="orders-alert orders-alert--success">{successMessage}</div> : null}
-      {errorMessage ? <div className="orders-alert orders-alert--danger">{errorMessage}</div> : null}
+      {successMessage ? (
+        <div className="ord-alert ord-alert--success">
+          <CheckIcon size={16} />
+          <span>{successMessage}</span>
+        </div>
+      ) : null}
 
-      <section className="orders-toolbar">
-        <label className="orders-search">
-          <span>🔎</span>
-          <input
-            type="search"
-            value={searchKeyword}
-            onChange={(event) => setSearchKeyword(event.target.value)}
-            placeholder="Tìm mã đơn, sản phẩm, SKU, địa chỉ, mã vận đơn..."
-          />
-        </label>
-        <label className="orders-filter">
-          <span>Phương thức thanh toán</span>
-          <select value={paymentFilter} onChange={(event) => setPaymentFilter(event.target.value)}>
-            {PAYMENT_FILTERS.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
+      {errorMessage ? (
+        <div className="ord-alert ord-alert--danger">
+          <span>{errorMessage}</span>
+        </div>
+      ) : null}
+
+      {/* Unified Marketplace Navigation & Filter Surface (Shopee / Tiki Pattern) */}
+      <section className="ord-controls-card">
+        <nav className="ord-tabs" aria-label="Lọc trạng thái đơn hàng">
+          {FILTER_TABS.map((tab) => {
+            const count = tabCounts[tab.id] || 0;
+            const isActive = statusFilter === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setStatusFilter(tab.id)}
+                className={`ord-tab ${isActive ? "is-active" : ""}`}
+              >
+                <span>{tab.label}</span>
+                {count > 0 || tab.id === "ALL" ? (
+                  <span className={`ord-tab__count ${isActive ? "is-active" : ""}`}>{count}</span>
+                ) : null}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="ord-search-bar">
+          <label className="ord-search-input">
+            <span className="ord-search-input__icon">
+              <SearchIcon />
+            </span>
+            <input
+              type="search"
+              value={searchKeyword}
+              onChange={(event) => setSearchKeyword(event.target.value)}
+              placeholder="Tìm theo mã đơn hàng (#812), tên linh kiện, SKU, mã vận đơn..."
+            />
+            {searchKeyword ? (
+              <button
+                type="button"
+                className="ord-search-input__clear"
+                onClick={() => setSearchKeyword("")}
+                aria-label="Xóa từ khóa tìm kiếm"
+              >
+                ×
+              </button>
+            ) : null}
+          </label>
+
+          <div className="ord-pay-pills" role="group" aria-label="Lọc phương thức thanh toán">
+            {paymentFilterOptions.map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setPaymentFilter(opt.id)}
+                className={`ord-pay-pill ${paymentFilter === opt.id ? "is-active" : ""}`}
+              >
+                {opt.label}
+              </button>
             ))}
-          </select>
-        </label>
+          </div>
+        </div>
       </section>
 
-      <nav className="orders-tabs" aria-label="Lọc trạng thái đơn hàng">
-        {FILTER_TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setStatusFilter(tab.id)}
-            className={`orders-tab ${statusFilter === tab.id ? "is-active" : ""}`}
-          >
-            <span className="orders-tab__icon">{tab.icon}</span>
-            <span>{tab.label}</span>
-            <strong>{tabCounts[tab.id] || 0}</strong>
-          </button>
-        ))}
-      </nav>
-
+      {/* Order Cards Feed */}
       {loading ? (
-        <section className="orders-loading">
-          <span className="orders-loading__spinner" />
-          <div>
-            <strong>Đang tải lịch sử đơn hàng...</strong>
-            <p>Vui lòng chờ trong giây lát.</p>
-          </div>
+        <section className="ord-skeleton-list" aria-label="Đang tải danh sách đơn hàng">
+          {[1, 2, 3].map((n) => (
+            <div className="ord-skel-card" key={n}>
+              <div className="ord-skel" style={{ height: 22, width: "36%" }} />
+              <div className="ord-skel" style={{ height: 74, width: "100%" }} />
+              <div className="ord-skel" style={{ height: 38, width: "52%", justifySelf: "end" }} />
+            </div>
+          ))}
         </section>
       ) : filteredOrders.length === 0 ? (
-        <EmptyOrdersState hasFilters={Boolean(searchKeyword || paymentFilter !== "ALL" || statusFilter !== "ALL")} />
+        <EmptyOrdersState hasFilters={hasFilters} onResetFilters={handleResetFilters} />
       ) : (
-        <section className="orders-list">
+        <section className="ord-list">
           {filteredOrders.map((order) => {
             const isBusy = actionOrderId === order.id;
-            const paymentMeta = getPaymentStatusMeta(order.paymentStatus);
+            const paymentMeta = getPaymentStatusMeta(order.paymentStatus, order.paymentMethod);
             const detailUrl = routeConfig.public.orderDetail.replace(":orderId", String(order.id));
-            const itemPreview = order.items || [];
+            const items = order.items || [];
+            const previewItems = items.slice(0, 2);
+            const hiddenCount = Math.max(0, items.length - previewItems.length);
+            const accentColor = getOrderAccentColor(order);
+            const payVietQr = canCustomerPayVietQr(order);
+            const payVnpay = canCustomerPayOrder(order);
+            const confirmReceived = canCustomerConfirmReceived(order);
+            const canCancel = canCustomerCancelOrder(order);
+            const hasPrimaryOverride = payVietQr || payVnpay || confirmReceived;
 
             return (
-              <article className={`order-card ${createdOrderId === order.id ? "is-new" : ""}`} key={order.id}>
-                <div className="order-card__top">
-                  <div>
-                    <div className="order-card__id">Đơn hàng #{order.id}</div>
-                    <div className="order-card__date">{order.createdAt ? new Date(order.createdAt).toLocaleString("vi-VN") : "Chưa có ngày đặt"}</div>
+              <article
+                className={`ord-card ${createdOrderId === order.id ? "is-new" : ""}`}
+                style={{ "--ord-accent": accentColor }}
+                key={order.id}
+              >
+                {/* Card Header */}
+                <header className="ord-card__head">
+                  <div className="ord-card__head-left">
+                    <span className="ord-store-tag">
+                      <StoreIcon /> PC Mall Official
+                    </span>
+                    <Link to={detailUrl} className="ord-card__id-link">
+                      Đơn hàng #{order.id}
+                    </Link>
+                    <button
+                      type="button"
+                      className={`ord-copy-id ${copiedOrderId === order.id ? "copied" : ""}`}
+                      onClick={() => handleCopyOrderId(order.id)}
+                      title="Sao chép mã đơn hàng"
+                    >
+                      {copiedOrderId === order.id ? <CheckIcon size={12} /> : <CopyIcon />}
+                    </button>
+                    <span className="ord-card__date">{formatDate(order.createdAt)}</span>
                   </div>
-                  <div className="order-card__badges">
-                    <OrderStatusBadge status={order.status} />
-                    <span className="payment-badge" style={{ color: paymentMeta.tone, borderColor: `${paymentMeta.tone}33`, background: `${paymentMeta.tone}12` }}>
+
+                  <div className="ord-card__head-right">
+                    <OrderStatusBadge
+                      status={order.status}
+                      paymentMethod={order.paymentMethod}
+                      paymentStatus={order.paymentStatus}
+                    />
+                  </div>
+                </header>
+
+                {/* Product List Preview */}
+                <div className="ord-card__items">
+                  {previewItems.length > 0 ? (
+                    previewItems.map((item) => (
+                      <Link
+                        to={detailUrl}
+                        className="ord-item-row"
+                        key={item.id || `${item.name}-${item.sku}`}
+                      >
+                        <div className="ord-item-thumb">
+                          {item.image_url ? (
+                            <img src={resolveProductImage(item)} alt={item.product_name || item.name} />
+                          ) : (
+                            <PackageIcon size={22} />
+                          )}
+                        </div>
+
+                        <div className="ord-item-body">
+                          <div className="ord-item-name">{item.product_name || item.name}</div>
+                          <div className="ord-item-tags">
+                            {item.sku ? <span className="ord-sku-chip">SKU: {item.sku}</span> : null}
+                            <span className="ord-qty-chip">×{item.quantity || 1}</span>
+                          </div>
+                        </div>
+
+                        <div className="ord-item-price">
+                          <strong>{formatCurrency(item.line_total || item.unit_price * (item.quantity || 1))} đ</strong>
+                          {item.quantity > 1 ? (
+                            <span>
+                              {formatCurrency(item.unit_price || item.price)} đ × {item.quantity}
+                            </span>
+                          ) : null}
+                        </div>
+                      </Link>
+                    ))
+                  ) : (
+                    <div className="ord-item-empty">Chưa có dữ liệu sản phẩm trong đơn.</div>
+                  )}
+
+                  {hiddenCount > 0 ? (
+                    <Link to={detailUrl} className="ord-more-items">
+                      <span>Xem thêm {hiddenCount} sản phẩm khác trong đơn hàng này</span>
+                      <ChevronRightIcon />
+                    </Link>
+                  ) : null}
+                </div>
+
+                {/* Compact Tracking & Mini Stepper Strip */}
+                <InlineOrderProgress order={order} />
+
+                {/* Card Footer: Payment Summary + Action Group */}
+                <footer className="ord-card__foot">
+                  <div className="ord-card__pay-meta">
+                    <span className="ord-pay-status-chip" style={{ color: paymentMeta.tone }}>
+                      <span className="ord-pay-dot" style={{ background: paymentMeta.tone }} />
                       {paymentMeta.label}
                     </span>
-                  </div>
-                </div>
-
-                <div className="order-card__body">
-                  <div className="order-card__main">
-                    <div className="order-products">
-                      {itemPreview.length > 0 ? (
-                        itemPreview.slice(0, 4).map((item) => (
-                          <div className="order-product" key={item.id || `${item.name}-${item.sku}`}>
-                            <div className="order-product__image">
-                              <img src={resolveProductImage(item)} alt={item.product_name || item.name || "Sản phẩm"} />
-                            </div>
-                            <div>
-                              <strong>{item.product_name || item.name || "Sản phẩm"}</strong>
-                              <span>{item.sku ? `SKU: ${item.sku} · ` : ""}SL {item.quantity || 1} · {formatCurrency(item.price || item.unit_price)} đ</span>
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="order-product order-product--empty">Chưa có dữ liệu sản phẩm trong đơn.</div>
-                      )}
-                      {itemPreview.length > 4 ? <div className="order-products__more">+{itemPreview.length - 4} sản phẩm khác</div> : null}
-                    </div>
-
-                    <OrderProgress status={order.status} />
-
-                    <div className="order-tracking">
-                      <span className="order-tracking__dot" />
-                      <div>
-                        <strong>Theo dõi đơn hàng</strong>
-                        <p>{getTrackingText(order)}</p>
-                      </div>
-                    </div>
+                    <span className="ord-meta-sep">·</span>
+                    <span className="ord-meta-muted">{getPaymentMethodLabel(order.paymentMethod)}</span>
+                    <span className="ord-meta-sep">·</span>
+                    <span className="ord-meta-muted">{order.totalItems || items.length || 0} sản phẩm</span>
                   </div>
 
-                  <aside className="order-card__summary">
-                    <div>
-                      <span>Tổng thanh toán</span>
+                  <div className="ord-card__foot-right">
+                    <div className="ord-card__total">
+                      <span>Thành tiền:</span>
                       <strong>{formatCurrency(order.finalAmount)} đ</strong>
                     </div>
-                    <dl>
-                      <div>
-                        <dt>Phương thức</dt>
-                        <dd>{getPaymentMethodLabel(order.paymentMethod)}</dd>
-                      </div>
-                      <div>
-                        <dt>Số lượng</dt>
-                        <dd>{order.totalItems || itemPreview.length || 0} sản phẩm</dd>
-                      </div>
-                      <div>
-                        <dt>Địa chỉ</dt>
-                        <dd>{order.shippingAddress || "Chưa có thông tin"}</dd>
-                      </div>
-                    </dl>
-                  </aside>
-                </div>
 
-                <div className="order-card__actions">
-                  <Link to={detailUrl} className="order-action order-action--primary">
-                    Xem chi tiết
-                  </Link>
-                  <Link to={detailUrl} className="order-action">
-                    Theo dõi đơn hàng
-                  </Link>
-                  <button type="button" className="order-action" disabled={isBusy} onClick={() => handleReorder(order)}>
-                    {isBusy ? "Đang thêm..." : "Mua lại"}
-                  </button>
-                  {canCustomerPayOrder(order) ? (
-                    <button type="button" className="order-action order-action--pay" disabled={isBusy} onClick={() => handlePayOrder(order)}>
-                      {isBusy ? "Đang mở..." : "Thanh toán VNPay"}
-                    </button>
-                  ) : null}
-                  {canCustomerCancelOrder(order) ? (
-                    <button type="button" className="order-action order-action--danger" disabled={isBusy} onClick={() => handleCancelOrder(order.id)}>
-                      {isBusy ? "Đang xử lý..." : "Hủy đơn"}
-                    </button>
-                  ) : null}
-                  {canCustomerConfirmReceived(order) ? (
-                    <button type="button" className="order-action order-action--success" disabled={isBusy} onClick={() => handleConfirmReceived(order.id)}>
-                      {isBusy ? "Đang xác nhận..." : "Xác nhận đã nhận hàng"}
-                    </button>
-                  ) : null}
-                </div>
+                    <div className="ord-card__actions">
+                      {canCancel ? (
+                        <button
+                          type="button"
+                          className="ord-btn ord-btn--danger"
+                          disabled={isBusy}
+                          onClick={() => handleCancelOrder(order.id)}
+                        >
+                          {isBusy ? "Đang hủy..." : "Hủy đơn"}
+                        </button>
+                      ) : null}
+
+                      <button
+                        type="button"
+                        className="ord-btn ord-btn--secondary"
+                        disabled={isBusy}
+                        onClick={() => handleReorder(order)}
+                      >
+                        <CartIcon /> {isBusy ? "Đang thêm..." : "Mua lại"}
+                      </button>
+
+                      {payVietQr ? (
+                        <Link
+                          to={routeConfig.public.paymentVietQr.replace(":orderId", String(order.id))}
+                          className="ord-btn ord-btn--primary"
+                        >
+                          <QrIcon /> Quét QR thanh toán
+                        </Link>
+                      ) : null}
+
+                      {payVnpay ? (
+                        <button
+                          type="button"
+                          className="ord-btn ord-btn--primary"
+                          disabled={isBusy}
+                          onClick={() => handlePayOrder(order)}
+                        >
+                          {isBusy
+                            ? "Đang mở..."
+                            : ["FAILED", "PAYMENT_CANCELLED"].includes(normalizeStatus(order.paymentStatus))
+                              ? "Thanh toán lại VNPay"
+                              : "Thanh toán VNPay"}
+                        </button>
+                      ) : null}
+
+                      {confirmReceived ? (
+                        <button
+                          type="button"
+                          className="ord-btn ord-btn--success"
+                          disabled={isBusy}
+                          onClick={() => handleConfirmReceived(order.id)}
+                        >
+                          <CheckIcon /> {isBusy ? "Đang xác nhận..." : "Đã nhận được hàng"}
+                        </button>
+                      ) : null}
+
+                      <Link
+                        to={detailUrl}
+                        className={`ord-btn ${hasPrimaryOverride ? "ord-btn--ghost" : "ord-btn--primary"}`}
+                      >
+                        Xem chi tiết <ChevronRightIcon />
+                      </Link>
+                    </div>
+                  </div>
+                </footer>
               </article>
             );
           })}
@@ -628,711 +1008,849 @@ export function OrdersPage() {
 }
 
 const ordersStyles = `
-.orders-dashboard {
+.ord-page {
+  max-width: 1220px;
+  margin: 0 auto;
   display: grid;
-  gap: 22px;
+  gap: 18px;
+  padding-bottom: 40px;
 }
 
-.orders-hero {
+/* Breadcrumb */
+.ord-crumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #64748b;
+  font-weight: 600;
+}
+.ord-crumb a {
+  color: #64748b;
+  text-decoration: none;
+}
+.ord-crumb a:hover {
+  color: #2563eb;
+}
+.ord-crumb__current {
+  color: #0f172a;
+  font-weight: 800;
+}
+
+/* Executive Compact Header Card */
+.ord-header-card {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 24px;
-  align-items: end;
-  padding: 30px;
-  border-radius: 28px;
-  color: #fff;
+  align-items: center;
+  padding: 26px 30px;
+  border-radius: 24px;
+  color: #f8fafc;
   background:
-    radial-gradient(circle at top right, rgba(96, 165, 250, 0.38), transparent 34%),
-    linear-gradient(135deg, #0f172a 0%, #1e3a8a 58%, #2563eb 100%);
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
+    radial-gradient(circle at 92% 14%, rgba(59, 130, 246, 0.34) 0%, transparent 45%),
+    radial-gradient(circle at 8% 92%, rgba(16, 185, 129, 0.16) 0%, transparent 42%),
+    linear-gradient(135deg, #0b1120 0%, #132240 55%, #0f172a 100%);
+  box-shadow: 0 20px 44px -16px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
 }
-
-.orders-hero__eyebrow {
+.ord-header-card__eyebrow {
   display: inline-flex;
-  margin-bottom: 10px;
-  font-size: 12px;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.18);
+  border: 1px solid rgba(147, 197, 253, 0.28);
+  color: #93c5fd;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #bfdbfe;
+  margin-bottom: 10px;
 }
-
-.orders-hero h1 {
+.ord-header-card__title {
   margin: 0;
-  font-size: clamp(30px, 4vw, 46px);
-  line-height: 1.08;
+  font-size: clamp(26px, 3.2vw, 34px);
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: #ffffff;
 }
-
-.orders-hero p {
-  max-width: 680px;
-  margin: 10px 0 0;
-  color: rgba(255, 255, 255, 0.82);
-  font-size: 16px;
+.ord-header-card__sub {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: #cbd5e1;
+  line-height: 1.5;
+  max-width: 600px;
 }
-
-.orders-hero__summary {
-  min-width: 240px;
-  padding: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 18px;
-  background: rgba(15, 23, 42, 0.32);
+.ord-header-card__sub strong {
+  color: #ffffff;
 }
-
-.orders-hero__summary span,
-.orders-hero__summary small {
-  display: block;
-  color: rgba(255, 255, 255, 0.72);
-}
-
-.orders-hero__summary strong {
-  display: block;
-  margin: 8px 0 4px;
-  font-size: 24px;
-}
-
-.orders-stats {
+.ord-header-card__metrics {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(168px, 1fr));
   gap: 12px;
 }
-
-.orders-stat-card {
-  min-height: 104px;
-  padding: 18px;
-  border: 1px solid #e2e8f0;
-  border-radius: 18px;
-  background: #fff;
-  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
-}
-
-.orders-stat-card span {
-  color: #64748b;
-  font-weight: 700;
-  font-size: 13px;
-}
-
-.orders-stat-card strong {
-  display: block;
-  margin-top: 10px;
-  color: #0f172a;
-  font-size: 32px;
-  line-height: 1;
-}
-
-.orders-stat-card--total {
-  color: #fff;
-  border-color: transparent;
-  background: linear-gradient(135deg, #0f172a, #2563eb);
-}
-
-.orders-stat-card--total span,
-.orders-stat-card--total strong {
-  color: #fff;
-}
-
-.orders-stat-card--danger strong {
-  color: #dc2626;
-}
-
-.orders-alert {
+.ord-metric-box {
   padding: 15px 18px;
   border-radius: 16px;
-  font-weight: 700;
-}
-
-.orders-alert a {
-  color: inherit;
-}
-
-.orders-alert--success {
-  color: #047857;
-  border: 1px solid #86efac;
-  background: #ecfdf5;
-}
-
-.orders-alert--info {
-  color: #1d4ed8;
-  border: 1px solid #bfdbfe;
-  background: #eff6ff;
-}
-
-.orders-alert--danger {
-  color: #b91c1c;
-  border: 1px solid #fecaca;
-  background: #fef2f2;
-}
-
-.orders-toolbar {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(12px);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid #e2e8f0;
-  border-radius: 20px;
-  background: #fff;
-  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.06);
+  gap: 4px;
+}
+.ord-metric-box--accent {
+  background: linear-gradient(145deg, rgba(37, 99, 235, 0.24), rgba(255, 255, 255, 0.06));
+  border-color: rgba(147, 197, 253, 0.26);
+}
+.ord-metric-box__label {
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+.ord-metric-box__value {
+  font-size: 22px;
+  font-weight: 900;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+.ord-metric-box__hint {
+  font-size: 11.5px;
+  color: #94a3b8;
+  font-weight: 500;
 }
 
-.orders-search,
-.orders-filter {
+/* Alerts */
+.ord-alert {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 48px;
-  padding: 0 14px;
-  border: 1px solid #dbe4f0;
+  padding: 14px 18px;
   border-radius: 14px;
-  background: #f8fafc;
+  font-size: 14px;
+  font-weight: 700;
+}
+.ord-alert a {
+  color: inherit;
+  text-decoration: underline;
+}
+.ord-alert--success {
+  background: #ecfdf5;
+  border: 1px solid #86efac;
+  color: #047857;
+}
+.ord-alert--info {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+}
+.ord-alert--danger {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
 }
 
-.orders-search input,
-.orders-filter select {
+/* Unified Controls Card (Tabs + Search + Payment Pills) */
+.ord-controls-card {
+  border-radius: 20px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 8px 24px -10px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+.ord-tabs {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0 12px;
+  scrollbar-width: none;
+}
+.ord-tabs::-webkit-scrollbar {
+  display: none;
+}
+.ord-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 15px 16px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 750;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+.ord-tab:hover {
+  color: #0f172a;
+}
+.ord-tab.is-active {
+  color: #2563eb;
+}
+.ord-tab.is-active::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  height: 3px;
+  border-radius: 999px 999px 0 0;
+  background: #2563eb;
+}
+.ord-tab__count {
+  min-width: 20px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 11.5px;
+  font-weight: 800;
+}
+.ord-tab__count.is-active {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.ord-search-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 18px;
+  background: #f8fafc;
+  flex-wrap: wrap;
+}
+.ord-search-input {
+  flex: 1 1 320px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid #dbe4f0;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.ord-search-input:focus-within {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+.ord-search-input__icon {
+  color: #94a3b8;
+  display: grid;
+}
+.ord-search-input input {
   width: 100%;
   border: 0;
   outline: 0;
-  color: #0f172a;
   background: transparent;
-  font: inherit;
-}
-
-.orders-filter {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 2px;
-  align-items: center;
-}
-
-.orders-filter span {
-  color: #64748b;
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.orders-tabs {
-  display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-}
-
-.orders-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 46px;
-  padding: 0 16px;
-  border: 1px solid #dbe4f0;
-  border-radius: 999px;
-  color: #334155;
-  background: #fff;
-  font-weight: 800;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
-}
-
-.orders-tab:hover {
-  transform: translateY(-2px);
-  border-color: #93c5fd;
-  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.12);
-}
-
-.orders-tab.is-active {
-  color: #fff;
-  border-color: transparent;
-  background: linear-gradient(135deg, #0f172a, #2563eb);
-}
-
-.orders-tab strong {
-  min-width: 24px;
-  padding: 3px 8px;
-  border-radius: 999px;
-  color: #1d4ed8;
-  background: #eff6ff;
-  font-size: 12px;
-}
-
-.orders-tab.is-active strong {
   color: #0f172a;
-  background: #fff;
+  font-size: 13.5px;
+  font-weight: 600;
 }
-
-.orders-list {
-  display: grid;
-  gap: 16px;
-}
-
-.order-card {
-  display: grid;
-  gap: 18px;
-  padding: 20px;
-  border: 1px solid #e2e8f0;
-  border-radius: 24px;
-  background: #fff;
-  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
-}
-
-.order-card.is-new {
-  border-color: #60a5fa;
-  box-shadow: 0 20px 52px rgba(37, 99, 235, 0.14);
-}
-
-.order-card__top,
-.order-card__body,
-.order-card__actions {
-  display: flex;
-  gap: 16px;
-}
-
-.order-card__top {
-  justify-content: space-between;
-  align-items: flex-start;
-}
-
-.order-card__id {
-  color: #0f172a;
-  font-size: 24px;
-  font-weight: 900;
-}
-
-.order-card__date {
-  margin-top: 5px;
-  color: #64748b;
+.ord-search-input__clear {
+  border: none;
+  background: #e2e8f0;
+  color: #475569;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
   font-size: 14px;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
 }
-
-.order-card__badges {
+.ord-pay-pills {
   display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
   flex-wrap: wrap;
 }
-
-.payment-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 12px;
-  border: 1px solid;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 900;
+.ord-pay-pill {
+  padding: 8px 13px;
+  border-radius: 10px;
+  border: 1px solid #dbe4f0;
+  background: #ffffff;
+  color: #475569;
+  font-size: 12.5px;
+  font-weight: 750;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+.ord-pay-pill:hover {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+.ord-pay-pill.is-active {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #ffffff;
 }
 
-.order-card__body {
-  align-items: stretch;
-}
-
-.order-card__main {
+/* Order Cards List */
+.ord-list {
   display: grid;
-  gap: 14px;
-  min-width: 0;
-  flex: 1;
+  gap: 16px;
 }
-
-.order-products {
-  display: grid;
-  gap: 10px;
-}
-
-.order-product {
-  display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
-  gap: 12px;
-  align-items: center;
-  min-height: 70px;
-  padding: 10px;
-  border: 1px solid #edf2f7;
-  border-radius: 16px;
-  background: #f8fafc;
-}
-
-.order-product--empty {
-  display: block;
-  color: #64748b;
-  font-weight: 700;
-}
-
-.order-product__image {
-  width: 58px;
-  height: 58px;
-  overflow: hidden;
-  border-radius: 14px;
-  background: #e2e8f0;
-}
-
-.order-product__image img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.order-product strong {
-  display: block;
-  overflow: hidden;
-  color: #0f172a;
-  font-size: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.order-product span,
-.order-products__more {
-  display: block;
-  margin-top: 4px;
-  color: #64748b;
-  font-size: 13px;
-}
-
-.order-progress {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.order-progress__step {
+.ord-card {
   position: relative;
-  display: grid;
-  gap: 6px;
-  justify-items: center;
-  color: #94a3b8;
-  font-size: 12px;
-  font-weight: 800;
-  text-align: center;
+  border-radius: 22px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 10px 26px -12px rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
-
-.order-progress__step::before {
+.ord-card::before {
   content: "";
   position: absolute;
-  top: 15px;
-  left: -50%;
-  width: 100%;
+  top: 0;
+  left: 0;
+  right: 0;
   height: 3px;
-  background: #e2e8f0;
-  z-index: 0;
+  background: var(--ord-accent, #2563eb);
+  opacity: 0.85;
+}
+.ord-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 16px 36px -14px rgba(15, 23, 42, 0.12);
+}
+.ord-card.is-new {
+  border-color: #60a5fa;
+  box-shadow: 0 18px 40px -12px rgba(37, 99, 235, 0.2);
 }
 
-.order-progress__step:first-child::before {
-  display: none;
-}
-
-.order-progress__step.is-active::before {
-  background: #2563eb;
-}
-
-.order-progress__marker {
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 999px;
-  color: #94a3b8;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-}
-
-.order-progress__step.is-active {
-  color: #1d4ed8;
-}
-
-.order-progress__step.is-active .order-progress__marker {
-  color: #fff;
-  border-color: #2563eb;
-  background: #2563eb;
-}
-
-.order-tracking {
+.ord-card__head {
+  padding: 16px 22px 14px;
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  align-items: flex-start;
-  padding: 14px;
-  border-radius: 16px;
-  background: #eff6ff;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #f1f5f9;
 }
-
-.order-tracking--cancelled {
-  background: #fef2f2;
+.ord-card__head-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
-
-.order-tracking__dot {
-  flex: 0 0 auto;
-  width: 12px;
-  height: 12px;
-  margin-top: 5px;
-  border-radius: 999px;
-  background: #2563eb;
-  box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.14);
-}
-
-.order-tracking--cancelled .order-tracking__dot {
-  background: #dc2626;
-  box-shadow: 0 0 0 5px rgba(220, 38, 38, 0.14);
-}
-
-.order-tracking strong {
-  color: #0f172a;
-}
-
-.order-tracking p {
-  margin: 3px 0 0;
-  color: #475569;
-  font-size: 13px;
-}
-
-.order-card__summary {
-  display: grid;
-  align-content: start;
-  gap: 14px;
-  width: 310px;
-  padding: 16px;
-  border-radius: 18px;
-  background: linear-gradient(180deg, #f8fafc, #eef6ff);
-}
-
-.order-card__summary span,
-.order-card__summary dt {
-  color: #64748b;
-  font-size: 13px;
+.ord-store-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #1e3a8a, #2563eb);
+  color: #ffffff;
+  font-size: 11px;
   font-weight: 800;
 }
-
-.order-card__summary strong {
-  display: block;
-  margin-top: 6px;
+.ord-card__id-link {
+  font-size: 15.5px;
+  font-weight: 850;
   color: #0f172a;
-  font-size: 24px;
-}
-
-.order-card__summary dl {
-  display: grid;
-  gap: 10px;
-  margin: 0;
-}
-
-.order-card__summary dl div {
-  display: grid;
-  gap: 3px;
-}
-
-.order-card__summary dd {
-  margin: 0;
-  color: #0f172a;
-  font-weight: 700;
-}
-
-.order-card__actions {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.order-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 40px;
-  padding: 0 16px;
-  border: 1px solid #dbe4f0;
-  border-radius: 12px;
-  color: #0f172a;
-  background: #fff;
-  font: inherit;
-  font-weight: 900;
   text-decoration: none;
-  cursor: pointer;
-  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+  letter-spacing: -0.01em;
 }
-
-.order-action:hover {
-  transform: translateY(-1px);
-  border-color: #93c5fd;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1);
+.ord-card__id-link:hover {
+  color: #2563eb;
 }
-
-.order-action:disabled {
-  cursor: not-allowed;
-  opacity: 0.68;
-  transform: none;
-}
-
-.order-action--primary,
-.order-action--pay {
-  color: #fff;
-  border-color: transparent;
-  background: linear-gradient(135deg, #0f172a, #2563eb);
-}
-
-.order-action--danger {
-  color: #b91c1c;
-  border-color: #fecaca;
-  background: #fff;
-}
-
-.order-action--success {
-  color: #fff;
-  border-color: transparent;
-  background: #059669;
-}
-
-.orders-loading,
-.orders-empty,
-.orders-auth-card {
-  display: grid;
-  gap: 14px;
-  justify-items: center;
-  padding: 34px;
+.ord-copy-id {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
   border: 1px solid #e2e8f0;
-  border-radius: 24px;
-  background: #fff;
-  text-align: center;
-  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
-}
-
-.orders-loading {
-  grid-template-columns: auto minmax(0, 1fr);
-  justify-items: start;
-  text-align: left;
-}
-
-.orders-loading p,
-.orders-empty p,
-.orders-auth-card p {
-  margin: 0;
+  background: #f8fafc;
   color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
-
-.orders-loading__spinner {
-  width: 30px;
-  height: 30px;
-  border: 3px solid #bfdbfe;
-  border-top-color: #2563eb;
-  border-radius: 999px;
-  animation: orders-spin 800ms linear infinite;
+.ord-copy-id:hover {
+  border-color: #93c5fd;
+  color: #2563eb;
+  background: #eff6ff;
 }
-
-.orders-empty__art {
-  width: min(180px, 70vw);
+.ord-copy-id.copied {
+  border-color: #86efac;
+  background: #ecfdf5;
+  color: #059669;
 }
-
-.orders-empty__art svg {
-  display: block;
-  width: 100%;
-  height: auto;
+.ord-card__date {
+  font-size: 12.5px;
+  color: #64748b;
+  font-weight: 600;
 }
-
-.orders-empty h2,
-.orders-auth-card h1 {
-  margin: 0;
-  color: #0f172a;
-}
-
-.orders-empty__cta {
-  display: inline-flex;
+.ord-card__head-right {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  min-height: 44px;
-  padding: 0 18px;
-  border-radius: 14px;
-  color: #fff;
-  background: linear-gradient(135deg, #0f172a, #2563eb);
-  font-weight: 900;
-  text-decoration: none;
+  gap: 8px;
 }
 
-.orders-auth-card__icon {
+/* Product Rows inside Card */
+.ord-card__items {
+  display: grid;
+}
+.ord-item-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 22px;
+  text-decoration: none;
+  border-bottom: 1px solid #f1f5f9;
+  transition: background 0.15s ease;
+}
+.ord-item-row:last-child {
+  border-bottom: none;
+}
+.ord-item-row:hover {
+  background: #fafcff;
+}
+.ord-item-thumb {
+  width: 72px;
+  height: 72px;
+  border-radius: 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
   display: grid;
   place-items: center;
-  width: 64px;
-  height: 64px;
-  border-radius: 20px;
+  padding: 5px;
+  flex-shrink: 0;
+  overflow: hidden;
+  color: #94a3b8;
+}
+.ord-item-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.ord-item-body {
+  flex: 1;
+  min-width: 0;
+}
+.ord-item-name {
+  font-size: 15px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ord-item-tags {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.ord-sku-chip {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 11.5px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.ord-qty-chip {
+  padding: 2px 8px;
+  border-radius: 6px;
   background: #eff6ff;
-  font-size: 30px;
+  color: #1d4ed8;
+  font-size: 11.5px;
+  font-weight: 800;
+}
+.ord-item-price {
+  text-align: right;
+  flex-shrink: 0;
+  display: grid;
+  gap: 2px;
+}
+.ord-item-price strong {
+  font-size: 15.5px;
+  font-weight: 850;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+.ord-item-price span {
+  font-size: 12px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+.ord-item-empty {
+  padding: 18px 22px;
+  color: #64748b;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.ord-more-items {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 22px;
+  background: #f8fafc;
+  border-top: 1px dashed #e2e8f0;
+  color: #2563eb;
+  font-size: 12.5px;
+  font-weight: 750;
+  text-decoration: none;
+}
+.ord-more-items:hover {
+  background: #eff6ff;
 }
 
-@keyframes orders-spin {
-  to {
-    transform: rotate(360deg);
+/* Compact Inline Progress Strip */
+.ord-strip {
+  padding: 12px 22px;
+  background: #f8fafc;
+  border-top: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.ord-strip--success {
+  background: #f0fdf4;
+  border-top-color: #dcfce7;
+}
+.ord-strip--danger {
+  background: #fef2f2;
+  border-top-color: #fee2e2;
+  justify-content: flex-start;
+  gap: 10px;
+}
+.ord-strip__status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  flex: 1 1 300px;
+}
+.ord-strip__icon {
+  color: #2563eb;
+  display: grid;
+  flex-shrink: 0;
+}
+.ord-strip--success .ord-strip__icon {
+  color: #059669;
+}
+.ord-strip__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.ord-strip__dot--danger {
+  background: #dc2626;
+  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.16);
+}
+.ord-strip__text {
+  font-size: 13px;
+  font-weight: 650;
+  color: #334155;
+  line-height: 1.45;
+}
+.ord-strip--danger .ord-strip__text {
+  color: #991b1b;
+}
+
+.ord-mini-stepper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ord-mini-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+.ord-mini-step__dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1.5px solid #cbd5e1;
+  background: #ffffff;
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+}
+.ord-mini-step.is-done {
+  color: #047857;
+}
+.ord-mini-step.is-done .ord-mini-step__dot {
+  border-color: #10b981;
+  background: #10b981;
+  color: #ffffff;
+}
+.ord-mini-step.is-current {
+  color: #1d4ed8;
+}
+.ord-mini-step.is-current .ord-mini-step__dot {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #ffffff;
+}
+
+/* Card Footer */
+.ord-card__foot {
+  padding: 16px 22px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border-top: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.ord-card__pay-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+.ord-pay-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 800;
+}
+.ord-pay-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+}
+.ord-meta-sep {
+  color: #cbd5e1;
+}
+.ord-meta-muted {
+  color: #64748b;
+  font-weight: 650;
+}
+
+.ord-card__foot-right {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+.ord-card__total {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.ord-card__total span {
+  font-size: 13px;
+  color: #64748b;
+  font-weight: 700;
+}
+.ord-card__total strong {
+  font-size: 20px;
+  font-weight: 900;
+  color: #2563eb;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.ord-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Buttons */
+.ord-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 15px;
+  border-radius: 11px;
+  border: 1px solid transparent;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.16s ease;
+}
+.ord-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.ord-btn--primary {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #ffffff;
+  box-shadow: 0 6px 16px -6px rgba(37, 99, 235, 0.45);
+}
+.ord-btn--primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px -6px rgba(37, 99, 235, 0.55);
+}
+.ord-btn--success {
+  background: linear-gradient(135deg, #059669, #10b981);
+  color: #ffffff;
+}
+.ord-btn--secondary {
+  background: #ffffff;
+  border-color: #dbe4f0;
+  color: #1e293b;
+}
+.ord-btn--secondary:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+.ord-btn--ghost {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+.ord-btn--ghost:hover:not(:disabled) {
+  background: #dbeafe;
+}
+.ord-btn--danger {
+  background: #ffffff;
+  border-color: #fecaca;
+  color: #dc2626;
+}
+.ord-btn--danger:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #f87171;
+}
+
+/* Skeleton Loader */
+@keyframes ordShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.ord-skeleton-list {
+  display: grid;
+  gap: 16px;
+}
+.ord-skel-card {
+  padding: 22px;
+  border-radius: 22px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  display: grid;
+  gap: 14px;
+}
+.ord-skel {
+  border-radius: 12px;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: ordShimmer 1.4s ease infinite;
+}
+
+/* Empty & Auth States */
+.ord-empty,
+.ord-auth-card {
+  padding: 44px 28px;
+  border-radius: 24px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 12px 32px -12px rgba(15, 23, 42, 0.06);
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 12px;
+}
+.ord-empty h2,
+.ord-auth-card h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 900;
+  color: #0f172a;
+}
+.ord-empty p,
+.ord-auth-card p {
+  margin: 0;
+  max-width: 460px;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.ord-auth-card__icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 18px;
+  background: #eff6ff;
+  color: #2563eb;
+  display: grid;
+  place-items: center;
+}
+
+/* Responsive */
+@media (max-width: 960px) {
+  .ord-header-card {
+    grid-template-columns: 1fr;
+    padding: 22px;
+  }
+  .ord-card__foot-right {
+    margin-left: 0;
+    width: 100%;
+    justify-content: space-between;
   }
 }
 
-@media (max-width: 1100px) {
-  .orders-stats {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .order-card__body {
-    flex-direction: column;
-  }
-
-  .order-card__summary {
-    width: auto;
-  }
-}
-
-@media (max-width: 760px) {
-  .orders-hero,
-  .orders-toolbar,
-  .orders-loading {
+@media (max-width: 680px) {
+  .ord-header-card__metrics {
     grid-template-columns: 1fr;
   }
-
-  .orders-hero {
-    padding: 24px;
+  .ord-card__head,
+  .ord-item-row,
+  .ord-strip,
+  .ord-card__foot {
+    padding-left: 16px;
+    padding-right: 16px;
   }
-
-  .orders-hero__summary {
-    min-width: 0;
+  .ord-item-row {
+    align-items: flex-start;
   }
-
-  .orders-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .ord-item-thumb {
+    width: 60px;
+    height: 60px;
   }
-
-  .order-card {
-    padding: 16px;
-    border-radius: 20px;
-  }
-
-  .order-card__top,
-  .order-card__actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .order-card__badges {
-    justify-content: flex-start;
-  }
-
-  .order-progress {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-  }
-
-  .order-progress__step::before {
+  .ord-mini-stepper {
     display: none;
   }
-
-  .order-action {
-    width: 100%;
+  .ord-card__foot-right {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
   }
-}
-
-@media (max-width: 520px) {
-  .orders-stats {
-    grid-template-columns: 1fr;
+  .ord-card__total {
+    justify-content: space-between;
   }
-
-  .order-product {
-    grid-template-columns: 48px minmax(0, 1fr);
-  }
-
-  .order-product__image {
-    width: 48px;
-    height: 48px;
-  }
-
-  .order-card__id {
-    font-size: 20px;
+  .ord-card__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 `;

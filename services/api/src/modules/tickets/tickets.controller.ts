@@ -226,6 +226,11 @@ export const postTicketMessage = asyncHandler(async (req: Request, res: Response
     throw new AppError("Forbidden", 403);
   }
 
+  const currentStatus = String((ticket as any).status || "OPEN").toUpperCase();
+  if (currentStatus === "CLOSED") {
+    throw new AppError("Ticket đã đóng, bạn không thể gửi thêm phản hồi.", 400);
+  }
+
   const payload = addTicketMessageSchema.parse(req.body);
   const isStaff = canManageTicketRole(req.user.role);
   const visibility = isStaff && payload.visibility === "INTERNAL" ? "INTERNAL" : "PUBLIC";
@@ -237,7 +242,6 @@ export const postTicketMessage = asyncHandler(async (req: Request, res: Response
   });
 
   // Tự động chuyển trạng thái hợp lý khi có phản hồi mới
-  const currentStatus = String((ticket as any).status || "OPEN").toUpperCase();
   if (!isStaff && currentStatus === "RESOLVED") {
     // Khách hàng phản hồi lại khi ticket đang RESOLVED -> mở lại IN_PROGRESS để kỹ thuật viên xử lý tiếp
     updated = await updateTicket(req.params.id, { status: "IN_PROGRESS" });

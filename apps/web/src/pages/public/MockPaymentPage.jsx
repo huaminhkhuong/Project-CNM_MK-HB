@@ -52,7 +52,7 @@ export function MockPaymentPage() {
       setStatus("cancelling");
       setErrorMessage("");
       await cancelMockPayment(orderId);
-      navigate(`/checkout?payment_cancelled=true&orderId=${orderId}`, {
+      navigate(`/payment/result?success=false&orderId=${orderId}&reason=user_cancelled`, {
         replace: true,
         state: { paymentStatus: "payment_cancelled", orderId }
       });

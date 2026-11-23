@@ -2,6 +2,7 @@ const { createError, toPositiveInteger } = require("../../utils/service-helpers"
 const { query } = require("../../config/database");
 const { getTableColumns, pickColumn } = require("../../utils/schema-helpers");
 const { env } = require("../../config/env");
+const { isMockPaymentEnabled } = require("../../services/payment-mode.service");
 
 let schemaCache = null;
 
@@ -365,7 +366,15 @@ async function getPaymentStatus(userId, paymentId, reqOrBaseUrl = null) {
   return mapPayment(payment, reqOrBaseUrl);
 }
 
+async function assertMockGatewayAllowed() {
+  const mockEnabled = await isMockPaymentEnabled();
+  if (!mockEnabled) {
+    throw createError("Mock payment is disabled", 403);
+  }
+}
+
 async function confirmPayment(userId, paymentId, payload = {}, reqOrBaseUrl = null) {
+  await assertMockGatewayAllowed();
   const parsedPaymentId = toPositiveInteger(paymentId, "paymentId");
   const payment = await getPaymentRowById(parsedPaymentId);
 
@@ -381,6 +390,7 @@ async function confirmPayment(userId, paymentId, payload = {}, reqOrBaseUrl = nu
 }
 
 async function confirmPaymentByGateway(paymentId, status, note = null, reqOrBaseUrl = null) {
+  await assertMockGatewayAllowed();
   const schema = await getSchema();
   const parsedPaymentId = toPositiveInteger(paymentId, "paymentId");
   const payment = await getPaymentRowById(parsedPaymentId);
@@ -425,28 +435,106 @@ async function uploadPaymentProof(orderOrPaymentId, file, reqOrBaseUrl = null) {
   const schema = await getSchema();
 
   // Determine whether id is orderId or paymentId
-  let orderId = id;
-  const orderRows = await query(`SELECT id FROM orders WHERE id = ? LIMIT 1`, [id]);
-  if (!orderRows || orderRows.length === 0) {
+  let orderRow = null;
+  const orderRows = await query(
+    `SELECT id, user_id, payment_method, payment_status, status, final_amount, total_amount FROM orders WHERE id = ? LIMIT 1`,
+    [id]
+  );
+  if (orderRows && orderRows.length > 0) {
+    orderRow = orderRows[0];
+  } else {
     const paymentRows = await query(`SELECT order_id FROM ${schema.payments.table} WHERE id = ? LIMIT 1`, [id]);
     if (paymentRows && paymentRows.length > 0) {
-      orderId = paymentRows[0].order_id;
-    } else {
-      throw createError(`Không tìm thấy đơn hàng hoặc thanh toán với mã #${id}`, 404);
+      const resolvedRows = await query(
+        `SELECT id, user_id, payment_method, payment_status, status, final_amount, total_amount FROM orders WHERE id = ? LIMIT 1`,
+        [paymentRows[0].order_id]
+      );
+      orderRow = resolvedRows?.[0] || null;
     }
   }
 
-  // Update payments table if record exists
-  if (schema.payments.proofImageUrl) {
+  if (!orderRow) {
+    throw createError(`Không tìm thấy đơn hàng hoặc thanh toán với mã #${id}`, 404);
+  }
+
+  const orderId = orderRow.id;
+  const actor = reqOrBaseUrl?.user || null;
+  if (actor) {
+    const actorRole = String(actor.role || "").trim().toUpperCase();
+    const isStaffOrAdmin = ["ADMIN", "SALES_STAFF", "SALES"].includes(actorRole);
+    const actorUserId = Number(actor.id ?? actor.userId ?? 0);
+    if (!isStaffOrAdmin && Number(orderRow.user_id) !== actorUserId) {
+      throw createError("Forbidden: you can only upload payment proof for your own orders", 403);
+    }
+  }
+
+  if (String(orderRow.payment_method || "").trim().toUpperCase() !== "BANK_TRANSFER") {
+    throw createError("Payment proof upload is only available for QR Banking orders", 400);
+  }
+
+  if (String(orderRow.status || "").trim().toUpperCase() === "CANCELED") {
+    throw createError("Cannot upload payment proof for a canceled order", 400);
+  }
+
+  if (String(orderRow.payment_status || "").trim().toUpperCase() === "PAID") {
+    throw createError("Order already paid", 400);
+  }
+
+  // Update payments table if record exists, otherwise create a VIETQR payment row
+  const existingPayment = await getPaymentRowByOrderId(orderId);
+  if (existingPayment) {
+    const paymentUpdates = [`${schema.payments.status} = ?`];
+    const paymentParams = ["AWAITING_ADMIN_CONFIRMATION"];
+    if (schema.payments.proofImageUrl) {
+      paymentUpdates.push(`${schema.payments.proofImageUrl} = ?`);
+      paymentParams.push(proofUrl);
+    }
+    if (schema.payments.updatedAt) {
+      paymentUpdates.push(`${schema.payments.updatedAt} = NOW()`);
+    }
+    paymentParams.push(existingPayment.id);
     await query(
-      `UPDATE ${schema.payments.table} SET ${schema.payments.proofImageUrl} = ? WHERE ${schema.payments.orderId} = ? OR ${schema.payments.id} = ?`,
-      [proofUrl, orderId, id]
+      `UPDATE ${schema.payments.table} SET ${paymentUpdates.join(", ")} WHERE ${schema.payments.id} = ?`,
+      paymentParams
     );
+  } else {
+    const fields = [schema.payments.orderId, schema.payments.amount, schema.payments.status];
+    const values = ["?", "?", "?"];
+    const params = [orderId, Number(orderRow.final_amount || orderRow.total_amount || 0), "AWAITING_ADMIN_CONFIRMATION"];
+    if (schema.payments.userId) {
+      fields.push(schema.payments.userId);
+      values.push("?");
+      params.push(orderRow.user_id || null);
+    }
+    if (schema.payments.provider) {
+      fields.push(schema.payments.provider);
+      values.push("?");
+      params.push("VIETQR");
+    }
+    if (schema.payments.paymentMethod) {
+      fields.push(schema.payments.paymentMethod);
+      values.push("?");
+      params.push("BANK_TRANSFER");
+    }
+    if (schema.payments.proofImageUrl) {
+      fields.push(schema.payments.proofImageUrl);
+      values.push("?");
+      params.push(proofUrl);
+    }
+    if (schema.payments.createdAt) {
+      fields.push(schema.payments.createdAt);
+      values.push("NOW()");
+    }
+    if (schema.payments.updatedAt) {
+      fields.push(schema.payments.updatedAt);
+      values.push("NOW()");
+    }
+    await query(`INSERT INTO ${schema.payments.table} (${fields.join(", ")}) VALUES (${values.join(", ")})`, params);
   }
 
   // Update orders table
   await query(
-    `UPDATE orders SET payment_proof = ?, payment_status = 'AWAITING_ADMIN_CONFIRMATION' WHERE id = ?`,
+    `UPDATE orders SET payment_proof = ?, payment_status = 'AWAITING_ADMIN_CONFIRMATION', updated_at = NOW() WHERE id = ?`,
     [proofUrl, orderId]
   );
 

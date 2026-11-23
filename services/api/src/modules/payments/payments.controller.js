@@ -1,6 +1,7 @@
 const { sendSuccess } = require("../../utils/api-response");
 const asyncHandler = require("../../utils/async-handler");
 const paymentsService = require("./payments.service");
+const sepayService = require("./sepay.service");
 const { env } = require("../../config/env");
 
 const createPayment = asyncHandler(async (req, res) => {
@@ -29,10 +30,22 @@ const uploadPaymentProof = asyncHandler(async (req, res) => {
   return sendSuccess(res, "Payment proof uploaded successfully", result, 200);
 });
 
+const getSepayOrderPaymentInfo = asyncHandler(async (req, res) => {
+  const result = await sepayService.getSepayOrderPaymentInfo(req.user, req.params.orderId);
+  return sendSuccess(res, "SePay VietQR payment details fetched successfully", result, 200);
+});
+
+const handleSepayWebhook = asyncHandler(async (req, res) => {
+  const result = await sepayService.processSepayWebhook(req);
+  return res.status(200).json(result);
+});
+
 module.exports = {
   createPayment,
   getPaymentStatus,
   confirmPayment,
   handleMockCallback,
-  uploadPaymentProof
+  uploadPaymentProof,
+  getSepayOrderPaymentInfo,
+  handleSepayWebhook
 };

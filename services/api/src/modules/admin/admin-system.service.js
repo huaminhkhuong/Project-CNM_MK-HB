@@ -3,12 +3,17 @@ const { createError } = require("../../utils/service-helpers");
 const { getTableColumns } = require("../../utils/schema-helpers");
 const { checkDatabaseHealth } = require("../../services/test-connection.service");
 const { getRecentAuditLogs } = require("../../services/audit-log.service");
+const {
+  VALID_ONLINE_PAYMENT_MODES,
+  invalidatePaymentModeCache
+} = require("../../services/payment-mode.service");
+const { env } = require("../../config/env");
 
 const DEFAULT_SETTINGS = [
   { key: "store_name", value: "PC Mall", description: "Tên hiển thị của hệ thống" },
   { key: "support_email", value: "support@pcmall.vn", description: "Email hỗ trợ khách hàng" },
   { key: "support_phone", value: "0900000000", description: "Số điện thoại hỗ trợ" },
-  { key: "online_payment_mode", value: "sandbox", description: "Chế độ thanh toán online: sandbox/live" },
+  { key: "online_payment_mode", value: "sandbox", description: "Chế độ thanh toán online: sandbox/mock/live" },
   { key: "shipping_mode", value: "mock", description: "Chế độ vận chuyển: mock/live" },
   { key: "maintenance_mode", value: "off", description: "Bật/tắt chế độ bảo trì" },
   // Cấu hình linh hoạt Tài khoản ngân hàng & Thông tin Doanh nghiệp
@@ -112,16 +117,29 @@ async function updateSettings(payload = {}) {
     throw createError("No valid system settings provided", 400);
   }
 
-  for (const [key, value] of entries) {
+  for (const [key, rawValue] of entries) {
+    let normalizedValue = rawValue === null || rawValue === undefined ? "" : String(rawValue);
+    if (key === "online_payment_mode") {
+      normalizedValue = normalizedValue.trim().toLowerCase();
+      if (!VALID_ONLINE_PAYMENT_MODES.includes(normalizedValue)) {
+        throw createError(
+          `online_payment_mode must be one of: ${VALID_ONLINE_PAYMENT_MODES.join(", ")}`,
+          400
+        );
+      }
+    }
+
     await query(
       `
         UPDATE system_settings
         SET setting_value = ?, updated_at = CURRENT_TIMESTAMP
         WHERE setting_key = ?
       `,
-      [value === null || value === undefined ? "" : String(value), key]
+      [normalizedValue, key]
     );
   }
+
+  invalidatePaymentModeCache();
 
   return getSettings();
 }
@@ -258,6 +276,7 @@ async function getPublicStoreInfo() {
   for (const s of settings) {
     map[s.key] = s.value;
   }
+  const activeEnv = globalThis.__CNM_ENV__ || env;
 
   return {
     storeName: map.store_name || "PC Mall",
@@ -266,10 +285,11 @@ async function getPublicStoreInfo() {
     storeAddress: map.store_address || "123 Nguyễn Thị Minh Khai, Q.1, TP. Hồ Chí Minh",
     storeTaxId: map.store_tax_id || "0316888999",
     storeHotline: map.store_hotline || "1900 8888",
-    bankName: map.bank_name || "Techcombank",
-    bankAccountNumber: map.bank_account_number || "8686868991",
-    bankAccountHolder: map.bank_account_holder || "HỨA MINH KHƯƠNG",
-    transferNotePrefix: "DH"
+    bankName: activeEnv.sepayBankCode || map.bank_name || "Techcombank",
+    bankAccountNumber: activeEnv.sepayAccountNumber || map.bank_account_number || "8686868991",
+    bankAccountHolder: activeEnv.sepayAccountName || map.bank_account_holder || "HỨA MINH KHƯƠNG",
+    transferNotePrefix: activeEnv.sepayTransferPrefix || "PCMALL",
+    sepayAutoVerify: true
   };
 }
 

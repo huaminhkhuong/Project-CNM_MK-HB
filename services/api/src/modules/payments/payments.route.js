@@ -5,6 +5,7 @@ const fs = require("fs");
 
 const controller = require("./payments.controller");
 const { verifyToken } = require("../../middlewares/auth.middleware");
+const { createError } = require("../../utils/service-helpers");
 const { validateCreatePayment, validateConfirmPayment } = require("./payments.validation.middleware");
 
 const router = express.Router();
@@ -33,7 +34,7 @@ const upload = multer({
     if (file.mimetype.startsWith("image/")) {
       cb(null, true);
     } else {
-      cb(new Error("Chỉ chấp nhận file hình ảnh (JPG, PNG, GIF, WEBP)"));
+      cb(createError("Chỉ chấp nhận file hình ảnh (JPG, PNG, GIF, WEBP)", 400));
     }
   }
 });
@@ -45,7 +46,15 @@ const proofUploadMiddleware = (req, res, next) => {
     { name: "paymentProof", maxCount: 1 },
     { name: "file", maxCount: 1 }
   ])(req, res, (err) => {
-    if (err) return next(err);
+    if (err) {
+      if (err.code === "LIMIT_FILE_SIZE") {
+        return next(createError("Kích thước ảnh biên lai không được vượt quá 5MB", 400));
+      }
+      if (err instanceof multer.MulterError) {
+        return next(createError(err.message || "Tải ảnh biên lai thất bại", 400));
+      }
+      return next(err);
+    }
     req.file =
       req.files?.proof_image?.[0] ||
       req.files?.paymentProof?.[0] ||
@@ -54,6 +63,10 @@ const proofUploadMiddleware = (req, res, next) => {
     next();
   });
 };
+
+// SePay Auto-VietQR real-money payment endpoints (must be registered BEFORE /:paymentId)
+router.post("/sepay/webhook", controller.handleSepayWebhook);
+router.get("/sepay/order/:orderId", verifyToken, controller.getSepayOrderPaymentInfo);
 
 router.post("/", verifyToken, validateCreatePayment, controller.createPayment);
 router.get("/:paymentId", verifyToken, controller.getPaymentStatus);
