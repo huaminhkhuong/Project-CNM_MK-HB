@@ -273,6 +273,18 @@ export function RequirementWizardModal({
 
     const mergedAnswers = finalAnswers || { ...step1Answers, ...step2Answers, ...allAnswers };
 
+    // Trích xuất sở thích màu sắc/vỏ case từ toàn bộ các câu hỏi có thể có
+    let extractedAesthetic = "black";
+    const caseRaw = mergedAnswers.case_style || mergedAnswers.dev_case || mergedAnswers.editing_case || mergedAnswers.general_case || mergedAnswers.aesthetic || mergedAnswers.aesthetic_style || "";
+    const caseStr = String(caseRaw).toLowerCase();
+    if (caseStr.includes("white") || caseStr.includes("trắng")) {
+      extractedAesthetic = "white";
+    } else if (caseStr.includes("aquarium") || caseStr.includes("bể cá") || caseStr.includes("kính")) {
+      extractedAesthetic = "fish_tank";
+    } else {
+      extractedAesthetic = "black";
+    }
+
     // Build the profile payload
     const profile = {
       purpose: purposeQuery.trim() || selectedPreset,
@@ -280,6 +292,7 @@ export function RequirementWizardModal({
       budget: Number(budget) || 20000000,
       resolution: mergedAnswers.target_resolution || mergedAnswers.refresh_rate || mergedAnswers.screen_resolution || mergedAnswers.resolution || "1080p",
       preference: "value",
+      aesthetic: extractedAesthetic,
       engineType: "ai",
       step1Answers,
       step2Answers,
@@ -333,6 +346,7 @@ export function RequirementWizardModal({
           borderRadius: "16px",
           width: "100%",
           maxWidth: "680px",
+          minHeight: "560px",
           boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
           overflow: "hidden",
           border: "1px solid #e2e8f0",
@@ -440,7 +454,7 @@ export function RequirementWizardModal({
         )}
 
         {/* ================= MODAL BODY ================= */}
-        <div style={{ padding: "24px", overflowY: "auto", flex: 1 }}>
+        <div style={{ padding: "24px", overflowY: "auto", flex: 1, minHeight: "440px" }}>
           {/* ── PHASE 0: INPUT & PURPOSE ── */}
           {phase === "input" && (
             <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
@@ -703,26 +717,35 @@ export function RequirementWizardModal({
                 </h4>
               </div>
 
-              {/* Question Options: Cards format */}
+              {/* Question Options */}
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                 {currentQuestion.options?.map((opt, oIdx) => {
                   const currentSelected = phase === "step1_quiz" ? step1Answers[currentQuestion.id] : step2Answers[currentQuestion.id];
                   const isSelected = currentSelected === opt.value;
+
                   return (
                     <div
                       key={opt.value || oIdx}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => handleSelectOption(currentQuestion.id, opt.value, opt.recommendedBudget, opt)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          handleSelectOption(currentQuestion.id, opt.value, opt.recommendedBudget, opt);
+                        }
+                      }}
                       style={{
                         padding: "14px 18px",
                         borderRadius: "12px",
-                        border: isSelected ? "2px solid #2563eb" : "1px solid #e2e8f0",
+                        border: "2px solid",
+                        borderColor: isSelected ? "#2563eb" : "#e2e8f0",
                         background: isSelected ? "#eff6ff" : "#ffffff",
                         cursor: "pointer",
                         display: "flex",
                         alignItems: "center",
                         gap: "14px",
-                        boxShadow: isSelected ? "0 4px 12px rgba(37,99,235,0.12)" : "0 1px 2px rgba(0,0,0,0.04)",
-                        transition: "all 0.15s"
+                        boxSizing: "border-box",
+                        userSelect: "none"
                       }}
                     >
                       {/* Radio Circle */}
@@ -731,17 +754,37 @@ export function RequirementWizardModal({
                           width: "20px",
                           height: "20px",
                           borderRadius: "50%",
-                          border: isSelected ? "6px solid #2563eb" : "2px solid #cbd5e1",
+                          border: "2px solid",
+                          borderColor: isSelected ? "#2563eb" : "#cbd5e1",
                           background: "#ffffff",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
                           flexShrink: 0
                         }}
-                      />
+                      >
+                        {isSelected && (
+                          <div
+                            style={{
+                              width: "10px",
+                              height: "10px",
+                              borderRadius: "50%",
+                              background: "#2563eb"
+                            }}
+                          />
+                        )}
+                      </div>
 
                       {/* Content */}
                       <div style={{ flex: 1 }}>
-                        <span style={{ fontSize: "14px", fontWeight: isSelected ? 700 : 500, color: isSelected ? "#1e3a8a" : "#1e293b" }}>
+                        <span style={{ fontSize: "14.5px", fontWeight: 600, color: isSelected ? "#1e40af" : "#1e293b", lineHeight: 1.45 }}>
                           {opt.label}
                         </span>
+                        {opt.desc && (
+                          <div style={{ fontSize: "12px", color: isSelected ? "#2563eb" : "#64748b", lineHeight: 1.4, marginTop: "2px" }}>
+                            {opt.desc}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );

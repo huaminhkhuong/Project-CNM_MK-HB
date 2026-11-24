@@ -622,6 +622,36 @@ export function PcBuilderPage() {
     }
   }, [pendingAiAction]);
 
+  /* ── 🚀 KIỂM TRA ĐĂNG NHẬP SỚM KHI MỞ WIZARD (FAIL-FAST AUTH CHECK) ── */
+  const handleOpenWizardWithAuth = useCallback((initialTemplate = null) => {
+    if (!isAuthenticated) {
+      handleRequireLogin({
+        pendingPrompt: initialTemplate?.title || initialTemplate?.name || "Khảo sát và xây dựng cấu hình tối ưu với AI",
+        action: () => {
+          if (initialTemplate) {
+            setSuggestionForm((prev) => ({
+              ...prev,
+              purpose: initialTemplate.purpose || initialTemplate.id || "gaming",
+              budget: String(initialTemplate.budget || initialTemplate.defaultBudget || 20000000),
+              subPurpose: initialTemplate.id || ""
+            }));
+          }
+          setIsReqWizardOpen(true);
+        }
+      });
+      return;
+    }
+    if (initialTemplate) {
+      setSuggestionForm((prev) => ({
+        ...prev,
+        purpose: initialTemplate.purpose || initialTemplate.id || "gaming",
+        budget: String(initialTemplate.budget || initialTemplate.defaultBudget || 20000000),
+        subPurpose: initialTemplate.id || ""
+      }));
+    }
+    setIsReqWizardOpen(true);
+  }, [isAuthenticated, handleRequireLogin]);
+
   /* ── ADVANCED FILTER STATE ──────────────────────────────── */
   const [showFilters, setShowFilters] = useState(false);
   const [filterPriceRange, setFilterPriceRange] = useState({ min: 0, max: 0 });
@@ -1311,45 +1341,19 @@ export function PcBuilderPage() {
 
       if (isAiRequest) {
         // ── 🚀 CHỨC NĂNG 1: AI STREAMING TUYỂN CHỌN TỪ POOL 32 LINH KIỆN ──
-        let initialCandidates = {};
-        let initialTotalPrice = targetBudget;
-        let initialUtilization = 100;
-
-        try {
-          const fastRes = await httpClient.post("/pc-builder/suggest", {
-            budget: targetBudget,
-            useCase: purpose,
-            resolution,
-            preference,
-            futureNeed,
-            engineType: "ai",
-            customPrompt: synthesizedCustomPrompt,
-            answers: allAnswers,
-            platformPref: extractedPlatform,
-            gpuBrandPref: extractedGpuBrand
-          });
-          const fastData = fastRes.data?.data || fastRes.data;
-          if (fastData?.candidates) {
-            initialCandidates = fastData.candidates;
-            initialTotalPrice = fastData.candidates.bestValue?.totalPrice || targetBudget;
-            initialUtilization = fastData.candidates.bestValue?.budgetUtilization || 100;
-          }
-        } catch (fastErr) {
-          console.warn("Fast suggest pre-fetch failed, will rely on stream", fastErr);
-        }
-
+        // Tuyệt đối không hiển thị trước cấu hình hệ thống rule-based để tránh xung đột với AI
         setProposalModalData({
           useCase: purpose,
           subPurpose: overrideOptions?.subPurpose || "",
           targetBudget,
           resolution,
           engineType: "ai",
-          aiAdvice: "⚡ Đang kết nối tới Hội Đồng Thẩm Định AI để phân tích 32 linh kiện ứng viên từ kho hàng...",
+          aiAdvice: "⚡ Đang kết nối tới Hội Đồng Thẩm Định AI để phân tích kho hàng và tuyển chọn 8 linh kiện tối ưu nhất...",
           provider: "PC Mall AI Engine",
           isStreaming: true,
-          candidates: initialCandidates,
-          totalPrice: initialTotalPrice,
-          budgetUtilization: initialUtilization,
+          candidates: {},
+          totalPrice: targetBudget,
+          budgetUtilization: 100,
           platformPref: extractedPlatform,
           gpuBrandPref: extractedGpuBrand,
           minRam: overrideOptions?.minRam || suggestionForm?.minRam || "32gb",
@@ -1392,22 +1396,24 @@ export function PcBuilderPage() {
                 const compsList = Object.entries(comps).map(([type, c]) => ({
                   type,
                   componentType: type,
-                  product: c
+                  product: c,
+                  explanation: c?.explanation || c?.reason || "Lựa chọn tối ưu tương thích và P/P từ AI."
                 }));
 
+                // Khóa chặt 100% linh kiện do chính AI tuyển chọn, đồng bộ tuyệt đối với lời văn AI phía trên
                 setProposalModalData((prev) => ({
                   ...prev,
                   isStreaming: false,
-                  aiAdvice: result.advice,
+                  aiAdvice: result.advice || prev?.aiAdvice,
                   provider: result.provider || "PC Mall AI Engine",
-                  totalPrice: result.totalPrice,
-                  budgetUtilization: result.budgetUtilization,
-                  dynamicBottleneck: result.dynamicBottleneck,
-                  ramArchitecture: result.ramArchitecture,
+                  totalPrice: result.totalPrice || prev?.totalPrice,
+                  budgetUtilization: result.budgetUtilization || prev?.budgetUtilization,
+                  dynamicBottleneck: result.dynamicBottleneck || prev?.dynamicBottleneck,
+                  ramArchitecture: result.ramArchitecture || prev?.ramArchitecture,
                   candidates: {
                     bestValue: {
                       label: "AI Tuyển Chọn (Tối Ưu 32 Linh Kiện)",
-                      desc: "Tuyển chọn nghiêm ngặt, không thiên vị từ 32 ứng viên thực tế trong kho",
+                      desc: "Tuyển chọn nghiêm ngặt từ kho hàng",
                       totalPrice: result.totalPrice,
                       budgetUtilization: result.budgetUtilization,
                       components: compsList,
@@ -1416,7 +1422,7 @@ export function PcBuilderPage() {
                   }
                 }));
                 setProcessingComponent(null);
-                setLocalMessage("✨ AI đã hoàn tất tuyển chọn 8 linh kiện từ 32 ứng viên trong kho!");
+                setLocalMessage("✨ AI đã hoàn tất thẩm định và phân tích chuyên sâu cho cấu hình!");
               },
               onError: async (err) => {
                 console.warn("AI Stream error, falling back to suggest API...", err);
@@ -2160,7 +2166,7 @@ export function PcBuilderPage() {
             budget: String(profile.budget || 25000000),
             resolution: profile.resolution || "1080p",
             preference: profile.preference || "value",
-            aesthetic: profile.aesthetic || "white_tank",
+            aesthetic: profile.aesthetic || "black",
             minRam: profile.minRam || "32gb",
             minStorage: profile.minStorage || "1tb",
             coolingPref: profile.coolingPref || "air",
@@ -2182,7 +2188,7 @@ export function PcBuilderPage() {
       budget: String(profile.budget || 25000000),
       resolution: profile.resolution || "1080p",
       preference: profile.preference || "value",
-      aesthetic: profile.aesthetic || "white_tank",
+      aesthetic: profile.aesthetic || "black",
       minRam: profile.minRam || "32gb",
       minStorage: profile.minStorage || "1tb",
       coolingPref: profile.coolingPref || "air",
@@ -2330,7 +2336,7 @@ export function PcBuilderPage() {
 
       {/* ── TOPBAR SUMMARY PANEL (Chứa Nút "Build PC Của Bạn" + "Đánh Giá Build Với AI" + Tiện Ích) ── */}
       <BuilderSummaryPanel
-        onOpenReqWizard={() => setIsReqWizardOpen(true)}
+        onOpenReqWizard={() => handleOpenWizardWithAuth()}
         onOpenAiAudit={() => setIsAuditModalOpen(true)}
         onOpenXaiDrawer={handleOpenXaiDrawer}
         onRefreshCatalog={handleRefreshCatalog}
@@ -2444,7 +2450,7 @@ export function PcBuilderPage() {
               setSuggestionForm={setSuggestionForm}
               onAutoRecommend={handleAutoRecommend}
               isAutoBuilding={isAutoBuilding}
-              onOpenWizard={() => setIsReqWizardOpen(true)}
+              onOpenWizard={() => handleOpenWizardWithAuth()}
             />
 
             <div className="sidebar-divider" />
@@ -2501,7 +2507,7 @@ export function PcBuilderPage() {
 
                   <button
                     type="button"
-                    onClick={() => setIsReqWizardOpen(true)}
+                    onClick={() => handleOpenWizardWithAuth()}
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
@@ -2539,8 +2545,7 @@ export function PcBuilderPage() {
                     setSuggestionForm((prev) => ({
                       ...prev,
                       purpose: tpl.category === "creative" ? "editing" : tpl.category === "work" ? (tpl.id === "ai" ? "ai" : "office") : "gaming",
-                      budget: String(tpl.budget),
-                      subPurpose: tpl.id
+                      budget: tpl.budget
                     }));
                     setIsReqWizardOpen(true);
                   }}
@@ -2782,8 +2787,7 @@ export function PcBuilderPage() {
                       setSuggestionForm((prev) => ({
                         ...prev,
                         purpose: tpl.category === "creative" ? "editing" : tpl.category === "work" ? (tpl.id === "ai" ? "ai" : "office") : "gaming",
-                        budget: String(tpl.budget),
-                        subPurpose: tpl.id
+                        budget: tpl.budget
                       }));
                       setIsReqWizardOpen(true);
                     }}
@@ -2818,7 +2822,13 @@ export function PcBuilderPage() {
             suggestionFormBudget={suggestionForm.budget}
             visibleChecks={visibleChecks}
             onOpenXaiDrawer={setIsXaiDrawerOpen}
-            onOpenAiDrawer={() => setIsAiAdvisorDrawerOpen(true)}
+            onOpenAiDrawer={() => {
+              if (selectedCount > 0) {
+                setIsAuditModalOpen(true);
+              } else {
+                handleOpenWizardWithAuth();
+              }
+            }}
             handleRunWhatIf={handleRunWhatIf}
             isWhatIfLoading={isWhatIfLoading}
             aiInsightText={aiInsightText}

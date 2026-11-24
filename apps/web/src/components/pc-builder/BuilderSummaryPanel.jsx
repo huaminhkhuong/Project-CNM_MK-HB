@@ -62,82 +62,109 @@ export function BuilderSummaryPanel({
         </div>
       </div>
 
-      {/* ── Center Hub: NÚT "Build PC Của Bạn" & "Đánh Giá Build Với AI" ── */}
+      {/* ── Center Hub: QUY HOẠCH 1 LUỒNG AI DUY NHẤT (UNIFIED AI FLOW) ── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", flex: "1 1 auto", flexWrap: "wrap" }}>
-        <button
-          type="button"
-          onClick={onOpenReqWizard}
-          title="Mở quy trình 5 bước thu thập tiêu chí ➔ Bước cuối rẽ nhánh: Hệ Thống Đề Xuất hoặc AI Tư Vấn"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "10px",
-            padding: "10px 22px",
-            borderRadius: "10px",
-            border: "none",
-            backgroundColor: "#0f172a",
-            color: "#ffffff",
-            fontSize: "13.5px",
-            fontWeight: "800",
-            cursor: "pointer",
-            boxShadow: "0 2px 10px rgba(15, 23, 42, 0.2)",
-            letterSpacing: "-0.01em"
-          }}
-        >
-          <span style={{ fontSize: "16px" }}>🚀</span>
-          <span>Build PC Của Bạn</span>
-          <span
-            style={{
-              fontSize: "11px",
-              fontWeight: "700",
-              backgroundColor: "#2563eb",
-              color: "#ffffff",
-              padding: "2px 8px",
-              borderRadius: "6px",
-              marginLeft: "2px"
-            }}
-          >
-            5 Bước Tiêu Chí
-          </span>
-        </button>
-
-        {/* Nút Đánh Giá Build Chi Tiết Bằng AI */}
-        {onOpenAiAudit && (
+        {selectedCount === 0 ? (
           <button
             type="button"
-            onClick={onOpenAiAudit}
-            title="Đánh giá chi tiết cấu hình hiện tại bằng AI: kiểm tra nghẽn cổ chai, nguồn điện, tản nhiệt và tự động đề xuất đổi linh kiện"
+            onClick={onOpenReqWizard}
+            title="Khởi động AI khảo sát nhu cầu để tự động tuyển chọn dàn PC tối ưu nhất"
             style={{
               display: "inline-flex",
               alignItems: "center",
-              gap: "8px",
-              padding: "10px 18px",
+              gap: "10px",
+              padding: "10px 24px",
               borderRadius: "10px",
-              border: "1px solid #bfdbfe",
-              backgroundColor: "#eff6ff",
-              color: "#1d4ed8",
-              fontSize: "13px",
-              fontWeight: "700",
-              cursor: "pointer"
+              border: "none",
+              backgroundColor: "#0f172a",
+              color: "#ffffff",
+              fontSize: "14px",
+              fontWeight: "800",
+              cursor: "pointer",
+              boxShadow: "0 2px 10px rgba(15, 23, 42, 0.2)",
+              letterSpacing: "-0.01em",
+              transition: "transform 0.15s, background-color 0.15s"
             }}
           >
-            <span style={{ fontSize: "15px" }}>🧠</span>
-            <span>Đánh Giá Build Với AI</span>
-            {selectedCount > 0 && (
-              <span
+            <span style={{ fontSize: "17px" }}>✨</span>
+            <span>Nhờ AI Xây Dựng Cấu Hình</span>
+            <span
+              style={{
+                fontSize: "11px",
+                fontWeight: "700",
+                backgroundColor: "#2563eb",
+                color: "#ffffff",
+                padding: "2px 8px",
+                borderRadius: "6px",
+                marginLeft: "2px"
+              }}
+            >
+              Khảo Sát Nhanh
+            </span>
+          </button>
+        ) : (
+          <>
+            {onOpenAiAudit && (
+              <button
+                type="button"
+                onClick={onOpenAiAudit}
+                title="Đánh giá chi tiết cấu hình hiện tại bằng AI: kiểm tra độ cân bằng, nguồn điện, tản nhiệt và tự động đề xuất đổi linh kiện"
                 style={{
-                  fontSize: "10.5px",
-                  fontWeight: "700",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "10px 22px",
+                  borderRadius: "10px",
+                  border: "none",
                   backgroundColor: "#2563eb",
                   color: "#ffffff",
-                  padding: "1px 6px",
-                  borderRadius: "10px"
+                  fontSize: "13.5px",
+                  fontWeight: "800",
+                  cursor: "pointer",
+                  boxShadow: "0 2px 12px rgba(37, 99, 235, 0.3)",
+                  transition: "transform 0.15s, background-color 0.15s"
                 }}
               >
-                {selectedCount} món
-              </span>
+                <span style={{ fontSize: "16px" }}>🔬</span>
+                <span>AI Thẩm Định & Tối Ưu Dàn Máy</span>
+                <span
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: "700",
+                    backgroundColor: "#1e40af",
+                    color: "#ffffff",
+                    padding: "2px 8px",
+                    borderRadius: "6px"
+                  }}
+                >
+                  {selectedCount} linh kiện
+                </span>
+              </button>
             )}
-          </button>
+
+            <button
+              type="button"
+              onClick={onOpenReqWizard}
+              title="Nhờ AI tư vấn lại cấu hình mới từ đầu"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "9px 15px",
+                borderRadius: "10px",
+                border: "1px solid #cbd5e1",
+                backgroundColor: "#f8fafc",
+                color: "#475569",
+                fontSize: "12.5px",
+                fontWeight: "700",
+                cursor: "pointer",
+                transition: "background-color 0.15s"
+              }}
+            >
+              <span>🔄</span>
+              <span>Build Mới Bằng AI</span>
+            </button>
+          </>
         )}
       </div>
 

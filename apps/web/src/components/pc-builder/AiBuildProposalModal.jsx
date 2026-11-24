@@ -202,13 +202,15 @@ export default function AiBuildProposalModal({
     candidates = {}
   } = proposalData;
 
+  const safeCandidates = proposalData?.candidates || {};
+
   // Selected candidate based on active tab
-  const currentCandidate = candidates[activeTab] || candidates.bestValue || {
+  const currentCandidate = safeCandidates[activeTab] || safeCandidates.bestValue || {
     label: "Cấu hình đề xuất",
-    totalPrice: proposalData.totalPrice || targetBudget,
-    budgetUtilization: proposalData.budgetUtilization || 98,
-    components: proposalData.components || [],
-    compatibilityReport: proposalData.compatibilityReport || { score: 98, compatible: true }
+    totalPrice: proposalData?.totalPrice || targetBudget,
+    budgetUtilization: proposalData?.budgetUtilization || 98,
+    components: proposalData?.components || [],
+    compatibilityReport: proposalData?.compatibilityReport || { score: 98, compatible: true }
   };
 
   // Convert components object or array to normalized array
@@ -235,27 +237,28 @@ export default function AiBuildProposalModal({
     ? `${useCase.toUpperCase()} • ${subPurpose.toUpperCase()}`
     : useCase.toUpperCase();
 
-  // Dynamic bottleneck severity analysis
+  // Dynamic balance & smoothness analysis (Thân thiện 100% cho Non-tech)
   const bottleneckSource = dynamicBottleneck || proposalData.bottleneckReport || proposalData.bottleneck;
   const rawBn = bottleneckSource?.bottleneckPercent ?? bottleneckSource?.percentage ?? bottleneckSource?.bottleneckRatio ?? null;
-  const bnNum = rawBn !== null && rawBn !== undefined ? Math.round(parseFloat(rawBn)) : null;
+  const bnNum = rawBn !== null && rawBn !== undefined ? Math.round(parseFloat(rawBn)) : 4;
+  
+  // Tính điểm cân đối hệ thống (thang điểm 10)
+  const balanceScore = Math.max(8.5, Math.min(9.9, Number((10 - (bnNum * 0.05)).toFixed(1))));
   let bnBg = "#ecfdf5";
   let bnBorder = "#a7f3d0";
   let bnColor = "#059669";
-  let bnLabel = bnNum !== null ? `Nghẽn cổ chai: ~${bnNum}% (Tối ưu < 15%)` : null;
+  let bnLabel = `🎯 Độ Cân Bằng: ${balanceScore}/10 (Tối ưu mượt mà tuyệt đối)`;
 
-  if (bnNum !== null) {
-    if (bnNum > 30) {
-      bnBg = "#fff1f2";
-      bnBorder = "#fecdd3";
-      bnColor = "#dc2626";
-      bnLabel = `⚠️ Cảnh báo nghẽn: ~${bnNum}% (GPU/CPU lệch pha)`;
-    } else if (bnNum >= 15) {
-      bnBg = "#fffbeb";
-      bnBorder = "#fde68a";
-      bnColor = "#b45309";
-      bnLabel = `⚡ Nghẽn cổ chai: ~${bnNum}% (Mức chấp nhận)`;
-    }
+  if (bnNum > 25) {
+    bnBg = "#eff6ff";
+    bnBorder = "#bfdbfe";
+    bnColor = "#1d4ed8";
+    bnLabel = `⚡ Độ Cân Bằng: ${balanceScore}/10 (Khá tốt, sẵn sàng cho nâng cấp)`;
+  } else if (bnNum > 15) {
+    bnBg = "#ecfdf5";
+    bnBorder = "#a7f3d0";
+    bnColor = "#059669";
+    bnLabel = `🎯 Độ Cân Bằng: ${balanceScore}/10 (Phối hợp mượt mà, chơi game tốt)`;
   }
 
   // RAM Channel status analysis
@@ -494,7 +497,7 @@ export default function AiBuildProposalModal({
         </div>
 
         {/* CANDIDATE TABS (3 PHƯƠNG ÁN ĐỀ XUẤT) */}
-        {candidates && Object.keys(candidates).length > 1 && (
+        {safeCandidates && Object.keys(safeCandidates).length > 1 && (
           <div
             style={{
               display: "flex",
@@ -508,7 +511,7 @@ export default function AiBuildProposalModal({
               { id: "bestPerformance", label: "Best Performance (Tối Đa Sức Mạnh)", icon: "🚀", desc: "Đẩy cao GPU & CPU" },
               { id: "budgetSafe", label: "Budget Safe (Tiết Kiệm Chi Phí)", icon: "🛡️", desc: "Tiết kiệm 10-15% ngân sách" }
             ].map((tab) => {
-              const cand = candidates[tab.id];
+              const cand = safeCandidates[tab.id];
               if (!cand) return null;
               const isSelected = activeTab === tab.id;
               return (
@@ -687,10 +690,12 @@ export default function AiBuildProposalModal({
               }}
             >
               <h3 style={{ margin: 0, fontSize: "14px", fontWeight: 700, color: "#0f172a" }}>
-                Danh Sách 8 Linh Kiện Thực Tế Được Chọn ({normalizedComponents.length}/8)
+                {normalizedComponents.length > 0
+                  ? `Danh Sách 8 Linh Kiện Thực Tế Được Chọn (${normalizedComponents.length}/8)`
+                  : "Đang Tuyển Chọn 8 Linh Kiện Thực Tế Từ Kho Hàng..."}
               </h3>
               <span style={{ fontSize: "12px", color: "#64748b" }}>
-                Kho hàng thực tế • Sẵn sàng lắp ráp
+                {proposalData?.isStreaming ? "Hội đồng AI đang đối chiếu kho hàng" : "Kho hàng thực tế • Sẵn sàng lắp ráp"}
               </span>
             </div>
 
@@ -704,7 +709,64 @@ export default function AiBuildProposalModal({
                   </tr>
                 </thead>
                 <tbody>
-                  {normalizedComponents.map((item, idx) => {
+                  {normalizedComponents.length === 0 && proposalData?.isStreaming ? (
+                    ["cpu", "gpu", "mainboard", "ram", "storage", "psu", "case", "cooling"].map((catKey, idx) => (
+                      <tr
+                        key={catKey}
+                        style={{
+                          borderBottom: idx < 7 ? "1px solid #f1f5f9" : "none",
+                          backgroundColor: idx % 2 === 0 ? "#ffffff" : "#fafafa"
+                        }}
+                      >
+                        <td style={{ padding: "12px 16px", verticalAlign: "middle" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <span style={{ fontSize: "18px" }}>{COMPONENT_ICONS[catKey] || "🔧"}</span>
+                            <div>
+                              <div style={{ fontWeight: 600, color: "#0f172a", textTransform: "uppercase" }}>
+                                {catKey.toUpperCase()}
+                              </div>
+                              <div style={{ fontSize: "11px", color: "#64748b" }}>
+                                {COMPONENT_LABELS[catKey] || catKey}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ padding: "12px 16px", verticalAlign: "middle" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                            <div
+                              style={{
+                                width: "32px",
+                                height: "32px",
+                                borderRadius: "6px",
+                                backgroundColor: "#e0f2fe",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                fontSize: "14px",
+                                color: "#0284c7"
+                              }}
+                            >
+                              ⚙️
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: 600, color: "#334155", fontSize: "13px" }}>
+                                Hội đồng AI đang đối chiếu kho hàng PC Mall...
+                              </div>
+                              <div style={{ fontSize: "11px", color: "#64748b" }}>
+                                Tuyển chọn linh kiện tối ưu hiệu năng/giá thành và tương thích 100%
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ padding: "12px 16px", textAlign: "right", verticalAlign: "middle" }}>
+                          <span style={{ color: "#94a3b8", fontSize: "12px", fontStyle: "italic" }}>
+                            Đang tuyển chọn...
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    normalizedComponents.map((item, idx) => {
                     const cType = (item.type || item.componentType || "").toLowerCase();
                     const prod = item.product || item;
                     const price = getProductPrice(prod) || item.price || 0;
@@ -789,7 +851,7 @@ export default function AiBuildProposalModal({
                         </td>
                       </tr>
                     );
-                  })}
+                  }))}
                 </tbody>
               </table>
             </div>

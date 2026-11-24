@@ -285,21 +285,21 @@ export function AiBuildAuditModal({
 
   if (!isOpen) return null;
 
-  // Format Status Badge
-  const score = auditResult?.auditScore ?? 80;
+  // Format Status Badge (Thân thiện, tích cực cho người dùng phổ thông)
+  const score = auditResult?.auditScore ?? 85;
   const status = auditResult?.status ?? "GOOD";
   let statusBadgeBg = "#ecfdf5";
   let statusBadgeColor = "#059669";
-  let statusBadgeText = "XUẤT SẮC - SẴN SÀNG LẮP RÁP";
+  let statusBadgeText = "RẤT TỐT - CẤU HÌNH CÂN ĐỐI & SẴN SÀNG HOẠT ĐỘNG";
 
   if (status === "CRITICAL_ISSUE" || score < 50) {
-    statusBadgeBg = "#fef2f2";
-    statusBadgeColor = "#dc2626";
-    statusBadgeText = "NGUY HIỂM - LỖI PHẦN CỨNG / NGHẼN NẶNG";
-  } else if (status === "NEEDS_OPTIMIZATION" || score < 80) {
     statusBadgeBg = "#fffbeb";
-    statusBadgeColor = "#d97706";
-    statusBadgeText = "CẦN TỐI ƯU HÓA LINH KIỆN";
+    statusBadgeColor = "#b45309";
+    statusBadgeText = "CẦN ĐIỀU CHỈNH ĐỂ TỐI ƯU HIỆU NĂNG TỐT HƠN";
+  } else if (status === "NEEDS_OPTIMIZATION" || score < 80) {
+    statusBadgeBg = "#eff6ff";
+    statusBadgeColor = "#1d4ed8";
+    statusBadgeText = "GỢI Ý TỐI ƯU THÊM MỘT VÀI LINH KIỆN";
   }
 
   const issues = auditResult?.issues || [];

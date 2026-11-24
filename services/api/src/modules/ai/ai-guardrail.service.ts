@@ -155,8 +155,20 @@ function validateChatMessageDomain(message) {
   }
 
   // 2. Kiểm tra các mẫu Prohibited / Jailbreak / Off-topic rõ rệt
-  for (const pattern of PROHIBITED_PATTERNS) {
-    if (pattern.test(raw) || pattern.test(normalized)) {
+  const hasPcContext = /\b(may tinh|may|pc|laptop|mua|tu van|cau hinh|gia|hoc|dung|can tim|cho con|linh kien|ngan sach|trieu|tr)\b/i.test(normalized);
+
+  for (let idx = 0; idx < PROHIBITED_PATTERNS.length; idx++) {
+    const pattern = PROHIBITED_PATTERNS[idx];
+    const isMatched = pattern.test(raw) || pattern.test(normalized);
+    if (isMatched) {
+      // Nếu câu hỏi có ngữ cảnh mua sắm máy tính rõ ràng (VD: mua máy cho con học bài tập giải toán),
+      // chỉ chặn nếu dính Jailbreak hoặc Cờ bạc (nhóm 1 & nhóm 6)
+      const isSevereJailbreakOrGambling = idx < 11 || idx >= 21;
+      if (hasPcContext && !isSevereJailbreakOrGambling) {
+        // Cho phép đi tiếp vào LLM để phân tích ngữ cảnh học tập / kinh doanh
+        continue;
+      }
+
       return {
         isAllowed: false,
         reason: "PROHIBITED_OR_OFF_TOPIC",
