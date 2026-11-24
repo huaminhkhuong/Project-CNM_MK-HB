@@ -156,6 +156,10 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     throw new AppError("Invalid credentials", 401);
   }
 
+  if (String(user.status || "ACTIVE").toUpperCase() !== "ACTIVE") {
+    throw new AppError("Tài khoản đã bị khóa hoặc tạm ngừng hoạt động", 403);
+  }
+
   res.status(200).json({
     success: true,
     data: buildAuthResponse(user)
@@ -207,6 +211,10 @@ export const googleMock = asyncHandler(async (req: Request, res: Response) => {
   }
 
   if (!user) throw new AppError("Error processing google login", 500);
+
+  if (String(user.status || "ACTIVE").toUpperCase() !== "ACTIVE") {
+    throw new AppError("Tài khoản đã bị khóa hoặc tạm ngừng hoạt động", 403);
+  }
 
   const tokenPayload = { 
     userId: String(user.id), 

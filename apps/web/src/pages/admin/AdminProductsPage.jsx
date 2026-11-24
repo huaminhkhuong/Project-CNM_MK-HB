@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 
 import {
   AdminAlerts,
@@ -97,7 +97,10 @@ export function AdminProductsPage() {
   const [categories, setCategories] = useState([]);
   const [brands, setBrands] = useState([]);
   const [keyword, setKeyword] = useState("");
-  const [searchKeyword, setSearchKeyword] = useState("");
+  const [selectedCategoryId, setSelectedCategoryId] = useState("");
+  const [selectedBrandId, setSelectedBrandId] = useState("");
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, limit: 30, totalItems: 0, totalPages: 1 });
   const [formValues, setFormValues] = useState(createInitialFormState());
   const [formErrors, setFormErrors] = useState({});
   const [editingProductId, setEditingProductId] = useState(null);
@@ -110,18 +113,40 @@ export function AdminProductsPage() {
 
   useAdminToast(successMessage, () => setSuccessMessage(""));
 
-  const filteredProducts = useMemo(() => {
-    const normalizedKeyword = String(searchKeyword || "").trim().toLowerCase();
+  async function loadProductsData(targetPage = 1, catId = selectedCategoryId, bId = selectedBrandId, kw = keyword) {
+    try {
+      setLoading(true);
+      setErrorMessage("");
 
-    if (!normalizedKeyword) {
-      return products;
+      const params = {
+        page: targetPage,
+        limit: 30
+      };
+      if (catId) params.categoryId = catId;
+      if (bId) params.brandId = bId;
+      if (kw?.trim()) params.keyword = kw.trim();
+
+      const response = await getAdminProducts(params);
+      const items = normalizeAdminList(response).map(normalizeProductRow);
+      setProducts(items);
+
+      const payload = response?.data || response;
+      if (payload?.pagination) {
+        setPagination(payload.pagination);
+      } else {
+        setPagination({
+          page: targetPage,
+          limit: 30,
+          totalItems: items.length,
+          totalPages: 1
+        });
+      }
+    } catch (error) {
+      setErrorMessage(getAdminErrorMessage(error, "Không thể tải danh sách sản phẩm."));
+    } finally {
+      setLoading(false);
     }
-
-    return products.filter((product) => {
-      const haystack = [product.name, product.slug, product.categoryName, product.brandName].join(" ").toLowerCase();
-      return haystack.includes(normalizedKeyword);
-    });
-  }, [products, searchKeyword]);
+  }
 
   useEffect(() => {
     async function loadInitialData() {
@@ -129,17 +154,17 @@ export function AdminProductsPage() {
         setLoading(true);
         setErrorMessage("");
 
-        const [productsResponse, categoriesResponse, brandsResponse] = await Promise.all([
-          getAdminProducts({ page: 1, limit: 100 }),
+        const [categoriesResponse, brandsResponse] = await Promise.all([
           getCategories(),
           getBrands()
         ]);
 
-        setProducts(normalizeAdminList(productsResponse).map(normalizeProductRow));
         setCategories(normalizeEntityList(categoriesResponse));
         setBrands(normalizeEntityList(brandsResponse));
+
+        await loadProductsData(1, "", "", "");
       } catch (error) {
-        setErrorMessage(getAdminErrorMessage(error, "Không thể tải dữ liệu sản phẩm."));
+        setErrorMessage(getAdminErrorMessage(error, "Không thể tải dữ liệu ban đầu."));
       } finally {
         setLoading(false);
       }
@@ -148,15 +173,34 @@ export function AdminProductsPage() {
     loadInitialData();
   }, []);
 
-  function resetForm() {
-    setFormValues(createInitialFormState());
-    setFormErrors({});
-    setEditingProductId(null);
+  function handleCategoryFilterChange(newCatId) {
+    setSelectedCategoryId(newCatId);
+    setPage(1);
+    loadProductsData(1, newCatId, selectedBrandId, keyword);
+  }
+
+  function handleBrandFilterChange(newBrandId) {
+    setSelectedBrandId(newBrandId);
+    setPage(1);
+    loadProductsData(1, selectedCategoryId, newBrandId, keyword);
   }
 
   function handleSearchSubmit(event) {
     event.preventDefault();
-    setSearchKeyword(keyword);
+    setPage(1);
+    loadProductsData(1, selectedCategoryId, selectedBrandId, keyword);
+  }
+
+  function handlePageChange(newPage) {
+    if (newPage < 1 || (pagination.totalPages && newPage > pagination.totalPages)) return;
+    setPage(newPage);
+    loadProductsData(newPage, selectedCategoryId, selectedBrandId, keyword);
+  }
+
+  function resetForm() {
+    setEditingProductId(null);
+    setFormValues(createInitialFormState());
+    setFormErrors({});
   }
 
   function handleFormChange(event) {
@@ -395,22 +439,58 @@ export function AdminProductsPage() {
         </AdminCard>
 
         <AdminCard>
-          <div className="admin-panel-head">
-            <div className="admin-section-title">
-              <h3>Danh sách ({filteredProducts.length})</h3>
-              <p>Tìm theo tên, slug, danh mục hoặc thương hiệu.</p>
+          <div className="admin-panel-head" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+              <div className="admin-section-title" style={{ margin: 0 }}>
+                <h3>Danh sách ({pagination.totalItems || products.length})</h3>
+                <p>Quản lý linh kiện, lọc theo danh mục chuẩn và thương hiệu.</p>
+              </div>
             </div>
-            <form onSubmit={handleSearchSubmit} className="admin-search-row">
-              <input className="admin-input" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="Tìm sản phẩm…" />
+
+            {/* Bộ Lọc Danh Mục, Thương Hiệu & Tìm Kiếm */}
+            <form onSubmit={handleSearchSubmit} style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr auto", gap: 10, width: "100%" }}>
+              <input
+                className="admin-input"
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+                placeholder="🔍 Tìm tên sản phẩm, mã linh kiện…"
+              />
+              <select
+                className="admin-input"
+                value={selectedCategoryId}
+                onChange={(e) => handleCategoryFilterChange(e.target.value)}
+                style={{ fontWeight: 600, background: "#f8fafc" }}
+              >
+                <option value="">📂 Tất cả danh mục</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="admin-input"
+                value={selectedBrandId}
+                onChange={(e) => handleBrandFilterChange(e.target.value)}
+                style={{ background: "#f8fafc" }}
+              >
+                <option value="">🏷️ Tất cả thương hiệu</option>
+                {brands.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
               <AdminBtn type="submit" variant="dark">
-                Tìm
+                Tìm kiếm
               </AdminBtn>
             </form>
           </div>
+
           {loading ? (
-            <AdminEmpty>Đang tải…</AdminEmpty>
-          ) : filteredProducts.length === 0 ? (
-            <AdminEmpty>Không có sản phẩm phù hợp.</AdminEmpty>
+            <AdminEmpty>⏳ Đang tải dữ liệu sản phẩm...</AdminEmpty>
+          ) : products.length === 0 ? (
+            <AdminEmpty>Không tìm thấy sản phẩm nào phù hợp với bộ lọc.</AdminEmpty>
           ) : (
             <AdminTableWrap>
               <table className="admin-table">
@@ -426,14 +506,25 @@ export function AdminProductsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredProducts.map((product) => (
+                  {products.map((product) => (
                     <tr key={product.id}>
                       <td>
                         <strong>{product.name}</strong>
                         <div style={{ fontSize: 13, color: "#64748b" }}>{product.description || "—"}</div>
                       </td>
                       <td>{product.slug || "—"}</td>
-                      <td>{product.categoryName || "—"}</td>
+                      <td>
+                        <span style={{
+                          padding: "2px 8px",
+                          borderRadius: 6,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          background: "#e0f2fe",
+                          color: "#0369a1"
+                        }}>
+                          {product.categoryName || "—"}
+                        </span>
+                      </td>
                       <td>{product.brandName || "—"}</td>
                       <td>
                         <strong>{product.warrantyMonths || 24} tháng</strong>
@@ -449,7 +540,7 @@ export function AdminProductsPage() {
                             Sửa
                           </AdminBtn>
                           <AdminBtn variant="secondary" disabled={statusLoadingId === product.id} onClick={() => handleToggleStatus(product)}>
-                            {statusLoadingId === product.id ? "Đang xử lý..." : product.status === "ACTIVE" ? "Ẩn" : "Bật hiển thị"}
+                            {statusLoadingId === product.id ? "Đang xử lý..." : product.status === "ACTIVE" ? "Ẩn" : "Bật"}
                           </AdminBtn>
                           <AdminBtn variant="secondary" disabled={deleteLoadingId === product.id} onClick={() => handleDeleteProduct(product)}>
                             {deleteLoadingId === product.id ? "Đang xóa..." : "Xóa"}
@@ -460,6 +551,29 @@ export function AdminProductsPage() {
                   ))}
                 </tbody>
               </table>
+
+              {/* Thanh Điều Hướng Phân Trang */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 8px 4px", borderTop: "1px solid #f1f5f9" }}>
+                <span style={{ fontSize: 13, color: "#64748b" }}>
+                  Trang <strong>{page}</strong> / <strong>{pagination.totalPages || 1}</strong> (Tổng cộng <strong>{pagination.totalItems || products.length}</strong> sản phẩm)
+                </span>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <AdminBtn
+                    variant="secondary"
+                    disabled={page <= 1 || loading}
+                    onClick={() => handlePageChange(page - 1)}
+                  >
+                    ← Trang trước
+                  </AdminBtn>
+                  <AdminBtn
+                    variant="secondary"
+                    disabled={page >= (pagination.totalPages || 1) || loading}
+                    onClick={() => handlePageChange(page + 1)}
+                  >
+                    Trang sau →
+                  </AdminBtn>
+                </div>
+              </div>
             </AdminTableWrap>
           )}
         </AdminCard>

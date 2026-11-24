@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { resolveProductImage } from "../../utils/productImage";
 import { SPEC_ALIASES } from "../../components/pc-builder/pcBuilderConstants";
 import {
@@ -178,12 +178,19 @@ export function ProductImageContainer({ product, activeComponent, isSelected }) 
   const [loaded, setLoaded] = useState(false);
   const stock = getProductStock(product);
   const stockState = getStockState(stock);
+  const imgRef = useRef(null);
 
   useEffect(() => {
     setImageSrc(resolveProductImage(product));
     setImgError(false);
     setLoaded(false);
   }, [product]);
+
+  useEffect(() => {
+    if (imgRef.current?.complete && imgRef.current?.naturalWidth > 0) {
+      setLoaded(true);
+    }
+  }, [imageSrc]);
 
   function handleImageError() {
     const categoryFallback = resolveProductImage({ category_name: activeComponent, product_name: getProductName(product) });
@@ -202,10 +209,11 @@ export function ProductImageContainer({ product, activeComponent, isSelected }) 
 
       {!imgError && imageSrc ? (
         <img
-          className={`product-card__img ${loaded ? "is-loaded" : "is-loading"}`}
+          ref={imgRef}
+          className="product-card__img"
           src={imageSrc}
           alt={getProductName(product)}
-          loading="lazy"
+          decoding="async"
           onLoad={() => setLoaded(true)}
           onError={handleImageError}
         />

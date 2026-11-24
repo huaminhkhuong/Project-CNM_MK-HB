@@ -397,8 +397,10 @@ export function AiChatPage() {
         })
       ]);
       textareaRef.current?.focus();
-    } catch {
-      setStatusMessage("Kênh AI đang phản hồi chậm. Bạn vui lòng thử lại sau ít giây.");
+    } catch (err) {
+      console.error("AI Chat error:", err);
+      const serverMsg = err?.response?.data?.message;
+      setStatusMessage(serverMsg || "Kênh AI đang phản hồi chậm. Bạn vui lòng thử lại sau ít giây.");
       setQuestion(trimmedQuestion);
     } finally {
       setLoading(false);

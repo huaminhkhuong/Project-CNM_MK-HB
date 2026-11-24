@@ -96,6 +96,7 @@ const env = {
   mailFrom: process.env.MAIL_FROM || "",
   backendUrl: process.env.BACKEND_URL || process.env.API_BASE_URL || `http://localhost:${Number(process.env.PORT || 4000)}`,
   apiBaseUrl: process.env.API_BASE_URL || process.env.BACKEND_URL || `http://localhost:${Number(process.env.PORT || 4000)}`,
+  aiServiceUrl: process.env.AI_SERVICE_URL || "http://127.0.0.1:5001",
   paymentTimeoutMinutes: Number(process.env.PAYMENT_TIMEOUT_MINUTES || 30),
   chatStoragePath: process.env.CHAT_STORAGE_PATH || "./data/chat-sessions.json"
 };

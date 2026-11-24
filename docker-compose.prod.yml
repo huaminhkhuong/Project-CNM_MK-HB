@@ -74,6 +74,7 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai-service:5001}
     volumes:
       - ./services/api/data:/app/data
       - ./services/api/uploads:/app/services/api/uploads
@@ -85,6 +86,22 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+
+  ai-service:
+    build:
+      context: ./services/ai-service
+      dockerfile: Dockerfile
+    container_name: cnm_ai_service_prod
+    restart: unless-stopped
+    environment:
+      PORT: 5001
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-${LLM_API_KEY:-}}
+    volumes:
+      - ./services/ai-service/data_store:/app/data_store
+      - ./data:/app/data:ro
+      - ./services/api/src/data:/app/services/api/src/data:ro
+    networks:
+      - cnm_network
 
   web:
     build:

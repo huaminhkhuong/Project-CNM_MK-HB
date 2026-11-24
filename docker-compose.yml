@@ -52,11 +52,27 @@ services:
       - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_MODEL=${LLM_MODEL:-gemini-1.5-flash}
+      - AI_SERVICE_URL=${AI_SERVICE_URL:-http://ai-service:5001}
       - PAYMENT_MOCK_MODE=${PAYMENT_MOCK_MODE:-true}
       - SHIPPING_MOCK_MODE=${SHIPPING_MOCK_MODE:-true}
     depends_on:
       mysql:
         condition: service_healthy
+
+  ai-service:
+    build:
+      context: ./services/ai-service
+      dockerfile: Dockerfile
+    container_name: cnm_ai_service
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    environment:
+      - PORT=5001
+    volumes:
+      - ./services/ai-service/data_store:/app/data_store
+      - ./data:/app/data:ro
+      - ./services/api/src/data:/app/services/api/src/data:ro
 
   frontend:
     build:

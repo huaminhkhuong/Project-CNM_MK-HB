@@ -345,7 +345,7 @@ export function CandidateBuildsPanel({
                     </div>
                     {item.explanation && (
                       <div className="candidate-comp-explanation">
-                        <span className="explanation-label">🧠 AI Gợi ý:</span> {item.explanation}
+                        <span className="explanation-label">💡 Đánh giá kỹ thuật:</span> {item.explanation}
                       </div>
                     )}
                   </div>

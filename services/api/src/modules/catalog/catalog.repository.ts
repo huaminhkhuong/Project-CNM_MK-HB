@@ -144,22 +144,65 @@ export async function listProducts(params: ProductListParams) {
         : {})
     };
 
-    const [items, total] = await Promise.all([
-      prisma.product.findMany({
-        where,
-        include: {
-          Category: true,
-          Brand: true,
-          ProductSku: { take: 1 }
-        },
-        orderBy: {
-          [sortBy]: sortOrder
-        },
-        skip: (page - 1) * limit,
-        take: limit
-      }),
-      prisma.product.count({ where })
-    ]);
+    let items: any[];
+    let total: number;
+
+    // Khi người dùng duyệt "Tất cả sản phẩm" mặc định (không lọc danh mục/tìm kiếm/khoảng giá):
+    // Đề xuất xen kẽ cân bằng các danh mục linh kiện (CPU, GPU, RAM, Mainboard...)
+    if (
+      !categoryId &&
+      !search &&
+      sortBy === "created_at" &&
+      typeof minPrice !== "number" &&
+      typeof maxPrice !== "number"
+    ) {
+      const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 200));
+      const safeOffset = Math.max(0, (Math.max(1, Number(page) || 1) - 1) * safeLimit);
+      const activeClause = typeof isActive === "boolean" ? `WHERE p.is_active = ${isActive ? 1 : 0}` : "WHERE p.is_active = 1";
+      const interleavedRows: any[] = await prisma.$queryRawUnsafe(`
+        SELECT p.id,
+               ROW_NUMBER() OVER (PARTITION BY p.category_id ORDER BY p.id DESC) as rn
+        FROM products p
+        JOIN categories c ON c.id = p.category_id
+        ${activeClause}
+        ORDER BY rn ASC, FIELD(c.name, 'CPU', 'GPU', 'RAM', 'MAINBOARD', 'SSD', 'PSU', 'CASE', 'COOLING', 'MONITOR', 'KEYBOARD_MOUSE', 'HEADPHONE', 'HDD') ASC
+        LIMIT ${safeLimit} OFFSET ${safeOffset}
+      `);
+
+      const ids = interleavedRows.map((r: any) => Number(r.id)).filter((id) => Number.isFinite(id));
+      if (ids.length > 0) {
+        const prods = await prisma.product.findMany({
+          where: { id: { in: ids } },
+          include: {
+            Category: true,
+            Brand: true,
+            ProductSku: { take: 1 }
+          }
+        });
+        items = ids.map((id) => prods.find((p) => p.id === id)).filter(Boolean);
+        total = await prisma.product.count({ where });
+      } else {
+        items = [];
+        total = 0;
+      }
+    } else {
+      [items, total] = await Promise.all([
+        prisma.product.findMany({
+          where,
+          include: {
+            Category: true,
+            Brand: true,
+            ProductSku: { take: 1 }
+          },
+          orderBy: {
+            [sortBy]: sortOrder
+          },
+          skip: (page - 1) * limit,
+          take: limit
+        }),
+        prisma.product.count({ where })
+      ]);
+    }
 
     return { items, total };
   } catch (_err) {

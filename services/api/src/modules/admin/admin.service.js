@@ -243,6 +243,24 @@ async function getProducts(params = {}) {
     queryParams.push(filters.keyword, filters.keyword, filters.keyword, filters.keyword);
   }
 
+  const catId = Number(params.categoryId || 0);
+  if (Number.isInteger(catId) && catId > 0) {
+    whereClauses.push("p.category_id = ?");
+    queryParams.push(catId);
+  }
+
+  const brandId = Number(params.brandId || 0);
+  if (Number.isInteger(brandId) && brandId > 0) {
+    whereClauses.push("p.brand_id = ?");
+    queryParams.push(brandId);
+  }
+
+  const statusFilter = String(params.status || "").trim().toUpperCase();
+  if (statusFilter === "ACTIVE" || statusFilter === "INACTIVE") {
+    whereClauses.push("(UPPER(COALESCE(p.status, '')) = ? OR p.is_active = ?)");
+    queryParams.push(statusFilter, statusFilter === "ACTIVE" ? 1 : 0);
+  }
+
   const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
   const [items, totalRows] = await Promise.all([

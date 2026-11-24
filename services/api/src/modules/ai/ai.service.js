@@ -1716,8 +1716,29 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
     model: "pc-mall-db-advisor",
     usage: null,
     isDatabaseGrounded: true,
+    isRagAugmented: false,
+    ragSources: [],
     userContextSummary: userContext?.hasActiveBuild ? `Cấu hình PC Builder: ${userContext.buildName || "PC Build"} (${userContext.buildTotalPrice?.toLocaleString("vi-VN")}đ)` : undefined
   };
+
+  // Hybrid RAG Layer: Ưu tiên Python AI Service (ChromaDB + BM25) nếu đang chạy, tự động fallback không chặn nếu offline
+  let ragData = null;
+  if (intent !== "greeting" && intent !== "policy" && process.env.NODE_ENV !== "test") {
+    try {
+      const { ragClientService } = require("./rag-client.service");
+      ragData = await ragClientService.retrieve(message, 4);
+      if (ragData && Array.isArray(ragData.documents) && ragData.documents.length > 0) {
+        response.isRagAugmented = true;
+        response.ragSources = ragData.documents.map((d) => ({
+          id: d.id,
+          type: d.metadata?.doc_type,
+          title: d.metadata?.name || d.metadata?.rule_id || d.metadata?.title || d.id
+        }));
+      }
+    } catch (_err) {
+      // Non-blocking fallback về dữ liệu nội bộ / Node.js RAG nếu Python AI Service chưa bật
+    }
+  }
 
   // Nếu khách hỏi trực tiếp về cấu hình vừa chọn trên PC Builder
   const normalizedMsg = normalizeVietnamese(message);
@@ -1812,7 +1833,9 @@ async function askDatabaseGroundedAdvisor(payload = {}) {
         ? `\n\nSản phẩm hiện có sẵn trong kho PC Mall tham khảo:\n` + topMatched.map(p => `- ${p.name} (Giá: ${Number(p.price).toLocaleString("vi-VN")}đ, tồn kho: ${p.stock})`).join("\n")
         : "";
 
-      const promptToLlm = `${effectiveSystemPrompt}
+      const promptToLlm = (ragData && ragData.grounded_system_prompt)
+        ? `${ragData.grounded_system_prompt}\n\nKhách hàng hỏi: "${message}"\n${productContext}`
+        : `${effectiveSystemPrompt}
 Khách hàng đang hỏi chuyên gia tư vấn phần cứng PC Mall câu hỏi công nghệ sau: "${message}".
 ${productContext}
 
@@ -1884,7 +1907,9 @@ Yêu cầu trả lời:
       : "";
 
     try {
-      const promptToLlm = `${effectiveSystemPrompt}
+      const promptToLlm = (ragData && ragData.grounded_system_prompt)
+        ? `${ragData.grounded_system_prompt}\n\nKhách hàng hỏi: "${message}"\n${productContext}`
+        : `${effectiveSystemPrompt}
 Khách hàng đang hỏi chuyên gia phần cứng PC Mall câu hỏi kiến thức/so sánh linh kiện: "${message}".
 ${productContext}
 
@@ -2238,7 +2263,9 @@ Yêu cầu trả lời:
 
   // 7. CÂU HỎI MỞ / KHÔNG RÕ RÀNG NHƯNG HỢP LỆ VỀ MẶT CÔNG NGHỆ
   try {
-    const promptToLlm = `${effectiveSystemPrompt}
+    const promptToLlm = (ragData && ragData.grounded_system_prompt)
+      ? `${ragData.grounded_system_prompt}\n\nKhách hàng đặt câu hỏi: "${message}"`
+      : `${effectiveSystemPrompt}
 Khách hàng đặt câu hỏi liên quan đến PC/công nghệ: "${message}".
 Hãy trả lời một cách chuyên nghiệp, chính xác và nhiệt tình bằng tiếng Việt, hướng dẫn khách hàng nếu cần tư vấn sâu hơn.`;
     const llmRes = await createResponsesRequest(promptToLlm, message);

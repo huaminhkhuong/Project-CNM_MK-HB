@@ -7,9 +7,9 @@ export function AuthRequiredModal({
   onSuccess,
   pendingPrompt = ""
 }) {
-  const { login, loginAsDemo } = useAuth();
-  const [email, setEmail] = useState("customer@pcmall.vn");
-  const [password, setPassword] = useState("password123");
+  const { login } = useAuth();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -31,20 +31,6 @@ export function AuthRequiredModal({
       onClose();
     } catch (err) {
       setError(err?.response?.data?.message || err?.message || "Đăng nhập thất bại. Vui lòng kiểm tra lại thông tin.");
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function handleQuickDemoLogin() {
-    setIsLoading(true);
-    setError("");
-    try {
-      await loginAsDemo();
-      if (onSuccess) onSuccess();
-      onClose();
-    } catch (err) {
-      setError("Không thể đăng nhập bằng tài khoản Demo. Vui lòng nhập thông tin đăng nhập.");
     } finally {
       setIsLoading(false);
     }
@@ -243,37 +229,6 @@ export function AuthRequiredModal({
               {isLoading ? "⏳ Đang xác thực..." : "🚀 Đăng Nhập & Tiếp Tục Build AI"}
             </button>
           </form>
-
-          {/* Quick Demo Login Option */}
-          <div style={{ marginTop: "16px", paddingTop: "16px", borderTop: "1px dashed #e2e8f0" }}>
-            <button
-              type="button"
-              onClick={handleQuickDemoLogin}
-              disabled={isLoading}
-              style={{
-                width: "100%",
-                padding: "10px 14px",
-                borderRadius: "10px",
-                border: "1px solid #e0e7ff",
-                background: "#f5f3ff",
-                color: "#6d28d9",
-                fontSize: "12.5px",
-                fontWeight: "700",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-                transition: "all 0.2s ease"
-              }}
-            >
-              <span>⚡</span>
-              <span>Đăng nhập nhanh 1-Click (Tài khoản Khách Demo)</span>
-            </button>
-            <div style={{ textAlign: "center", marginTop: "8px", fontSize: "11px", color: "#94a3b8" }}>
-              Tài khoản mẫu: <code>customer@pcmall.vn</code> / <code>password123</code>
-            </div>
-          </div>
         </div>
       </div>
     </div>

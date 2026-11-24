@@ -61,6 +61,7 @@ const envSchema = z.object({
   // Public/Gateway URLs and timeout
   BACKEND_URL: z.string().optional(),
   API_BASE_URL: z.string().optional(),
+  AI_SERVICE_URL: z.string().default("http://127.0.0.1:5001"),
   PAYMENT_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(30)
 });
 
@@ -135,6 +136,7 @@ export const env = {
   openaiApiKey: parsedEnv.data.OPENAI_API_KEY,
   backendUrl: parsedEnv.data.BACKEND_URL || parsedEnv.data.API_BASE_URL || `http://localhost:${parsedEnv.data.PORT}`,
   apiBaseUrl: parsedEnv.data.API_BASE_URL || parsedEnv.data.BACKEND_URL || `http://localhost:${parsedEnv.data.PORT}`,
+  aiServiceUrl: parsedEnv.data.AI_SERVICE_URL || "http://127.0.0.1:5001",
   paymentTimeoutMinutes: parsedEnv.data.PAYMENT_TIMEOUT_MINUTES
 };
 

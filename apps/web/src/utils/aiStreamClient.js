@@ -9,16 +9,24 @@
  * ==============================================================================
  */
 
+import { getStoredAuth } from "./storage";
+
 export async function streamAiResponse(endpoint, payload, { onChunk, onDone, onError, signal }) {
   const baseUrl = import.meta.env.VITE_API_BASE_URL || "/api";
   const url = `${baseUrl}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
 
   try {
+    const auth = getStoredAuth();
+    const headers = {
+      "Content-Type": "application/json"
+    };
+    if (auth?.accessToken) {
+      headers["Authorization"] = `Bearer ${auth.accessToken}`;
+    }
+
     const res = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
+      headers,
       body: JSON.stringify(payload),
       signal
     });

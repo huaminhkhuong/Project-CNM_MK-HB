@@ -1028,7 +1028,7 @@ class PcBuilderService {
       const filtered = filterFn ? pool.filter(filterFn) : pool;
       const candidates = filtered.length > 0 ? filtered : pool;
 
-      // Color scheme prioritization (e.g., White theme)
+      // Color scheme prioritization (White / Black theme)
       if (options.colorScheme === "white") {
         const whiteCandidates = candidates.filter(i => /white|trắng|snow/i.test(i.name));
         if (whiteCandidates.length > 0) {
@@ -1037,6 +1037,15 @@ class PcBuilderService {
             return inWhiteBudget.sort((a, b) => b.price - a.price)[0];
           }
           return [...whiteCandidates].sort((a, b) => a.price - b.price)[0];
+        }
+      } else if (options.colorScheme === "black") {
+        const blackCandidates = candidates.filter(i => !/white|trắng|snow/i.test(i.name));
+        if (blackCandidates.length > 0) {
+          const inBlackBudget = blackCandidates.filter(i => i.price <= maxSubBudget);
+          if (inBlackBudget.length > 0) {
+            return inBlackBudget.sort((a, b) => b.price - a.price)[0];
+          }
+          return [...blackCandidates].sort((a, b) => a.price - b.price)[0];
         }
       }
 
@@ -1136,6 +1145,11 @@ class PcBuilderService {
         : "ATX";
 
       const caseItem = pickBest(casePool, caseMax, (cs) => {
+        if (options.colorScheme === "black") {
+          if (/white|trắng|snow/i.test(cs.name)) return false;
+        } else if (options.colorScheme === "white") {
+          if (/black|đen/i.test(cs.name) && !/white|trắng/i.test(cs.name)) return false;
+        }
         if (options.caseStyle === "fish_tank") {
           if (!/bể cá|panorama|lv12|kính|aqua/i.test(cs.name)) return false;
         }
@@ -1424,12 +1438,36 @@ class PcBuilderService {
       });
     }
 
+    // Extract color scheme and case style preferences
+    const rawAesthetic = String(
+      payload.aesthetic ||
+      payload.answers?.aesthetic_style ||
+      payload.answers?.general_case ||
+      payload.answers?.case_style ||
+      ""
+    ).toLowerCase();
+    let candidateColorScheme: string | undefined = undefined;
+    if (rawAesthetic.includes("black") || rawAesthetic.includes("đen") || rawAesthetic.includes("stealth") || rawAesthetic.includes("tối giản")) {
+      candidateColorScheme = "black";
+    } else if (rawAesthetic.includes("white") || rawAesthetic.includes("trắng")) {
+      candidateColorScheme = "white";
+    }
+
+    let candidateCaseStyle: string | undefined = undefined;
+    if (rawAesthetic.includes("bể cá") || rawAesthetic.includes("aquarium") || rawAesthetic.includes("panorama") || rawAesthetic.includes("tank")) {
+      candidateCaseStyle = "fish_tank";
+    }
+
+    const candidateOptions = {
+      colorScheme: candidateColorScheme,
+      caseStyle: candidateCaseStyle
+    };
+
     // Generate 3 Candidates concurrently
-    // 3 Candidate generations
     const [bestValue, bestPerformance, budgetSafe] = await Promise.all([
-      this.querySingleCandidate(budget, ratios, 1.0, useCase),
-      this.querySingleCandidate(budget, ratios, 1.15, useCase),
-      this.querySingleCandidate(budget, ratios, 0.85, useCase)
+      this.querySingleCandidate(budget, ratios, 1.0, useCase, candidateOptions),
+      this.querySingleCandidate(budget, ratios, 1.15, useCase, candidateOptions),
+      this.querySingleCandidate(budget, ratios, 0.85, useCase, candidateOptions)
     ]);
 
     // ── Real Delta FPS Calculation based on GPU/CPU Tiers ──
@@ -2478,12 +2516,20 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
       ratios.cpu = Math.max(0.14, ratios.cpu - 0.02);
     }
 
-    const platformPref = String(criteria?.platformPref || "auto").toLowerCase();
-    const gpuBrandPref = String(criteria?.gpuBrandPref || "auto").toLowerCase();
-    const minRam = String(criteria?.minRam || "").toLowerCase();
-    const minStorage = String(criteria?.minStorage || "").toLowerCase();
-    const aesthetic = String(criteria?.aesthetic || "").toLowerCase();
-    const coolingPref = String(criteria?.coolingPref || "").toLowerCase();
+    const answers = criteria?.answers || {};
+    const platformPref = String(criteria?.platformPref && criteria.platformPref !== "auto" ? criteria.platformPref : answers.cpu_platform_pref || "auto").toLowerCase();
+    const gpuBrandPref = String(
+      criteria?.gpuBrandPref && criteria.gpuBrandPref !== "auto"
+        ? criteria.gpuBrandPref
+        : (answers.gpu_preference?.includes("nvidia") ? "nvidia" : answers.gpu_preference?.includes("amd") ? "amd" : "auto")
+    ).toLowerCase();
+    const minRam = String(criteria?.minRam || (answers.target_intensity?.includes("heavy") ? "32gb" : "")).toLowerCase();
+    const minStorage = String(
+      criteria?.minStorage ||
+      (answers.storage_plan?.includes("1tb") ? "1tb" : answers.storage_plan?.includes("2tb") ? "2tb" : "")
+    ).toLowerCase();
+    const aesthetic = String(criteria?.aesthetic || answers.aesthetic_style || answers.general_case || answers.case_style || "").toLowerCase();
+    const coolingPref = String(criteria?.coolingPref || (answers.aesthetic_style?.includes("rgb") ? "aio" : "")).toLowerCase();
 
     const pickDiverse = (list: any[], targetPrice: number, count: number = 4, scoreFn?: (item: any) => number) => {
       if (!list || list.length === 0) return [];
@@ -2553,23 +2599,53 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
     }
     if (gpuPool.length < 4) gpuPool = pickDiverse(gpus, gpuTarget, 4);
 
-    // 3. MAINBOARD
+    // 3. MAINBOARD (Pre-Prompt Compatibility Socket Alignment)
     const mainboards = getCatItems([2], ["MAINBOARD", "BO MẠCH"]);
     const mbTarget = budget * ratios.mainboard;
     const lgaBoards = mainboards.filter(m => /1700|b760|z790|h610|b660/i.test(m.name + " " + (m.specs?.socket || "")));
     const amBoards = mainboards.filter(m => /am5|am4|b650|b550|a620|x670/i.test(m.name + " " + (m.specs?.socket || "")));
-    let mbPool = [...pickDiverse(lgaBoards, mbTarget, 2), ...pickDiverse(amBoards, mbTarget, 2)];
+    let mbPool: any[] = [];
+    if (platformPref === "intel") {
+      mbPool = [...pickDiverse(lgaBoards, mbTarget, 3), ...pickDiverse(amBoards, mbTarget, 1)];
+    } else if (platformPref === "amd") {
+      mbPool = [...pickDiverse(amBoards, mbTarget, 3), ...pickDiverse(lgaBoards, mbTarget, 1)];
+    } else {
+      mbPool = [...pickDiverse(lgaBoards, mbTarget, 2), ...pickDiverse(amBoards, mbTarget, 2)];
+    }
     if (mbPool.length < 4) mbPool = pickDiverse(mainboards, mbTarget, 4);
 
-    // 4. RAM
+    // 4. RAM (Đồng bộ thế hệ RAM DDR4/DDR5 chặt chẽ với Mainboard ứng viên)
     const rams = getCatItems([3], ["RAM", "BỘ NHỚ"]);
     const ramTarget = budget * ratios.ram;
-    let ramPool = pickDiverse(rams, ramTarget, 4, (item) => {
-      let b = 0;
-      if (minRam && item.name.toLowerCase().includes(minRam)) b += 1000000;
-      if (/dual|2x|kit 2/i.test(item.name)) b += 500000;
-      return b;
-    });
+    const mbDdr5Count = mbPool.filter(m => /ddr5|d5\b|am5/i.test(m.name + " " + (m.specs?.ram_type || ""))).length;
+    const mbDdr4Count = mbPool.filter(m => /ddr4|d4\b|am4|h610|b550|a520/i.test(m.name + " " + (m.specs?.ram_type || ""))).length;
+    const preferDdr5 = mbDdr5Count > mbDdr4Count;
+    const ramsDdr5 = rams.filter(r => /ddr5|d5\b/i.test(r.name + " " + (r.specs?.ram_type || "")));
+    const ramsDdr4 = rams.filter(r => /ddr4|d4\b/i.test(r.name + " " + (r.specs?.ram_type || "")));
+
+    let ramPool: any[] = [];
+    if (preferDdr5 && ramsDdr5.length >= 2) {
+      ramPool = pickDiverse(ramsDdr5, ramTarget, 4, (item) => {
+        let b = 0;
+        if (minRam && item.name.toLowerCase().includes(minRam)) b += 1000000;
+        if (/dual|2x|kit 2/i.test(item.name)) b += 500000;
+        return b;
+      });
+    } else if (ramsDdr4.length >= 2) {
+      ramPool = pickDiverse(ramsDdr4, ramTarget, 4, (item) => {
+        let b = 0;
+        if (minRam && item.name.toLowerCase().includes(minRam)) b += 1000000;
+        if (/dual|2x|kit 2/i.test(item.name)) b += 500000;
+        return b;
+      });
+    } else {
+      ramPool = pickDiverse(rams, ramTarget, 4, (item) => {
+        let b = 0;
+        if (minRam && item.name.toLowerCase().includes(minRam)) b += 1000000;
+        if (/dual|2x|kit 2/i.test(item.name)) b += 500000;
+        return b;
+      });
+    }
 
     // 5. STORAGE
     const storages = getCatItems([5, 9], ["SSD", "STORAGE", "Ổ CỨNG"]);
@@ -2593,10 +2669,27 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
     // 7. CASE
     const cases = getCatItems([7], ["CASE", "THÙNG MÁY"]);
     const caseTarget = budget * ratios.case;
-    let casePool = pickDiverse(cases, caseTarget, 4, (item) => {
+    const isBlackCase = /black|đen|stealth|tối giản/i.test(aesthetic);
+    const isWhiteCase = /white|trắng/i.test(aesthetic);
+    const isTankCase = /bể cá|panorama|d300|tank|aquarium/i.test(aesthetic);
+
+    const eligibleCases = isBlackCase
+      ? cases.filter(c => !/white|trắng|snow/i.test(c.name))
+      : isWhiteCase
+      ? cases.filter(c => /white|trắng|snow/i.test(c.name) || !/black|đen/i.test(c.name))
+      : cases;
+    const sourceCases = eligibleCases.length >= 2 ? eligibleCases : cases;
+
+    let casePool = pickDiverse(sourceCases, caseTarget, 4, (item) => {
       let b = 0;
-      if (aesthetic.includes("white") && /white|trắng/i.test(item.name)) b += 1000000;
-      if (aesthetic.includes("tank") && /bể cá|panorama|d300/i.test(item.name)) b += 1000000;
+      if (isBlackCase) {
+        if (/white|trắng/i.test(item.name)) b -= 5000000;
+        if (/black|đen/i.test(item.name)) b += 2000000;
+      } else if (isWhiteCase) {
+        if (/black|đen/i.test(item.name)) b -= 5000000;
+        if (/white|trắng/i.test(item.name)) b += 2000000;
+      }
+      if (isTankCase && /bể cá|panorama|d300/i.test(item.name)) b += 1000000;
       return b;
     });
 
@@ -2645,21 +2738,36 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
     const useCase = String(payload.useCase || payload.purpose || "gaming").toLowerCase();
     const resolution = String(payload.resolution || "1080p").toLowerCase();
     const customPrompt = String(payload.customPrompt || payload.promptText || "").trim();
+    const aesthetic = String(
+      payload.aesthetic ||
+      payload.answers?.aesthetic_style ||
+      payload.answers?.general_case ||
+      payload.answers?.case_style ||
+      ""
+    ).toLowerCase();
 
     // 1. Tạo Pool 32 linh kiện thực tế
     const { pool, allItemsMap } = await this.getCandidatePool32(budget, useCase, resolution, payload);
 
-    // 2. Chuyển đổi 32 linh kiện thành văn bản có cấu trúc rõ ràng cho AI
+    // 2. Chuyển đổi 32 linh kiện thành văn bản có cấu trúc rõ ràng cho AI (Có xếp hạng thứ bậc)
+    const RANK_LABELS = [
+      "HẠNG 1: KHUYẾN NGHỊ CAO NHẤT (Best Value)",
+      "HẠNG 2: CÂN ĐỐI CHI PHÍ (Cost-Effective)",
+      "HẠNG 3: HIỆU NĂNG TỐI ĐA (High-End)",
+      "HẠNG 4: DỰ PHÒNG MỞ RỘNG (Alternative)"
+    ];
+
     const formatPoolSection = (catKey: string, catTitle: string) => {
       const items = pool[catKey] || [];
-      const lines = items.map((item, idx) => {
+      const lines = items.slice(0, 4).map((item, idx) => {
+        const rankLabel = RANK_LABELS[idx] || `HẠNG ${idx + 1}`;
         const specSummary = Object.entries(item.specs || {})
           .map(([k, v]) => `${k.toUpperCase()}: ${v}`)
           .slice(0, 4)
           .join(" | ");
-        return `  [${catKey.toUpperCase()}_${idx + 1} | SKU_ID: ${item.skuId}] ${item.name} - Giá: ${Number(item.price).toLocaleString("vi-VN")}đ ${specSummary ? `(${specSummary})` : ""}`;
+        return `  [${rankLabel} | SKU_ID: ${item.skuId}] ${item.name} - Giá: ${Number(item.price).toLocaleString("vi-VN")}đ ${specSummary ? `(${specSummary})` : ""}`;
       });
-      return `### DANH MỤC ${catTitle.toUpperCase()} (4 Ứng Viên):\n${lines.join("\n")}`;
+      return `DANH MỤC ${catTitle.toUpperCase()} (Top ${lines.length} Ứng Viên Xếp Hạng):\n${lines.join("\n")}`;
     };
 
     const candidatePoolText = [
@@ -2676,30 +2784,72 @@ Hãy phân tích và đưa ra lời khuyên kỹ thuật chính xác nhất:`;
     const { aiRuleService } = require("../ai/ai-rule.service");
     const suggestPromptCfg = aiRuleService.getPromptByScope("BUILDER_SUGGEST");
 
-    const systemInstruction = suggestPromptCfg?.systemPrompt || `Bạn là Trưởng ban Kiến trúc Phần cứng & Thẩm định Hệ thống (Senior PC Hardware Architect) tại PC Mall với hơn 15 năm kinh nghiệm thực chiến.
-Phong cách làm việc: CỰC KỲ NGHIÊM KHẮC, KHÁCH QUAN, HOÀN TOÀN KHÔNG THIÊN VỊ BẤT KỲ THƯƠNG HIỆU NÀO (Zero Vendor Bias). Bạn đề cao tính cân bằng nghẽn cổ chai (Bottleneck), hiệu quả chi phí trên hiệu năng thực tế (P/P), và độ an toàn điện năng tuyệt đối.`;
+    // Truy vấn Semantic Search RAG từ AI Microservice (Port 5001) — fallback an toàn nếu offline
+    let ragKnowledgeSnippet = "";
+    if (process.env.NODE_ENV !== "test") {
+      try {
+        const { ragClientService } = require("../ai/rag-client.service");
+        const ragRes = await ragClientService.retrieve(`${useCase} ${customPrompt || ""}`, 3);
+        if (ragRes?.grounded_system_prompt) {
+          ragKnowledgeSnippet = `\n${ragRes.grounded_system_prompt}\n`;
+        }
+      } catch {
+        // Non-blocking fallback
+      }
+    }
+
+    const systemInstruction = suggestPromptCfg?.systemPrompt || `Bạn là Chuyên gia Tư vấn Cấu hình Máy tính tận tâm, chu đáo tại PC Mall.
+Đối tượng người đọc: KHÁCH HÀNG PHỔ THÔNG (NON-TECH), KHÔNG CÓ NHIỀU KIẾN THỨC VỀ PHẦN CỨNG MÁY TÍNH.
+Phong cách làm việc: THÂN THIỆN, DỄ HIỂU, TỰ NHIÊN, TUYỆT ĐỐI KHÔNG DÙNG THUẬT NGỮ KỸ THUẬT GÂY HOANG MANG.
+- CẤM dùng các từ khó hiểu như "VRM", "Phase nguồn", "TDP 253W", "12VHPWR", "PCIe Gen 4", "Nghẽn cổ chai nặng".
+- Thay vào đó, HÃY TẬP TRUNG VÀO TRẢI NGHIỆM THỰC TẾ:
+  + Chơi mượt các tựa game mong muốn ở độ phân giải nào, tốc độ khung hình (FPS) ra sao?
+  + Mức độ đa nhiệm (mở 20-30 tab duyệt web, Photoshop, Zalo, nghe nhạc) mượt mà không lo đơ giật?
+  + Nhiệt độ và độ êm ái khi vận hành, nguồn điện ổn định, độ bền bỉ dài lâu.
+  + Tối ưu chi phí: Từng đồng chi ra đều đem lại giá trị thực tế cao nhất cho người dùng.
+
+QUY TẮC ĐỊNH DẠNG BẮT BUỘC:
+- TUYỆT ĐỐI KHÔNG xuất hiện ký tự Markdown '#' hay '##' hay '###'.
+- Phân đoạn từng mục linh kiện trên một dòng riêng biệt theo đúng cấu trúc tiêu đề:
+  1. BỘ VI XỬ LÝ (CPU)
+  2. CARD ĐỒ HỌA (GPU)
+  3. BO MẠCH CHỦ (MAINBOARD)
+  4. BỘ NHỚ RAM
+  5. Ổ CỨNG LƯU TRỮ (SSD)
+  6. NGUỒN MÁY TÍNH (PSU)
+  7. VỎ THÙNG MÁY (CASE)
+  8. TẢN NHIỆT (COOLING)
+- Dùng dấu gạch đầu dòng '-' hoặc '•' cho các phân tích cụ thể bên dưới mỗi mục.`;
+
+    const isUserBlack = /black|đen|stealth|tối giản/i.test(aesthetic);
+    const isUserWhite = /white|trắng/i.test(aesthetic);
+    const aestheticInstruction = isUserBlack
+      ? "- Vỏ thùng máy & Màu sắc: KHÁCH HÀNG YÊU CẦU THÙNG MÁY MÀU ĐEN (STEALTH BLACK). TUYỆT ĐỐI KHÔNG CHỌN VỎ CASE MÀU TRẮNG!"
+      : isUserWhite
+      ? "- Vỏ thùng máy & Màu sắc: KHÁCH HÀNG YÊU CẦU THÙNG MÁY MÀU TRẮNG (PURE WHITE). TUYỆT ĐỐI KHÔNG CHỌN VỎ CASE MÀU ĐEN!"
+      : "";
 
     const promptText = `Khách hàng cần xây dựng dàn PC với thông số sau:
 - Ngân sách mục tiêu: ${budget.toLocaleString("vi-VN")} VNĐ
 - Nhu cầu chính: ${useCase.toUpperCase()}
 - Độ phân giải mục tiêu: ${resolution.toUpperCase()}
-${customPrompt ? `- Yêu cầu bổ sung của khách hàng: "${customPrompt}"` : ""}
-
-KHO HÀNG PC MALL ĐÃ LỌC SẴN POOL 32 LINH KIỆN ỨNG VIÊN PHÙ HỢP NHẤT DƯỚI ĐÂY:
+${aestheticInstruction ? `${aestheticInstruction}\n` : ""}${customPrompt ? `- Yêu cầu bổ sung của khách hàng: "${customPrompt}"` : ""}
+${ragKnowledgeSnippet}
+KHO HÀNG PC MALL ĐÃ LỌC SẴN DANH SÁCH LINH KIỆN ỨNG VIÊN ĐƯỢC XẾP HẠNG PHÙ HỢP NHẤT DƯỚI ĐÂY:
 ${candidatePoolText}
 
 NHIỆM VỤ CỦA BẠN:
 0. PHẢN HỒI YÊU CẦU BỔ SUNG CỦA KHÁCH HÀNG:
-   - Nếu khách hàng có câu hỏi hoặc yêu cầu bổ sung riêng biệt (như thắc mắc tính toán "1+1=", câu hỏi ngoài lề hoặc yêu cầu sở thích linh kiện cá nhân), hãy trực tiếp giải đáp rõ ràng, thân thiện ngay ở 1-2 câu đầu tiên trước khi đánh giá linh kiện.
+   - Nếu khách hàng có câu hỏi hoặc yêu cầu bổ sung riêng biệt, hãy trực tiếp giải đáp rõ ràng, thân thiện ngay ở 1-2 câu đầu tiên trước khi đánh giá linh kiện.
 1. ĐÁNH GIÁ NGHIÊM KHẮC & KHÔNG THIÊN VỊ:
-   - Trong mỗi danh mục 4 ứng viên, hãy chọn ra DUY NHẤT 1 linh kiện tối ưu nhất cho tổng thể bộ máy.
-   - Trình bày ngắn gọn, sắc sảo (1 gạch đầu dòng lý do chọn, 1-2 gạch đầu dòng lý do loại 3 món còn lại). Không viết lan man.
+   - Trong mỗi danh mục 3-4 ứng viên đã xếp hạng, hãy chọn ra DUY NHẤT 1 linh kiện tối ưu nhất cho tổng thể bộ máy.
+   - Trình bày ngắn gọn, sắc sảo (1 gạch đầu dòng lý do chọn, 1-2 gạch đầu dòng lý do loại các món còn lại). Không viết lan man.
 2. ĐẢM BẢO TƯƠNG THÍCH VẬT LÝ & ĐIỆN NĂNG 100%:
    - Socket CPU phải tuyệt đối khớp với Socket Mainboard (LGA1700 đi với LGA1700, AM4 đi với AM4, AM5 đi với AM5).
-   - Chuẩn RAM (DDR4/DDR5) phải khớp với Mainboard đã chọn.
+   - Chuẩn RAM (DDR4/DDR5) phải tuyệt đối khớp với Mainboard đã chọn (Mainboard DDR4 đi với RAM DDR4; Mainboard DDR5 đi với RAM DDR5).
    - Nguồn PSU phải có công suất dư tải an toàn >= 20% so với tổng tiêu thụ CPU + GPU.
-   - Tản nhiệt phải giải nhiệt tốt cho mức TDP của CPU.
-   - Tổng giá tiền 8 món chọn lựa không được vượt quá 10% ngân sách mục tiêu.
+   - Tản nhiệt phải giải nhiệt tốt cho CPU đã chọn.
+   - BẮT BUỘC KHÓA CHẶT NGÂN SÁCH: Tổng giá tiền 8 món chọn lựa phải xoay quanh mức ngân sách ${budget.toLocaleString("vi-VN")} VNĐ trong phạm vi +-5% (Tối thiểu: ${(budget * 0.95).toLocaleString("vi-VN")} VNĐ, Tối đa: ${(budget * 1.05).toLocaleString("vi-VN")} VNĐ). Tuyệt đối không được vượt quá 5% ngân sách mục tiêu!
 3. BẮT BUỘC Ở CUỐI PHẢN HỒI:
    Xuất một khối JSON khép kín theo đúng cấu trúc sau (không được sai tên key) để hệ thống tự động nạp linh kiện:
 \`\`\`json
@@ -2795,6 +2945,17 @@ ${payload.rulePromptInjection ? `\nCHỈ THỊ BỔ SUNG TỪ HỆ THỐNG: ${pa
         chosenItem = pool[cat][0];
       }
 
+      // Check color consistency for Case
+      if (cat === "case" && chosenItem) {
+        if (isUserBlack && /white|trắng/i.test(chosenItem.name)) {
+          const blackCase = (pool.case || []).find((c: any) => !/white|trắng/i.test(c.name));
+          if (blackCase) chosenItem = blackCase;
+        } else if (isUserWhite && /black|đen/i.test(chosenItem.name)) {
+          const whiteCase = (pool.case || []).find((c: any) => /white|trắng/i.test(c.name));
+          if (whiteCase) chosenItem = whiteCase;
+        }
+      }
+
       if (chosenItem) {
         selectedComponents[cat] = {
           id: chosenItem.variantId,
@@ -2805,6 +2966,8 @@ ${payload.rulePromptInjection ? `\nCHỈ THỊ BỔ SUNG TỪ HỆ THỐNG: ${pa
           productName: chosenItem.name,
           price: chosenItem.price,
           imageUrl: chosenItem.imageUrl,
+          image: chosenItem.imageUrl,
+          image_url: chosenItem.imageUrl,
           specs: chosenItem.specs,
           stock: chosenItem.stock,
           explanation: componentReasons[cat] || chosenItem.explanation || `Tối ưu hiệu năng/giá thành cho ${cat.toUpperCase()} (${Number(chosenItem.price || 0).toLocaleString("vi-VN")}đ).`
@@ -3039,14 +3202,19 @@ ${payload.rulePromptInjection ? `\nCHỈ THỊ BỔ SUNG TỪ HỆ THỐNG: ${pa
     const { aiRuleService } = require("../ai/ai-rule.service");
     const auditPromptCfg = aiRuleService.getPromptByScope("BUILDER_AUDIT_CHAT");
 
-    const systemInstruction = auditPromptCfg?.systemPrompt || `Bạn là Trưởng ban Giám định Kỹ thuật Phần cứng (Senior PC Hardware Inspection Auditor) tại PC Mall.
-Nhiệm vụ của bạn: Kiểm tra, thẩm định một cách CỰC KỲ NGHIÊM KHẮC, KHÁCH QUAN, KHÔNG THIÊN VỊ cấu hình do khách hàng xây dựng.
-Đánh giá 5 trụ cột kỹ thuật:
-1. Độ cân bằng CPU - GPU (Nghẽn cổ chai Bottleneck ở độ phân giải ${resolution.toUpperCase()}).
-2. An toàn nguồn điện (PSU Headroom): Công suất thực, chuẩn 80 Plus, dư tải an toàn >= 20%.
-3. Hiệu năng tản nhiệt (Cooling): TDP của CPU và hiệu quả của tản nhiệt đối với luồng gió vỏ case.
-4. Băng thông bộ nhớ (RAM): Có chạy Dual Channel (2 thanh) không? Đơn thanh (Single) sẽ bóp nghẹt 15-20% FPS.
-5. Bo mạch chủ & Nâng cấp (Mainboard VRM & M.2 Slots).`;
+    const systemInstruction = auditPromptCfg?.systemPrompt || `Bạn là Chuyên gia Tư vấn & Tối ưu Cấu hình Máy tính tận tâm tại PC Mall.
+Đối tượng đọc: KHÁCH HÀNG PHỔ THÔNG (NON-TECH), KHÔNG CÓ NHIỀU KIẾN THỨC VỀ PHẦN CỨNG.
+Nhiệm vụ của bạn: Kiểm tra, thẩm định cấu hình do khách hàng lựa chọn và tư vấn một cách THÂN THIỆN, DỄ HIỂU, KHÍCH LỆ.
+QUY TẮC BẮT BUỘC VỀ NGÔN TỪ:
+- TUYỆT ĐỐI KHÔNG dùng từ ngữ dọa nạt, tiêu cực như "nguy hiểm", "nghẽn cổ chai nặng nề", "cháy nổ", "bóp nghẹt".
+- CẤM dùng các thuật ngữ khó hiểu như VRM, Phase nguồn, TDP, 12VHPWR.
+- Hãy đánh giá 5 trải nghiệm thực tế:
+  1. Độ cân đối giữa CPU và Card đồ họa (Có phối hợp nhịp nhàng, tối đa hóa FPS trong game ở độ phân giải ${resolution.toUpperCase()} không).
+  2. Nguồn điện có đủ êm ái, an toàn và dư tải để bền bỉ dài lâu không.
+  3. Tản nhiệt và vỏ case có thông thoáng, mát mẻ khi sử dụng liên tục không.
+  4. Bộ nhớ RAM: Khuyên dùng 2 thanh (Dual Channel) để tăng thêm 15-20% độ mượt mà khi chơi game và mở nhiều ứng dụng.
+  5. Khả năng mở rộng, nâng cấp trong tương lai nếu khách cần.
+- Nếu cần đổi linh kiện, hãy đưa ra lời khuyên ân cần, giải thích lý do vì sao đổi sẽ giúp máy chạy êm hơn, mượt hơn.`;
 
     const promptText = `HỒ SƠ CẤU HÌNH CẦN THẨM ĐỊNH:
 - Số lượng linh kiện đã chọn: ${activeItems.length} / 8 linh kiện
