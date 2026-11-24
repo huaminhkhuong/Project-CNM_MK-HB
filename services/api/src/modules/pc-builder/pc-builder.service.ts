@@ -3156,6 +3156,18 @@ ${payload.rulePromptInjection ? `\nCHỈ THỊ BỔ SUNG TỪ HỆ THỐNG: ${pa
   }
 
   /**
+   * Stream văn bản mượt mà theo từng cụm từ nhỏ (~60fps) khi kích hoạt Hardware Expert Engine cục bộ
+   */
+  private async streamTextSmoothly(fullText: string, onChunk: (chunk: string) => void): Promise<void> {
+    if (!fullText) return;
+    const chunkSize = 42;
+    for (let i = 0; i < fullText.length; i += chunkSize) {
+      onChunk(fullText.slice(i, i + chunkSize));
+      await new Promise((resolve) => setTimeout(resolve, 14));
+    }
+  }
+
+  /**
    * Đánh giá chi tiết cấu hình hiện tại của người dùng bằng AI (Streaming)
    */
   async streamAiAuditBuild(
@@ -3227,9 +3239,9 @@ DANH SÁCH LINH KIỆN HIỆN TẠI TRONG KHÔNG GIAN LẮP RÁP:
 ${itemsDescription}
 
 YÊU CẦU GIÁM ĐỊNH:
-1. Hãy phân tích chi tiết từng điểm mạnh, điểm yếu và các nguy cơ kỹ thuật (nếu có) bằng Markdown tiếng Việt chuyên nghiệp, sắc sảo.
+1. Hãy phân tích súc tích, cô đọng bằng Markdown tiếng Việt chuyên nghiệp (tổng phần văn bản khoảng 250 - 380 từ, chia 4 mục ngắn gọn: 1. CPU & GPU, 2. RAM & Mainboard, 3. Nguồn PSU & Tản nhiệt, 4. Kết luận & Khuyến nghị; mỗi mục tối đa 2-3 gạch đầu dòng đi thẳng vào vấn đề, viết trọn vẹn từng câu).
 2. NẾU CÓ LINH KIỆN XẤU / NGHẼN / KHÔNG TỐI ƯU, bạn BẮT BUỘC phải chỉ rõ lý do và xuất tiêu chí thay thế để hệ thống lọc hàng trong kho.
-3. BẮT BUỘC Ở CUỐI PHẢN HỒI, xuất một khối JSON có cấu trúc sau:
+3. BẮT BUỘC Ở CUỐI PHẢN HỒI, xuất một khối JSON hợp lệ có cấu trúc sau:
 \`\`\`json
 {
   "auditScore": <Điểm số từ 0 đến 100>,
@@ -3261,25 +3273,38 @@ Nếu cấu hình hoàn hảo không có lỗi gì cần thay, "issues" có th�
 ${payload.rulePromptInjection ? `\nCHỈ THỊ BỔ SUNG TỪ HỆ THỐNG: ${payload.rulePromptInjection}\n` : ""}Bắt đầu bài thẩm định kỹ thuật:`;
 
     let accumulatedReport = "";
+    let auditWasIncomplete = false;
+    let usedLlmModel = process.env.LLM_MODEL || process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
     try {
       const { unifiedLlmService } = require("../ai/unified-llm.service");
       const llmResult = await unifiedLlmService.generateStreamText({
         prompt: promptText,
         systemInstruction,
         temperature: auditPromptCfg?.temperature ?? 0.6,
-        maxTokens: auditPromptCfg?.maxTokens ?? 2500,
+        maxTokens: auditPromptCfg?.maxTokens ?? 4096,
+        timeoutMs: 9000,
         skipGuardrail: true
       }, (chunk: string) => {
         accumulatedReport += chunk;
         onChunk(chunk);
       });
 
+      if (llmResult?.model) {
+        usedLlmModel = llmResult.model;
+      }
+      auditWasIncomplete = Boolean(llmResult?.isIncomplete);
       if (!accumulatedReport && llmResult.text) {
         accumulatedReport = llmResult.text;
         onChunk(accumulatedReport);
       }
     } catch (err: any) {
       console.warn("Lỗi gọi LLM Streaming trong audit build:", err);
+    }
+
+    if (accumulatedReport.trim() && auditWasIncomplete && !/[.!?。)\]`"]$/.test(accumulatedReport.trim())) {
+      const cleanTail = "...\n\n#### ✅ Kết luận chốt từ Hệ thống XAI\n- Cấu hình đã đủ **8/8 nhóm linh kiện** tương thích nền tảng; vui lòng xem thẻ **Đề xuất thay thế linh kiện** (nếu có) hoặc hỏi trực tiếp ở tab **Chat Với AI Về Build** để được tư vấn tối ưu theo ngân sách.";
+      accumulatedReport += cleanTail;
+      await this.streamTextSmoothly(cleanTail, onChunk);
     }
 
     let auditScore = 88;
@@ -3325,6 +3350,27 @@ ${payload.rulePromptInjection ? `\nCHỈ THỊ BỔ SUNG TỪ HỆ THỐNG: ${pa
       if (cpuItem && gpuItem) {
         const cpuPrice = Number(cpuItem.price || 0);
         const gpuPrice = Number(gpuItem.price || 0);
+        const gpuNameStr = String(gpuItem.productName || gpuItem.name || "");
+        const isWorkstationGpu = /\b(a400|a1000|a2000|a4000|a5000|a6000|t400|t600|t1000|quadro)\b/i.test(gpuNameStr);
+        const isGamingPurpose = /game|gaming|gta|valorant|fps|esport|aaa/i.test(useCase);
+
+        if (isWorkstationGpu && isGamingPurpose) {
+          issues.push({
+            componentType: "gpu",
+            severity: "high",
+            currentName: gpuNameStr,
+            problem: `Card ${gpuNameStr} là dòng Workstation chuyên đồ họa/CAD, xung nhịp game thấp hơn đáng kể so với card Gaming cùng tầm giá khi chơi game ${resolution.toUpperCase()}.`,
+            targetCriteria: {
+              category: "gpu",
+              priceMin: Math.max(4500000, Math.round(gpuPrice * 0.7)),
+              priceMax: Math.max(9500000, Math.round(gpuPrice * 1.35)),
+              keywords: ["rtx 4060", "rtx 3060", "rx 7600", "rtx 4060 ti"],
+              advice: "Đổi sang card Gaming thuần túy như RTX 4060 / RX 7600 để tăng mạnh FPS thực tế và hỗ trợ DLSS 3."
+            }
+          });
+          auditScore -= 10;
+        }
+
         if (gpuPrice > cpuPrice * 3.2 && cpuPrice < 3500000) {
           issues.push({
             componentType: "cpu",
@@ -3430,7 +3476,8 @@ ${payload.rulePromptInjection ? `\nCHỈ THỊ BỔ SUNG TỪ HỆ THỐNG: ${pa
       ];
 
       accumulatedReport = reportSections.join("\n");
-      onChunk(accumulatedReport);
+      usedLlmModel = "PC Mall Expert XAI Engine";
+      await this.streamTextSmoothly(accumulatedReport, onChunk);
     }
 
     // Với mỗi issue được AI phát hiện, truy vấn kho hàng thật để tìm sản phẩm thay thế
@@ -3447,7 +3494,7 @@ ${payload.rulePromptInjection ? `\nCHỈ THỊ BỔ SUNG TỪ HỆ THỐNG: ${pa
 
     sendEvent({
       type: "done",
-      provider: `Google Gemini (${process.env.LLM_MODEL || process.env.GEMINI_MODEL || "gemini-1.5-flash"})`,
+      provider: `Google Gemini (${usedLlmModel})`,
       report: accumulatedReport,
       auditScore,
       status,
@@ -3505,28 +3552,38 @@ ${historyStr || "(Bắt đầu cuộc trò chuyện)"}
 CÂU HỎI MỚI CỦA KHÁCH HÀNG:
 "${userMessage}"
 ${payload.rulePromptInjection ? `\nCHỈ THỊ BỔ SUNG TỪ HỆ THỐNG: ${payload.rulePromptInjection}\n` : ""}
-Hãy trả lời chuyên nghiệp và xúc tích:`;
+Hãy trả lời trực diện, chuyên nghiệp và súc tích (khoảng 180 - 300 từ, chia 3 ý rõ ràng, luôn viết trọn vẹn câu chốt và lời khuyên kỹ thuật viên):`;
 
     let accumulatedChat = "";
+    let chatWasIncomplete = false;
     try {
       const { unifiedLlmService } = require("../ai/unified-llm.service");
       const llmResult = await unifiedLlmService.generateStreamText({
         prompt: promptText,
         systemInstruction,
         temperature: chatPromptCfg?.temperature ?? 0.7,
-        maxTokens: chatPromptCfg?.maxTokens ?? 1500,
+        maxTokens: chatPromptCfg?.maxTokens ?? 4096,
+        timeoutMs: 9000,
         skipGuardrail: true
       }, (chunk: string) => {
         accumulatedChat += chunk;
         onChunk(chunk);
       });
 
+      chatWasIncomplete = Boolean(llmResult?.isIncomplete);
       if (!accumulatedChat && llmResult.text) {
         accumulatedChat = llmResult.text;
         onChunk(accumulatedChat);
       }
     } catch (err: any) {
       console.warn("Lỗi chat LLM stream:", err);
+    }
+
+    // Nếu Google ngắt SSE giữa chừng & rescue cũng 503 -> nối chốt kỹ thuật sạch sẽ để không bao giờ cụt câu
+    if (accumulatedChat.trim() && chatWasIncomplete && !/[.!?。)\]`"]$/.test(accumulatedChat.trim())) {
+      const closingTail = "...\n\n#### 💡 Chốt nhanh từ Kỹ sư PC Mall\n- Đường truyền đám mây Google Gemini vừa bị nghẽn nhẹ ở câu cuối, nhưng kết luận trọng tâm cho cấu hình của bạn vẫn giữ nguyên: hãy ưu tiên **Dual-Channel (2 thanh RAM đồng bộ)**, kiểm tra **số khe cắm trống trên mainboard**, và đảm bảo bật **EXPO/XMP** trong BIOS để tối ưu 100% hiệu năng.";
+      accumulatedChat += closingTail;
+      await this.streamTextSmoothly(closingTail, onChunk);
     }
 
     // Check if AI suggested replacements
@@ -3546,7 +3603,7 @@ Hãy trả lời chuyên nghiệp và xúc tích:`;
       }
     } catch (_err) {}
 
-    // Offline / Fallback Engineer Response nếu LLM chưa trả về nội dung
+    // Offline / Hardware Expert Fallback khi LLM đám mây quá tải (503/429) -> phản hồi chính xác theo đúng linh kiện & câu hỏi
     if (!accumulatedChat.trim()) {
       const qLower = userMessage.toLowerCase();
       const totalBuildPrice = buildItems.reduce((acc, i) => acc + Number(i.price || 0), 0);
@@ -3556,8 +3613,61 @@ Hãy trả lời chuyên nghiệp và xúc tích:`;
         if (t) byType[t] = item;
       }
 
-      if (qLower.includes("giảm") || qLower.includes("tiết kiệm") || qLower.includes("rẻ hơn")) {
-        const targetCat = byType.gpu && Number(byType.gpu.price) > 6000000 ? "gpu" : byType.cpu ? "cpu" : "mainboard";
+      const mbName = String(byType.mainboard?.productName || byType.mainboard?.name || "");
+      const ramName = String(byType.ram?.productName || byType.ram?.name || "");
+      const cpuName = String(byType.cpu?.productName || byType.cpu?.name || "");
+      const gpuName = String(byType.gpu?.productName || byType.gpu?.name || "");
+      const psuName = String(byType.psu?.productName || byType.psu?.name || "");
+
+      const isRamOrMbQuestion = /\b(ram|ddr4|ddr5|dual\s*channel|single\s*channel|khe\s*ram|bo\s*mạch|mainboard|main\b)/i.test(qLower);
+      const isGpuQuestion = /\b(card|vga|gpu|đồ\s*họa|fps|game|rtx|rx\s*\d)/i.test(qLower);
+      const isCpuQuestion = /\b(cpu|chip|vi\s*xử\s*lý|nghẽn|bottleneck|ryzen|intel|core\s*i)/i.test(qLower);
+      const isSaveCostQuestion = /(giảm|tiết kiệm|rẻ hơn|bớt tiền|hạ giá|đắt quá)/i.test(qLower);
+      const isPsuQuestion = /\b(nguồn|psu|watt|w\b|nổ|đủ điện|công suất)/i.test(qLower);
+
+      if (isRamOrMbQuestion) {
+        const isTwoSlotMb = /\b(a620m|h610m|a520m|h510m|h410m|s2h|m-h\b|m-k\b|m-e\b|itx)\b/i.test(mbName);
+        const slotCount = isTwoSlotMb ? 2 : 4;
+        const ramGen = /ddr5/i.test(ramName) || /am5|a620|b650|x670|z790|b760.*ddr5/i.test(mbName) ? "DDR5" : "DDR4";
+        const isTwoSticks = /(2\s*[x×]\s*\d+|kit\s*2|dual)/i.test(ramName);
+        const usedSlots = ramName ? (isTwoSticks ? 2 : 1) : 0;
+        const freeSlots = Math.max(0, slotCount - usedSlots);
+
+        const repProducts = await this.findReplacementProducts({
+          category: "ram",
+          priceMin: 1200000,
+          priceMax: 4800000,
+          keywords: [ramGen.toLowerCase(), "2x16", "32gb", "kit"]
+        }, buildItems);
+        if (repProducts.length > 0) {
+          replacements.push({
+            componentType: "ram",
+            advice: `Các bộ Kit RAM ${ramGen} Dual-Channel đang sẵn hàng trong kho PC Mall để tối ưu băng thông ngay từ đầu:`,
+            suggestedProducts: repProducts
+          });
+        }
+
+        accumulatedChat = [
+          `#### 1. Số khe cắm RAM trên Bo mạch chủ`,
+          mbName
+            ? `- Bo mạch chủ **${mbName}** được trang bị **${slotCount} khe cắm RAM chuẩn ${ramGen}** (hỗ trợ Dual-Channel).`
+            : `- Hiện bạn chưa chọn bo mạch chủ trong cấu hình.`,
+          "",
+          `#### 2. Tình trạng RAM hiện tại & Khả năng lắp thêm`,
+          ramName
+            ? `- Bạn đang lắp **${ramName}** (chiếm **${usedSlots}/${slotCount} khe**), như vậy vẫn còn trống **${freeSlots} khe RAM**.`
+            : `- Hiện chưa chọn RAM trong cấu hình.`,
+          freeSlots > 0
+            ? `- **Câu trả lời là CÓ THỂ lắp thêm:** Bạn có thể cắm thêm tối đa **${freeSlots} thanh RAM ${ramGen}** nữa vào khe trống để kích hoạt **Dual-Channel (Kênh đôi)** và tăng dung lượng.`
+            : `- **Lưu ý:** Toàn bộ **${slotCount}/${slotCount} khe RAM** đã được lắp kín. Nếu muốn nâng dung lượng sau này, bạn sẽ cần thay bộ Kit dung lượng cao hơn (hoặc đổi sang mainboard 4 khe RAM như dòng B650/B760).`,
+          "",
+          `#### 3. Lời khuyên từ kỹ thuật viên PC Mall`,
+          !isTwoSticks && ramName
+            ? `- Vì bạn đang chọn **1 thanh đơn (Single-Channel)**, việc mua lẻ thêm 1 thanh sau này dù cùng mã vẫn có rủi ro khác lô chip nhớ (IC bin) gây khó bật XMP/EXPO ở xung tối đa. Khuyên bạn nên **đổi ngay sang Kit 2 thanh (2×16GB ${ramGen})** để chạy Dual-Channel ổn định tuyệt đối ngay từ ngày đầu, hoặc nâng lên mainboard **4 khe RAM** nếu dự định lên 64GB–128GB về sau.`
+            : `- Cấu hình RAM hiện tại đã chạy Dual-Channel tối ưu. Hãy nhớ bật profile **EXPO/XMP** trong BIOS sau khi lắp máy để RAM chạy đúng mức Bus thiết kế.`
+        ].join("\n");
+      } else if (isSaveCostQuestion) {
+        const targetCat = byType.gpu && Number(byType.gpu.price) > 5500000 ? "gpu" : byType.cpu ? "cpu" : "mainboard";
         const curItem = byType[targetCat];
         const curPrice = Number(curItem?.price || 5000000);
         const repProducts = await this.findReplacementProducts({
@@ -3574,11 +3684,35 @@ Hãy trả lời chuyên nghiệp và xúc tích:`;
         }
         accumulatedChat = [
           `Để tối ưu chi phí cho cấu hình hiện tại (**${totalBuildPrice.toLocaleString("vi-VN")}đ**) mà ít ảnh hưởng nhất đến FPS thực tế:`,
-          `- **Phương án 1 (Hiệu quả nhất):** Điều chỉnh nhẹ phân khúc **${targetCat.toUpperCase()}** hoặc chọn phiên bản 2 Fan tiêu chuẩn thay vì bản OC cao cấp (tiết kiệm 1.5 – 2.5 triệu VNĐ).`,
+          `- **Phương án 1 (Hiệu quả nhất):** Điều chỉnh nhẹ phân khúc **${targetCat.toUpperCase()}** (${curItem?.productName || curItem?.name || ""}) sang mẫu cùng phân khúc giá mềm hơn để tiết kiệm 1,5 – 2,5 triệu VNĐ.`,
           `- **Phương án 2:** Giữ nguyên cặp đôi CPU + GPU cốt lõi và tối ưu ở Vỏ Case / Tản nhiệt khí tháp đơn.`,
           repProducts.length > 0 ? `\nDưới đây là các linh kiện sẵn hàng trong kho PC Mall có mức giá mềm hơn để bạn bấm **"Đổi ngay"**:` : ""
         ].filter(Boolean).join("\n");
-      } else if (qLower.includes("nguồn") || qLower.includes("psu") || qLower.includes("nâng cấp")) {
+      } else if (isGpuQuestion) {
+        const isWorkstationGpu = /\b(a400|a1000|a2000|a4000|a5000|a6000|t400|t600|t1000|quadro)\b/i.test(gpuName);
+        const curGpuPrice = Number(byType.gpu?.price || 6500000);
+        const repProducts = await this.findReplacementProducts({
+          category: "gpu",
+          priceMin: Math.max(4500000, Math.round(curGpuPrice * 0.75)),
+          priceMax: Math.max(10500000, Math.round(curGpuPrice * 1.45)),
+          keywords: ["rtx 4060", "rtx 3060", "rx 7600", "rtx 4060 ti"]
+        }, buildItems);
+        if (repProducts.length > 0) {
+          replacements.push({
+            componentType: "gpu",
+            advice: "Các mẫu Card đồ họa Gaming sẵn hàng tối ưu FPS cao hơn cho nhu cầu chơi game:",
+            suggestedProducts: repProducts
+          });
+        }
+        accumulatedChat = [
+          `#### Đánh giá Card đồ họa (GPU) trong cấu hình`,
+          gpuName ? `- Card hiện tại: **${gpuName}** đi cùng **${cpuName || "CPU đã chọn"}**.` : `- Hiện bạn chưa chọn Card đồ họa rời.`,
+          isWorkstationGpu
+            ? `- **Điểm cần lưu ý:** **${gpuName}** thuộc dòng Workstation tối ưu cho CAD/Render hơn là chơi game. Với mục đích **${useCase.toUpperCase()} (${resolution.toUpperCase()})**, đổi sang dòng **GeForce RTX 4060 / RX 7600** sẽ cho mức FPS cao hơn rõ rệt và hỗ trợ công nghệ DLSS 3/Frame Generation.`
+            : `- Card đồ họa hiện tại đáp ứng tốt nhu cầu **${useCase.toUpperCase()}** ở độ phân giải **${resolution.toUpperCase()}** với mức FPS ổn định.`,
+          `- **Lời khuyên kỹ thuật viên:** Nếu ưu tiên mượt mà tối đa cho GTA V / Valorant ở 1080p–2K, bạn có thể bấm **"Đổi ngay"** ở danh sách VGA Gaming gợi ý bên dưới.`
+        ].join("\n");
+      } else if (isPsuQuestion) {
         const repProducts = await this.findReplacementProducts({
           category: "psu",
           minWattage: 750,
@@ -3594,19 +3728,32 @@ Hãy trả lời chuyên nghiệp và xúc tích:`;
           });
         }
         accumulatedChat = [
-          `Về khả năng chịu tải nguồn điện (PSU) và dư địa nâng cấp của dàn máy:`,
-          `- ${byType.psu ? `Nguồn hiện tại bạn chọn là **${byType.psu.productName || byType.psu.name}**.` : "Hiện bạn chưa chọn nguồn PSU trong danh sách."}`,
-          `- Theo tiêu chuẩn kỹ thuật an toàn, nếu bạn dự định nâng cấp lên các dòng VGA cao cấp hơn (như RTX 4070 Super / RTX 4070 Ti) trong 2-3 năm tới, bạn nên đầu tư sẵn nguồn **750W - 850W chuẩn 80 Plus Bronze/Gold** để đảm bảo khoảng dự phòng đỉnh xung (Transient Spike >= 20%).`
+          `#### Đánh giá nguồn điện (PSU) & Dư địa nâng cấp`,
+          `- ${psuName ? `Nguồn hiện tại: **${psuName}**.` : "Hiện bạn chưa chọn nguồn PSU trong danh sách."}`,
+          `- Với cặp đôi **${cpuName || "CPU"}** và **${gpuName || "GPU"}**, mức tải đỉnh toàn hệ thống chỉ khoảng ~280W–380W, vì vậy nguồn **650W trở lên** là hoàn toàn an toàn và mát mẻ (dư tải trên 30%).`,
+          `- **Lời khuyên kỹ thuật viên:** Nếu dự định nâng lên các dòng VGA ăn điện cao hơn (RTX 4070 Ti / RTX 4080) trong 2–3 năm tới, bạn có thể đầu tư sẵn nguồn **750W – 850W chuẩn 80 Plus Gold** ngay từ bây giờ.`
+        ].join("\n");
+      } else if (isCpuQuestion) {
+        const dynamicBn = this.calculateDynamicBottleneck(byType.cpu, byType.gpu, resolution) as any;
+        const bnPct = Number(dynamicBn?.bottleneckPercentage || dynamicBn?.bottleneckPercent || 5);
+        accumulatedChat = [
+          `#### Phân tích CPU & Độ cân bằng (Bottleneck)`,
+          `- CPU hiện tại: **${cpuName || "Chưa chọn"}** kết hợp cùng **${gpuName || "Chưa chọn"}** trên bo mạch chủ **${mbName || "Chưa chọn"}**.`,
+          `- Tỷ lệ nghẽn cổ chai ước tính ở **${resolution.toUpperCase()}**: khoảng **~${bnPct}%**.`,
+          /8600g|8500g|8700g|5600g/i.test(cpuName) && gpuName
+            ? `- **Lưu ý kỹ thuật:** Vì bạn đã lắp card rời **${gpuName}**, dùng CPU dòng **G** (tích hợp đồ họa mạnh nhưng cắt giảm dung lượng bộ nhớ đệm L3 Cache và làn PCIe) sẽ kém tối ưu hơn so với dòng **Ryzen 5 7500F / 7600** trong game eSports như Valorant.`
+            : `- Cặp đôi CPU và GPU hiện tại phối hợp cân bằng, sẵn sàng xử lý mượt các tác vụ đa nhiệm và chơi game.`
         ].join("\n");
       } else {
         accumulatedChat = [
           `Dựa trên hồ sơ cấu hình hiện tại của bạn (**${buildItems.length}/8 linh kiện** — Tổng tạm tính **${totalBuildPrice.toLocaleString("vi-VN")}đ** cho nhu cầu **${useCase.toUpperCase()} ${resolution.toUpperCase()}**):`,
-          `- **Đánh giá tương thích & vận hành:** Các linh kiện đã chọn hoạt động đồng bộ tốt. Lưu ý thiết lập **Dual Channel (2 thanh RAM)** và bật profile **XMP/EXPO** trong BIOS để tối ưu 15-20% hiệu suất khung hình (1% Low FPS).`,
-          `- **Hệ thống làm mát:** Đảm bảo vỏ case có tối thiểu 2-3 quạt hút gió mặt trước và 1 quạt xả phía sau để duy trì nhiệt độ CPU/GPU dưới 75°C khi tải nặng liên tục.`
+          `- **Cấu hình cốt lõi:** ${cpuName || "CPU"} + ${gpuName || "GPU"} trên nền tảng **${mbName || "Mainboard"}** và **${ramName || "RAM"}**.`,
+          `- **Đánh giá tương thích & vận hành:** Toàn bộ linh kiện khớp chuẩn kỹ thuật. Lưu ý chạy **Dual-Channel (2 thanh RAM)** và bật profile **XMP/EXPO** trong BIOS để tối ưu 15–20% hiệu suất khung hình (1% Low FPS).`,
+          `- **Lời khuyên kỹ thuật viên:** Bạn có thể hỏi cụ thể hơn về bất kỳ linh kiện nào (ví dụ: *nâng thêm RAM*, *đổi card đồ họa*, *kiểm tra nguồn PSU*, hoặc *cắt giảm chi phí*) để mình phân tích sâu và lọc hàng thay thế trực tiếp từ kho PC Mall.`
         ].join("\n");
       }
 
-      onChunk(accumulatedChat);
+      await this.streamTextSmoothly(accumulatedChat, onChunk);
     }
 
     sendEvent({

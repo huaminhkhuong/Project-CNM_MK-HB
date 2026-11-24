@@ -7,11 +7,11 @@ from .gemini_embedding import GeminiEmbeddingFunction
 
 def load_ai_env():
     """Tự động nạp cấu hình từ .env của ai-service hoặc api."""
-    paths = [
-        Path(__file__).resolve().parents[2] / ".env",
-        Path(__file__).resolve().parents[4] / "services" / "api" / ".env",
-        Path(__file__).resolve().parents[4] / ".env"
-    ]
+    resolved_parents = Path(__file__).resolve().parents
+    paths = [resolved_parents[2] / ".env"]
+    if len(resolved_parents) > 4:
+        paths.append(resolved_parents[4] / "services" / "api" / ".env")
+        paths.append(resolved_parents[4] / ".env")
     for p in paths:
         if p.exists():
             with open(p, "r", encoding="utf-8") as f:

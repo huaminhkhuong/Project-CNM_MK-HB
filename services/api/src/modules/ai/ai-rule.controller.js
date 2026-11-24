@@ -98,6 +98,18 @@ const updateSystemConfig = asyncHandler(async (req, res) => {
   return sendSuccess(res, "Cập nhật cấu hình hệ thống AI thành công", { config: updated, estimation });
 });
 
+const testLlmConnection = asyncHandler(async (req, res) => {
+  if (!ensureAdminUser(req, res)) return;
+  const { unifiedLlmService } = require("./unified-llm.service");
+  const { provider, model, apiKey } = req.body || {};
+  const result = await unifiedLlmService.testConnection({ provider, model, apiKey });
+  return sendSuccess(
+    res,
+    result.ok ? "Kết nối tới nhà cung cấp AI thành công" : "Kiểm tra kết nối AI không thành công",
+    result
+  );
+});
+
 module.exports = {
   getRules,
   getRule,
@@ -109,5 +121,6 @@ module.exports = {
   updatePrompt,
   testFilter,
   getSystemConfig,
-  updateSystemConfig
+  updateSystemConfig,
+  testLlmConnection
 };

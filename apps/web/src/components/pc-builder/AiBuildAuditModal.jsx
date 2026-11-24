@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { formatCurrency, getProductPrice, getProductName, getProductId } from "./pcBuilderUtils";
+import { formatCurrency, getItemPrice, getProductPrice, getProductName, getProductId } from "./pcBuilderUtils";
 import { resolveProductImage } from "../../utils/productImage";
 import { streamAiResponse } from "../../utils/aiStreamClient";
 
@@ -38,7 +38,7 @@ function FormattedAuditReport({ text }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
       {lines.map((line, lIdx) => {
-        const trimmed = line.trim();
+        const trimmed = line.trim().replace(/^>\s*/, "");
         if (!trimmed) return <div key={lIdx} style={{ height: "4px" }} />;
 
         // Nhận diện và làm sạch ký tự #
@@ -144,10 +144,16 @@ export function AiBuildAuditModal({
   const rawItems = currentBuild?.items || [];
   const buildItems = Array.isArray(rawItems)
     ? rawItems
-    : Object.entries(rawItems).map(([type, comp]) => ({
-        componentType: type,
-        ...(comp.product || comp)
-      }));
+    : Object.entries(rawItems).map(([type, comp]) => {
+        const resolvedPrice = getItemPrice(comp) || getProductPrice(comp?.product || comp);
+        return {
+          componentType: type,
+          ...(comp.product || comp),
+          variant: comp.variant || comp.ProductVariant || comp.productVariant || comp.sku,
+          quantity: comp.quantity || 1,
+          price: resolvedPrice
+        };
+      });
 
   const totalPrice = Number(currentBuild?.totalPrice || buildItems.reduce((sum, i) => sum + (getProductPrice(i) || 0), 0));
   const targetBudget = Number(currentBuild?.targetBudget || currentBuild?.budget || 0);
@@ -161,10 +167,10 @@ export function AiBuildAuditModal({
     }
   }, [isOpen, buildItems.length]);
 
-  // Auto-scroll chat
+  // Auto-scroll chat (không dùng smooth trong lúc streaming để loại bỏ giật/lag)
   useEffect(() => {
     if (activeTab === "chat" && chatBottomRef.current) {
-      chatBottomRef.current.scrollIntoView({ behavior: "smooth" });
+      chatBottomRef.current.scrollIntoView({ behavior: isChatStreaming ? "auto" : "smooth" });
     }
   }, [chatMessages, isChatStreaming, activeTab]);
 
@@ -183,7 +189,7 @@ export function AiBuildAuditModal({
     const formattedBuildItems = buildItems.map((item) => ({
       componentType: item.componentType || item.type,
       productName: getProductName(item),
-      price: getProductPrice(item),
+      price: Number(item.price || getItemPrice(item) || getProductPrice(item) || 0),
       specs: item.specs || item.product?.specs || {}
     }));
 
@@ -228,7 +234,7 @@ export function AiBuildAuditModal({
     const formattedBuildItems = buildItems.map((item) => ({
       componentType: item.componentType || item.type,
       productName: getProductName(item),
-      price: getProductPrice(item)
+      price: Number(item.price || getItemPrice(item) || getProductPrice(item) || 0)
     }));
 
     let currentReply = "";
@@ -251,7 +257,7 @@ export function AiBuildAuditModal({
             const copy = [...prev];
             const last = copy[copy.length - 1];
             if (last && last.role === "assistant") {
-              last.content = currentReply;
+              copy[copy.length - 1] = { ...last, content: currentReply };
             }
             return copy;
           });
@@ -262,8 +268,11 @@ export function AiBuildAuditModal({
             const copy = [...prev];
             const last = copy[copy.length - 1];
             if (last && last.role === "assistant") {
-              last.content = result.reply || currentReply;
-              last.replacements = result.replacements || [];
+              copy[copy.length - 1] = {
+                ...last,
+                content: result.reply || currentReply,
+                replacements: result.replacements || []
+              };
             }
             return copy;
           });
@@ -274,7 +283,10 @@ export function AiBuildAuditModal({
             const copy = [...prev];
             const last = copy[copy.length - 1];
             if (last && last.role === "assistant") {
-              last.content = `⚠️ Lỗi: ${err.message || "Kênh AI đang bận. Vui lòng thử lại sau ít giây."}`;
+              copy[copy.length - 1] = {
+                ...last,
+                content: `⚠️ Lỗi: ${err.message || "Kênh AI đang bận. Vui lòng thử lại sau ít giây."}`
+              };
             }
             return copy;
           });
@@ -892,8 +904,13 @@ export function AiBuildAuditModal({
                         {/* Formatted chat display without stray # */}
                         {isUser ? (
                           msg.content
+                        ) : msg.content ? (
+                          <FormattedAuditReport text={msg.content} />
                         ) : (
-                          <FormattedAuditReport text={msg.content || (isChatStreaming ? "..." : "")} />
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#2563eb", fontSize: "13px", fontWeight: 600 }}>
+                            <span style={{ display: "inline-block", animation: "spin 1s linear infinite" }}>⚡</span>
+                            <span>Kỹ sư AI đang phân tích cấu hình của bạn...</span>
+                          </div>
                         )}
 
                         {/* REPLACEMENT CARDS IN CHAT */}

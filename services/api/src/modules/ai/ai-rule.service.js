@@ -7,9 +7,12 @@ const STORE_PATH = path.resolve(__dirname, "../../data/ai-rules-store.json");
 // Cấu hình Hệ thống AI & Token mặc định (Tập trung toàn bộ tham số AI của PC Mall)
 const DEFAULT_SYSTEM_CONFIG = {
   provider: "gemini",
-  model: "gemini-1.5-flash",
+  model: "gemini-3.5-flash-lite",
+  fallbackProvider: "groq",
+  fallbackModel: "llama-3.3-70b-versatile",
+  autoFailover: true,
   temperature: 0.4,
-  maxTokens: 2048,
+  maxTokens: 4096,
   maxCatalogProducts: 35,
   retrievalMode: "keyword_and_category"
 };
@@ -20,25 +23,25 @@ const DEFAULT_PROMPTS = {
     scope: "GENERAL_CHAT",
     name: "AI Tư Vấn Bán Hàng & Kỹ Thuật Chung",
     systemPrompt: "Bạn là chuyên gia tư vấn kỹ thuật và bán hàng tại PC Mall. Nhiệm vụ: Giải đáp thắc mắc về phần cứng PC, laptop, linh kiện, so sánh sản phẩm và tư vấn cấu hình phù hợp với ngân sách của khách hàng. Phong cách trả lời: Thân thiện, khách quan, súc tích, trung thực, không bịa đặt sản phẩm không có thật.",
-    model: "gemini-1.5-flash",
+    model: "gemini-3-flash-preview",
     temperature: 0.4,
-    maxTokens: 1024
+    maxTokens: 4096
   },
   BUILDER_SUGGEST: {
     scope: "BUILDER_SUGGEST",
     name: "AI Đề Xuất Cấu Hình PC (Từ 32 Ứng Viên)",
     systemPrompt: "Bạn là chuyên gia cấu hình PC cao cấp tại PC Mall. Nhiệm vụ: Đánh giá danh sách 32 linh kiện ứng viên đã được lọc từ cơ sở dữ liệu (4 linh kiện cho mỗi danh mục trong 8 danh mục: CPU, Mainboard, RAM, GPU, Storage, PSU, Case, Cooling). Yêu cầu đánh giá và phân tích một cách không thiên vị, thật là nghiêm khắc. Chọn ra đúng 1 cấu hình tối ưu nhất gồm 8 linh kiện, đảm bảo 100% tương thích phần cứng, tối đa hóa hiệu năng trên từng đồng ngân sách của khách hàng.",
-    model: "gemini-1.5-flash",
+    model: "gemini-3-flash-preview",
     temperature: 0.2,
-    maxTokens: 2048
+    maxTokens: 4096
   },
   BUILDER_AUDIT_CHAT: {
     scope: "BUILDER_AUDIT_CHAT",
     name: "AI Giám Định & Chat Hỏi Đáp Về Build PC",
     systemPrompt: "Bạn là kỹ sư kiểm định phần cứng máy tính khắt khe của PC Mall. Nhiệm vụ: Giám định chi tiết dàn máy người dùng vừa xây dựng, phân tích kỹ thuật về điểm cân bằng CPU/GPU, độ dư công suất nguồn (PSU Headroom), nhiệt độ tản nhiệt và tính tương thích socket/bus RAM. Trả lời các câu hỏi người dùng về build này. Nếu phát hiện linh kiện yếu hoặc nghẽn, phải chỉ rõ nguyên nhân và đề xuất linh kiện thay thế hợp lý.",
-    model: "gemini-1.5-flash",
+    model: "gemini-3-flash-preview",
     temperature: 0.3,
-    maxTokens: 1536
+    maxTokens: 4096
   }
 };
 
@@ -346,14 +349,41 @@ class AiRuleService {
       try {
         const { unifiedLlmService } = require("./unified-llm.service");
         const sysCfg = this.store.systemConfig || {};
+        const deprecatedModels = new Set([
+          "gemini-1.5-flash",
+          "gemini-1.5-pro",
+          "gemini-2.0-flash",
+          "gemini-2.0-flash-lite",
+          "gemini-2.5-flash",
+          "gemini-2.5-flash-lite"
+        ]);
+        const resolvedModel = sysCfg.model && !deprecatedModels.has(sysCfg.model)
+          ? sysCfg.model
+          : (sysCfg.provider === "groq" ? "llama-3.3-70b-versatile" : "gemini-3.5-flash-lite");
+        const storedKeys = this.store.providerKeys || {};
+        const providerKeys = {
+          gemini: storedKeys.gemini || (sysCfg.provider === "gemini" ? this.store.apiKey : "") || process.env.GEMINI_API_KEY || "",
+          groq: storedKeys.groq || (sysCfg.provider === "groq" ? this.store.apiKey : "") || process.env.GROQ_API_KEY || "",
+          openai: storedKeys.openai || (sysCfg.provider === "openai" ? this.store.apiKey : "") || process.env.OPENAI_API_KEY || "",
+          deepseek: storedKeys.deepseek || (sysCfg.provider === "deepseek" ? this.store.apiKey : "") || process.env.DEEPSEEK_API_KEY || "",
+          ollama: ""
+        };
+        if (providerKeys.gemini) process.env.GEMINI_API_KEY = providerKeys.gemini;
+        if (providerKeys.groq) process.env.GROQ_API_KEY = providerKeys.groq;
+        if (providerKeys.openai) process.env.OPENAI_API_KEY = providerKeys.openai;
+
         const syncPayload = {
           provider: sysCfg.provider || "gemini",
-          model: sysCfg.model || "gemini-3.5-flash-lite",
+          model: resolvedModel,
+          fallbackProvider: sysCfg.fallbackProvider !== undefined ? sysCfg.fallbackProvider : "groq",
+          fallbackModel: sysCfg.fallbackModel || "llama-3.3-70b-versatile",
+          autoFailover: sysCfg.autoFailover !== false,
+          providerKeys,
           temperature: Number(sysCfg.temperature ?? 0.35),
-          maxTokens: Number(sysCfg.maxTokens || 2048)
+          maxTokens: Number(sysCfg.maxTokens || 4096)
         };
-        if (this.store.apiKey) {
-          syncPayload.apiKey = this.store.apiKey;
+        if (providerKeys[syncPayload.provider]) {
+          syncPayload.apiKey = providerKeys[syncPayload.provider];
         }
         unifiedLlmService.configure(syncPayload);
       } catch (_syncErr) {}
@@ -482,39 +512,82 @@ class AiRuleService {
     return this.store.prompts[scope];
   }
 
-  /**
-   * Lấy cấu hình hệ thống AI tập trung (Provider, Model, Output Tokens, v.v.)
-   * Khóa API nhạy cảm được che mờ (masked) để bảo vệ tuyệt đối trên màn hình.
-   */
-  getSystemConfig() {
-    const cfg = this.store?.systemConfig || { ...DEFAULT_SYSTEM_CONFIG };
-    const rawKey = this.store?.apiKey || process.env.LLM_API_KEY || process.env.GEMINI_API_KEY || "";
-    let maskedKey = "";
-    if (rawKey) {
-      maskedKey = rawKey.length > 8 ? `${rawKey.slice(0, 4)}••••••••${rawKey.slice(-4)}` : "••••••••";
-    }
+  maskSecretKey(rawKey) {
+    if (!rawKey) return "";
+    return rawKey.length > 8 ? `${rawKey.slice(0, 4)}••••••••${rawKey.slice(-4)}` : "••••••••";
+  }
+
+  getResolvedProviderKeys() {
+    const storedKeys = this.store?.providerKeys || {};
+    const cfgProvider = String(this.store?.systemConfig?.provider || "gemini").toLowerCase();
     return {
-      provider: cfg.provider || "gemini",
-      model: cfg.model || "gemini-1.5-flash",
-      temperature: Number(cfg.temperature ?? 0.4),
-      maxTokens: Number(cfg.maxTokens ?? 2048),
-      maxCatalogProducts: Number(cfg.maxCatalogProducts ?? 35),
-      retrievalMode: cfg.retrievalMode || "keyword_and_category",
-      apiKeyMasked: maskedKey,
-      hasApiKey: Boolean(rawKey)
+      gemini: storedKeys.gemini || (cfgProvider === "gemini" ? this.store?.apiKey : "") || process.env.GEMINI_API_KEY || "",
+      groq: storedKeys.groq || (cfgProvider === "groq" ? this.store?.apiKey : "") || process.env.GROQ_API_KEY || "",
+      openai: storedKeys.openai || (cfgProvider === "openai" ? this.store?.apiKey : "") || process.env.OPENAI_API_KEY || "",
+      deepseek: storedKeys.deepseek || (cfgProvider === "deepseek" ? this.store?.apiKey : "") || process.env.DEEPSEEK_API_KEY || "",
+      ollama: ""
     };
   }
 
   /**
-   * Cập nhật cấu hình hệ thống AI từ trang Quản trị Admin.
-   * Nếu người dùng nhập key mới (không chứa ký tự che mờ '••'), lưu trữ an toàn và nạp vào runtime.
+   * Lấy cấu hình hệ thống AI tập trung (Provider, Model, Failover, Output Tokens, v.v.)
+   * Khóa API nhạy cảm được che mờ (masked) để bảo vệ tuyệt đối trên màn hình.
+   */
+  getSystemConfig() {
+    const cfg = this.store?.systemConfig || { ...DEFAULT_SYSTEM_CONFIG };
+    const provider = String(cfg.provider || "gemini").toLowerCase();
+    const fallbackProvider = cfg.fallbackProvider !== undefined ? String(cfg.fallbackProvider).toLowerCase() : (provider === "gemini" ? "groq" : "gemini");
+    const keys = this.getResolvedProviderKeys();
+    const rawKey = keys[provider] || "";
+    const fallbackKey = keys[fallbackProvider] || "";
+
+    const providerKeyStatus = {
+      gemini: { hasKey: Boolean(keys.gemini), masked: this.maskSecretKey(keys.gemini) },
+      groq: { hasKey: Boolean(keys.groq), masked: this.maskSecretKey(keys.groq) },
+      openai: { hasKey: Boolean(keys.openai), masked: this.maskSecretKey(keys.openai) },
+      deepseek: { hasKey: Boolean(keys.deepseek), masked: this.maskSecretKey(keys.deepseek) },
+      ollama: { hasKey: true, masked: "Local (không cần key)" }
+    };
+
+    return {
+      provider,
+      model: cfg.model || (provider === "groq" ? "llama-3.3-70b-versatile" : "gemini-3.5-flash-lite"),
+      fallbackProvider,
+      fallbackModel: cfg.fallbackModel || (fallbackProvider === "groq" ? "llama-3.3-70b-versatile" : fallbackProvider === "gemini" ? "gemini-3.5-flash-lite" : ""),
+      autoFailover: cfg.autoFailover !== false,
+      temperature: Number(cfg.temperature ?? 0.4),
+      maxTokens: Number(cfg.maxTokens ?? 4096),
+      maxCatalogProducts: Number(cfg.maxCatalogProducts ?? 35),
+      retrievalMode: cfg.retrievalMode || "keyword_and_category",
+      apiKeyMasked: this.maskSecretKey(rawKey),
+      hasApiKey: provider === "ollama" || Boolean(rawKey),
+      fallbackApiKeyMasked: this.maskSecretKey(fallbackKey),
+      hasFallbackApiKey: fallbackProvider === "ollama" || Boolean(fallbackKey),
+      providerKeyStatus
+    };
+  }
+
+  /**
+   * Cập nhật cấu hình hệ thống AI từ trang Quản trị Admin (hỗ trợ lưu riêng key từng Provider + Auto-Failover).
    */
   updateSystemConfig(newConfig = {}) {
     if (!this.store.systemConfig) {
       this.store.systemConfig = { ...DEFAULT_SYSTEM_CONFIG };
     }
-    if (newConfig.provider) this.store.systemConfig.provider = String(newConfig.provider).trim();
+    if (!this.store.providerKeys) {
+      this.store.providerKeys = {};
+    }
+    if (newConfig.provider) this.store.systemConfig.provider = String(newConfig.provider).trim().toLowerCase();
     if (newConfig.model) this.store.systemConfig.model = String(newConfig.model).trim();
+    if (newConfig.fallbackProvider !== undefined) {
+      this.store.systemConfig.fallbackProvider = String(newConfig.fallbackProvider || "").trim().toLowerCase();
+    }
+    if (newConfig.fallbackModel !== undefined) {
+      this.store.systemConfig.fallbackModel = String(newConfig.fallbackModel || "").trim();
+    }
+    if (newConfig.autoFailover !== undefined) {
+      this.store.systemConfig.autoFailover = Boolean(newConfig.autoFailover);
+    }
     if (newConfig.temperature !== undefined) {
       this.store.systemConfig.temperature = Math.max(0.1, Math.min(1.0, Number(newConfig.temperature)));
     }
@@ -528,12 +601,29 @@ class AiRuleService {
       this.store.systemConfig.retrievalMode = String(newConfig.retrievalMode).trim();
     }
 
-    if (newConfig.apiKey && typeof newConfig.apiKey === "string" && !newConfig.apiKey.includes("••")) {
-      const trimmed = newConfig.apiKey.trim();
-      if (trimmed) {
+    const activeProvider = this.store.systemConfig.provider || "gemini";
+    const setKeyFor = (prov, rawVal) => {
+      if (!prov || !rawVal || typeof rawVal !== "string" || rawVal.includes("••")) return;
+      const trimmed = rawVal.trim();
+      if (!trimmed) return;
+      this.store.providerKeys[prov] = trimmed;
+      if (prov === "gemini") process.env.GEMINI_API_KEY = trimmed;
+      if (prov === "groq") process.env.GROQ_API_KEY = trimmed;
+      if (prov === "openai") process.env.OPENAI_API_KEY = trimmed;
+      if (prov === "deepseek") process.env.DEEPSEEK_API_KEY = trimmed;
+      if (prov === activeProvider) {
         this.store.apiKey = trimmed;
-        process.env.GEMINI_API_KEY = trimmed;
         process.env.LLM_API_KEY = trimmed;
+      }
+    };
+
+    setKeyFor(activeProvider, newConfig.apiKey);
+    if (this.store.systemConfig.fallbackProvider) {
+      setKeyFor(this.store.systemConfig.fallbackProvider, newConfig.fallbackApiKey);
+    }
+    if (newConfig.providerKeys && typeof newConfig.providerKeys === "object") {
+      for (const [prov, val] of Object.entries(newConfig.providerKeys)) {
+        setKeyFor(String(prov).toLowerCase(), val);
       }
     }
 
@@ -541,12 +631,17 @@ class AiRuleService {
 
     try {
       const { unifiedLlmService } = require("./unified-llm.service");
+      const resolvedKeys = this.getResolvedProviderKeys();
       unifiedLlmService.configure({
         provider: this.store.systemConfig.provider,
         model: this.store.systemConfig.model,
+        fallbackProvider: this.store.systemConfig.fallbackProvider,
+        fallbackModel: this.store.systemConfig.fallbackModel,
+        autoFailover: this.store.systemConfig.autoFailover !== false,
+        providerKeys: resolvedKeys,
         temperature: this.store.systemConfig.temperature,
         maxTokens: this.store.systemConfig.maxTokens,
-        ...(this.store.apiKey ? { apiKey: this.store.apiKey } : {})
+        apiKey: resolvedKeys[this.store.systemConfig.provider] || ""
       });
     } catch (_) {}
 
@@ -712,7 +807,7 @@ class AiRuleService {
       ruleName: matchedInjectRules.map((r) => r.name).join(" + ") || undefined,
       matchedRules: matchedInjectRules,
       promptInjections,
-      model: this.store?.systemConfig?.model || "gemini-1.5-flash"
+      model: this.store?.systemConfig?.model || "gemini-3-flash-preview"
     };
   }
 }

@@ -92,6 +92,11 @@ export async function updateAdminAiSystemConfig(data) {
   return response.data;
 }
 
+export async function testAdminAiConnection(data) {
+  const response = await httpClient.post("/ai/admin/test-connection", data, { timeout: 15000 });
+  return response.data;
+}
+
 // ==================== ADMIN RAG & KNOWLEDGE DOCUMENTS ====================
 
 export async function getAdminAiDocuments() {

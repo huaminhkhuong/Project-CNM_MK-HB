@@ -264,30 +264,34 @@ CẤU TRÚC JSON MẪU:
     # 4. Gọi Gemini API với cơ chế Fallback
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("LLM_API_KEY", "")
     models_to_try = [
-        os.environ.get("LLM_MODEL") or "gemini-3.5-flash-lite",
-        os.environ.get("LLM_FALLBACK_MODEL") or "gemini-3.1-flash-lite",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-2.0-flash"
+        "gemini-3-flash-preview",
+        os.environ.get("LLM_MODEL") or "gemini-flash-lite-latest",
+        os.environ.get("LLM_FALLBACK_MODEL") or "gemini-3.5-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-flash-latest"
     ]
 
-    for model_name in models_to_try:
+    for model_name in dict.fromkeys(m for m in models_to_try if m):
         if not api_key:
             break
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+            gen_cfg = {
+                "response_mime_type": "application/json",
+                "temperature": 0.3,
+                "maxOutputTokens": 2048
+            }
+            if model_name.startswith("gemini-3-flash"):
+                gen_cfg["thinkingConfig"] = {"thinkingBudget": 0}
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "response_mime_type": "application/json",
-                    "temperature": 0.3,
-                    "maxOutputTokens": 2048
-                }
+                "generationConfig": gen_cfg
             }
-            res = requests.post(url, json=payload, timeout=12)
+            res = requests.post(url, json=payload, timeout=15)
             if res.status_code == 200:
                 data = res.json()
-                raw_text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                raw_text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
                 parsed = json.loads(raw_text)
                 if isinstance(parsed, dict) and "questions" in parsed and len(parsed["questions"]) > 0:
                     # Chạy tầng lọc khử trùng lặp nghiêm ngặt giữa Vòng 1 và Vòng 2

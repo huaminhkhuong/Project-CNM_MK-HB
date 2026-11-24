@@ -53,10 +53,14 @@ playwright-report/
 # Crawler dataset (avoid git bloat)
 pc_crawler/data.zip
 pc_crawler/data/
-**/__pycache__/
-*.pyc
+.venv/
+**/.venv/
 
 data
+!services/ai-service/src/data/
+!services/ai-service/src/data/**
+**/__pycache__/
+*.pyc
 apps/web/public/data/images/products/
 
 # SSL Certificates (exclude real private keys from git)

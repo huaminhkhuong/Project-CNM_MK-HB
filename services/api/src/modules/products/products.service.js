@@ -490,10 +490,43 @@ async function getProducts(params = {}) {
     const priceExpr = config.skus ? `COALESCE(MIN(s.${config.skus.price}), p.${config.products.price || "price"})` : `p.${config.products.price}`;
     const imageExpr = config.skus?.imageUrl ? `MIN(s.${config.skus.imageUrl})` : "NULL";
     const orderBySql = resolveSortClause(filters.sort, config);
+    const shouldInterleave =
+      (!filters.sort || filters.sort === "featured") &&
+      !filters.categoryId &&
+      !filters.brandId &&
+      !filters.keyword &&
+      filters.minPrice === null &&
+      filters.maxPrice === null &&
+      (!filters.attributeValueIds || filters.attributeValueIds.length === 0);
 
-    const [items, totalRows] = await Promise.all([
-      query(
+    const listSql = shouldInterleave
+      ? `
+          SELECT
+            base.*,
+            ROW_NUMBER() OVER (PARTITION BY base.category_id ORDER BY base.product_id DESC) AS cat_rn
+          FROM (
+            SELECT
+              p.${config.products.id} AS product_id,
+              p.${config.products.categoryId} AS category_id,
+              p.${config.products.name} AS product_name,
+              ${config.products.slug ? `p.${config.products.slug}` : `CAST(p.${config.products.id} AS CHAR)`} AS slug,
+              ${config.products.warrantyMonths ? `p.${config.products.warrantyMonths}` : "24"} AS warranty_months,
+              c.${config.categories.name} AS category_name,
+              ${brandSelect}
+              ${priceExpr} AS price,
+              ${imageExpr} AS image_url,
+              ${config.skus && config.skus.stock ? `COALESCE(SUM(s.${config.skus.stock}), 0)` : "0"} AS stock_quantity
+            FROM ${config.products.table} p
+            INNER JOIN ${config.categories.table} c ON c.${config.categories.id} = p.${config.products.categoryId}
+            ${brandJoin}
+            ${skuJoin}
+            ${whereSql}
+            GROUP BY p.${config.products.id}
+          ) base
+          ORDER BY cat_rn ASC, FIELD(UPPER(base.category_name), 'CPU', 'GPU', 'RAM', 'MAINBOARD', 'SSD', 'PSU', 'CASE', 'COOLING', 'MÀN HÌNH', 'BÀN PHÍM & CHUỘT', 'TAI NGHE', 'HDD') ASC, base.product_id DESC
+          LIMIT ${safeLimit} OFFSET ${safeOffset}
         `
+      : `
           SELECT
             p.${config.products.id} AS product_id,
             p.${config.products.name} AS product_name,
@@ -512,9 +545,10 @@ async function getProducts(params = {}) {
           GROUP BY p.${config.products.id}
           ORDER BY ${orderBySql}
           LIMIT ${safeLimit} OFFSET ${safeOffset}
-        `,
-        whereParams
-      ),
+        `;
+
+    const [items, totalRows] = await Promise.all([
+      query(listSql, whereParams),
       query(
         `
           SELECT COUNT(DISTINCT p.${config.products.id}) AS total_items
@@ -732,11 +766,11 @@ async function getFilterOptions(params = {}) {
     }
   }
 
-  // 3. Faceted Attributes & Values with product_count
+  // 3. Faceted Attributes & Values with product_count (chỉ tải khi đã chọn danh mục cụ thể để tránh 794KB nhiễu khi xem "Tất cả sản phẩm")
   let attributeRows = [];
-  if (config.attributes && config.attributeValues && config.skus && config.skuAttributes) {
-    const whereCategory = categoryId ? `WHERE p.${config.products.categoryId} = ?` : "";
-    const catParams = categoryId ? [categoryId] : [];
+  if (categoryId && config.attributes && config.attributeValues && config.skus && config.skuAttributes) {
+    const whereCategory = `WHERE p.${config.products.categoryId} = ?`;
+    const catParams = [categoryId];
 
     attributeRows = await query(
       `

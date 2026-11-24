@@ -23,6 +23,8 @@ import {
   isVideoAttachment,
   normalizeTicketText
 } from "../../utils/ticketTech";
+import "../../styles/admin-ai-studio.css";
+import "../../styles/admin-catalog-studio.css";
 
 const STORAGE_SELECTED_TICKET = "pcmall_tech_selected_ticket";
 const STORAGE_INTERNAL_NOTES = "pcmall_tech_internal_notes";
@@ -30,9 +32,9 @@ const STORAGE_INTERNAL_NOTES = "pcmall_tech_internal_notes";
 const STATUS_OPTIONS = ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"];
 const PRIORITY_OPTIONS = ["LOW", "MEDIUM", "HIGH", "URGENT"];
 const SCOPE_OPTIONS = [
+  { value: "ALL", label: "Tất cả" },
   { value: "UNASSIGNED", label: "Chưa giao" },
-  { value: "ASSIGNED", label: "Ticket của tôi" },
-  { value: "ALL", label: "Tất cả ticket" }
+  { value: "ASSIGNED", label: "Của tôi" }
 ];
 const SORT_OPTIONS = [
   { value: "newest", label: "Mới nhất" },
@@ -81,12 +83,12 @@ function TicketAttachmentPreview({ attachment, compact = false }) {
   const fileUrl = getAttachmentUrl(attachment);
 
   if (!fileUrl) {
-    return <div className="tech-ticket-attachment__icon">FILE</div>;
+    return <div className="hd-att-icon">FILE</div>;
   }
 
   if (isImageAttachment(attachment)) {
     return (
-      <a className={`tech-ticket-attachment__preview${compact ? " tech-ticket-attachment__preview--compact" : ""}`} href={fileUrl} target="_blank" rel="noreferrer">
+      <a className={`hd-att-preview${compact ? " is-compact" : ""}`} href={fileUrl} target="_blank" rel="noreferrer">
         <img src={fileUrl} alt={attachment.name} loading="lazy" />
       </a>
     );
@@ -94,13 +96,13 @@ function TicketAttachmentPreview({ attachment, compact = false }) {
 
   if (isVideoAttachment(attachment)) {
     return (
-      <a className={`tech-ticket-attachment__preview${compact ? " tech-ticket-attachment__preview--compact" : ""}`} href={fileUrl} target="_blank" rel="noreferrer">
+      <a className={`hd-att-preview${compact ? " is-compact" : ""}`} href={fileUrl} target="_blank" rel="noreferrer">
         <video src={fileUrl} muted preload="metadata" />
       </a>
     );
   }
 
-  return <a className="tech-ticket-attachment__icon" href={fileUrl} target="_blank" rel="noreferrer">FILE</a>;
+  return <a className="hd-att-icon" href={fileUrl} target="_blank" rel="noreferrer">FILE</a>;
 }
 
 function isToday(value) {
@@ -115,12 +117,14 @@ function isToday(value) {
 }
 
 function getPriorityWeight(priority) {
-  return {
-    URGENT: 4,
-    HIGH: 3,
-    MEDIUM: 2,
-    LOW: 1
-  }[String(priority || "").toUpperCase()] || 0;
+  return (
+    {
+      URGENT: 4,
+      HIGH: 3,
+      MEDIUM: 2,
+      LOW: 1
+    }[String(priority || "").toUpperCase()] || 0
+  );
 }
 
 function extractTicketContext(ticket) {
@@ -155,25 +159,26 @@ function buildTicketStageState(ticket) {
     CLOSED: status === "CLOSED" ? ticket?.updatedAt : null
   };
 
-  const currentKey = status === "CLOSED"
-    ? "CLOSED"
-    : status === "RESOLVED"
-      ? "RESOLVED"
-      : waitingCustomer
-        ? "WAITING_CUSTOMER"
-        : status === "IN_PROGRESS"
-          ? "IN_PROGRESS"
-          : ticket?.assignedToId
-            ? "RECEIVED"
-            : "NEW";
+  const currentKey =
+    status === "CLOSED"
+      ? "CLOSED"
+      : status === "RESOLVED"
+        ? "RESOLVED"
+        : waitingCustomer
+          ? "WAITING_CUSTOMER"
+          : status === "IN_PROGRESS"
+            ? "IN_PROGRESS"
+            : ticket?.assignedToId
+              ? "RECEIVED"
+              : "NEW";
 
   const steps = [
-    { key: "NEW", label: "Mới", helper: "Ticket vừa được tạo", timestamp: stageTimestamps.NEW },
-    { key: "RECEIVED", label: "Đã tiếp nhận", helper: ticket?.assignee?.fullName || "Chưa có kỹ thuật nhận", timestamp: stageTimestamps.RECEIVED },
-    { key: "IN_PROGRESS", label: "Đang xử lý", helper: "Đang kiểm tra và phản hồi", timestamp: stageTimestamps.IN_PROGRESS },
-    { key: "WAITING_CUSTOMER", label: "Chờ khách phản hồi", helper: "Đã gửi hướng dẫn cho khách", timestamp: stageTimestamps.WAITING_CUSTOMER },
-    { key: "RESOLVED", label: "Đã giải quyết", helper: "Đã có kết quả xử lý", timestamp: stageTimestamps.RESOLVED },
-    { key: "CLOSED", label: "Đóng ticket", helper: "Kết thúc hội thoại", timestamp: stageTimestamps.CLOSED }
+    { key: "NEW", label: "Mới", helper: "Vừa khởi tạo", timestamp: stageTimestamps.NEW },
+    { key: "RECEIVED", label: "Đã tiếp nhận", helper: ticket?.assignee?.fullName || "Chưa phân công", timestamp: stageTimestamps.RECEIVED },
+    { key: "IN_PROGRESS", label: "Đang xử lý", helper: "Đang kiểm tra", timestamp: stageTimestamps.IN_PROGRESS },
+    { key: "WAITING_CUSTOMER", label: "Chờ khách", helper: "Đã gửi hướng dẫn", timestamp: stageTimestamps.WAITING_CUSTOMER },
+    { key: "RESOLVED", label: "Đã giải quyết", helper: "Có kết quả xử lý", timestamp: stageTimestamps.RESOLVED },
+    { key: "CLOSED", label: "Đóng ticket", helper: "Hoàn tất", timestamp: stageTimestamps.CLOSED }
   ];
 
   const currentIndex = steps.findIndex((step) => step.key === currentKey);
@@ -237,14 +242,19 @@ function buildActivityFeed(ticket) {
 
 function TicketListSkeleton() {
   return (
-    <div className="tech-ticket-skeleton-list">
-      {Array.from({ length: 6 }).map((_, index) => (
-        <article key={index} className="tech-ticket-skeleton-card">
-          <div className="tech-ticket-skeleton-card__line tech-ticket-skeleton-card__line--short" />
-          <div className="tech-ticket-skeleton-card__line" />
-          <div className="tech-ticket-skeleton-card__line" />
-          <div className="tech-ticket-skeleton-card__line tech-ticket-skeleton-card__line--tiny" />
-        </article>
+    <div style={{ display: "grid", gap: 10 }}>
+      {Array.from({ length: 5 }).map((_, index) => (
+        <div
+          key={index}
+          style={{
+            height: 112,
+            borderRadius: 14,
+            border: "1px solid #e2e8f0",
+            background: "linear-gradient(90deg, #f8fafc 25%, #f1f5f9 50%, #f8fafc 75%)",
+            backgroundSize: "200% 100%",
+            animation: "hdShimmer 1.4s ease-in-out infinite"
+          }}
+        />
       ))}
     </div>
   );
@@ -252,11 +262,19 @@ function TicketListSkeleton() {
 
 function WorkspaceSkeleton() {
   return (
-    <div className="tech-ticket-workspace-skeleton">
-      <div className="tech-ticket-workspace-skeleton__hero" />
-      <div className="tech-ticket-workspace-skeleton__grid">
-        <div className="tech-ticket-workspace-skeleton__panel" />
-        <div className="tech-ticket-workspace-skeleton__panel" />
+    <div style={{ display: "grid", gap: 16 }}>
+      <div
+        style={{
+          height: 210,
+          borderRadius: 18,
+          background: "linear-gradient(90deg, #0f172a 25%, #1e293b 50%, #0f172a 75%)",
+          backgroundSize: "200% 100%",
+          animation: "hdShimmer 1.4s ease-in-out infinite"
+        }}
+      />
+      <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", gap: 16 }}>
+        <div style={{ height: 320, borderRadius: 16, border: "1px solid #e2e8f0", background: "#f8fafc" }} />
+        <div style={{ height: 320, borderRadius: 16, border: "1px solid #e2e8f0", background: "#f8fafc" }} />
       </div>
     </div>
   );
@@ -352,12 +370,7 @@ export function TechTicketsPage() {
       const waitingCustomer = ticket.status === "IN_PROGRESS" && latestMessage && isTechSender(latestMessage.sender?.role);
       const needsTechAttention = ticket.status !== "CLOSED" && latestMessage && !isTechSender(latestMessage.sender?.role);
 
-      return {
-        ...ticket,
-        attachmentMentions,
-        waitingCustomer,
-        needsTechAttention
-      };
+      return { ...ticket, attachmentMentions, waitingCustomer, needsTechAttention };
     });
   }, [tickets]);
 
@@ -382,7 +395,6 @@ export function TechTicketsPage() {
         .toLowerCase();
       return haystack.includes(normalizedKeyword);
     });
-
 
     list = [...list].sort((a, b) => {
       if (sortBy === "priority") {
@@ -446,11 +458,10 @@ export function TechTicketsPage() {
     loadDetail();
   }, [selectedTicketId]);
 
-  // 🔌 Socket.io: Đăng ký nhận thông báo real-time cho kỹ thuật viên
+  // Socket.io: Tech queue real-time listeners
   useEffect(() => {
     joinRoom("join_tech_queue");
 
-    // Ticket mới được tạo → cập nhật danh sách
     const unsubNewTicket = on("tickets:new_ticket", (newTicket) => {
       setTickets((prev) => {
         const exists = prev.some((t) => Number(t.id) === Number(newTicket.id));
@@ -460,21 +471,16 @@ export function TechTicketsPage() {
       loadStats();
     });
 
-    // Trạng thái / tin nhắn ticket thay đổi → cập nhật trong danh sách
     const unsubQueueUpdated = on("tickets:queue_updated", ({ ticketId, status }) => {
       setTickets((prev) =>
-        prev.map((t) =>
-          Number(t.id) === Number(ticketId) ? { ...t, status: status || t.status } : t
-        )
+        prev.map((t) => (Number(t.id) === Number(ticketId) ? { ...t, status: status || t.status } : t))
       );
       if (ticketId) {
         getTicketDetail(ticketId)
           .then((response) => {
             const detail = getEnvelopeData(response, null);
             if (!detail) return;
-            setTickets((prev) =>
-              prev.map((t) => (Number(t.id) === Number(ticketId) ? { ...t, ...detail } : t))
-            );
+            setTickets((prev) => prev.map((t) => (Number(t.id) === Number(ticketId) ? { ...t, ...detail } : t)));
             if (Number(ticketId) === Number(selectedTicketId)) {
               setSelectedTicket(detail);
             }
@@ -490,13 +496,12 @@ export function TechTicketsPage() {
     };
   }, [joinRoom, on, loadStats, selectedTicketId]);
 
-  // 🔌 Socket.io: Lắng nghe cập nhật real-time khi đang xem chi tiết ticket
+  // Socket.io: Active ticket detail real-time listeners
   useEffect(() => {
     if (!selectedTicketId) return undefined;
 
     joinRoom("join_ticket", selectedTicketId);
 
-    // Tin nhắn mới trong ticket → cập nhật ngay
     const unsubNewMessage = on("ticket:new_message", ({ ticketId }) => {
       if (String(ticketId) !== String(selectedTicketId)) return;
       getTicketDetail(selectedTicketId)
@@ -510,7 +515,6 @@ export function TechTicketsPage() {
         .catch(() => {});
     });
 
-    // Trạng thái ticket thay đổi → cập nhật selectedTicket
     const unsubStatusChanged = on("ticket:status_changed", (updatedTicket) => {
       if (Number(updatedTicket?.id) === Number(selectedTicketId)) {
         getTicketDetail(selectedTicketId)
@@ -564,9 +568,7 @@ export function TechTicketsPage() {
 
     return {
       ...mergedTicket,
-      attachmentMentions: [
-        ...new Map((mergedTicket.attachmentMentions || []).map((attachment) => [attachment.id, attachment])).values()
-      ]
+      attachmentMentions: [...new Map((mergedTicket.attachmentMentions || []).map((att) => [att.id, att])).values()]
     };
   }, [normalizedTickets, selectedTicket]);
 
@@ -578,42 +580,18 @@ export function TechTicketsPage() {
   const activityFeed = useMemo(() => buildActivityFeed(selectedTicketResolved), [selectedTicketResolved]);
   const ticketContext = useMemo(() => extractTicketContext(selectedTicketResolved), [selectedTicketResolved]);
 
-  const statsCards = useMemo(() => {
+  const kpiStats = useMemo(() => {
     const waitingCustomer = normalizedTickets.filter((ticket) => ticket.waitingCustomer).length;
     const resolvedToday = normalizedTickets.filter(
       (ticket) => ["RESOLVED", "CLOSED"].includes(String(ticket.status || "").toUpperCase()) && isToday(ticket.updatedAt)
     ).length;
 
-    return [
-      {
-        label: "Ticket mới",
-        value: stats?.open ?? normalizedTickets.filter((ticket) => ticket.status === "OPEN").length,
-        tone: "info",
-        icon: "✦",
-        helper: "Ưu tiên tiếp nhận"
-      },
-      {
-        label: "Đang xử lý",
-        value: stats?.inProgress ?? normalizedTickets.filter((ticket) => ticket.status === "IN_PROGRESS").length,
-        tone: "warning",
-        icon: "⌘",
-        helper: "Đội kỹ thuật đang làm"
-      },
-      {
-        label: "Chờ phản hồi khách",
-        value: waitingCustomer,
-        tone: "neutral",
-        icon: "↺",
-        helper: "Đã gửi hướng dẫn"
-      },
-      {
-        label: "Đã giải quyết hôm nay",
-        value: resolvedToday,
-        tone: "success",
-        icon: "✓",
-        helper: "Hoàn tất trong ngày"
-      }
-    ];
+    return {
+      open: stats?.open ?? normalizedTickets.filter((ticket) => ticket.status === "OPEN").length,
+      inProgress: stats?.inProgress ?? normalizedTickets.filter((ticket) => ticket.status === "IN_PROGRESS").length,
+      waitingCustomer,
+      resolvedToday
+    };
   }, [normalizedTickets, stats]);
 
   async function refreshAll() {
@@ -630,9 +608,9 @@ export function TechTicketsPage() {
       const newTickets = freshList.filter((ticket) => !previousIds.has(Number(ticket.id)));
 
       if (newTickets.length > 0) {
-        const newestTicket = [...newTickets].sort((a, b) => {
-          return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
-        })[0];
+        const newestTicket = [...newTickets].sort(
+          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        )[0];
         setSelectedTicketId(newestTicket.id);
         setSuccessMessage(`Đã cập nhật. Có ${newTickets.length} ticket mới, đã mở ticket #${newestTicket.id}.`);
         return;
@@ -683,10 +661,7 @@ export function TechTicketsPage() {
           message: data,
           visibility: "INTERNAL"
         });
-        setInternalNotes((prev) => ({
-          ...prev,
-          [selectedTicketResolved.id]: ""
-        }));
+        setInternalNotes((prev) => ({ ...prev, [selectedTicketResolved.id]: "" }));
       } else {
         response = await updateTicket(selectedTicketResolved.id, data);
       }
@@ -699,7 +674,7 @@ export function TechTicketsPage() {
           ? "Đã gửi phản hồi cho khách hàng."
           : type === "internal_note"
             ? "Đã lưu và đồng bộ ghi chú nội bộ lên hệ thống."
-            : "Đã cập nhật ticket."
+            : "Đã cập nhật ticket thành công."
       );
       await loadStats();
     } catch (error) {
@@ -752,273 +727,294 @@ export function TechTicketsPage() {
   }
 
   return (
-    <div className="tech-ticket-center">
+    <div className="hd-shell">
       <style>{`
-        .tech-ticket-center { display: grid; gap: 24px; }
-        .tech-ticket-center .tech-page-head { align-items: center; }
-        .tech-ticket-center .tech-page-head h1 { font-size: 34px; letter-spacing: 0; }
-        .tech-ticket-center .tech-page-head p { max-width: 860px; }
-        .tech-ticket-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
-        .tech-ticket-stat { padding: 20px; border-radius: 22px; background: #ffffff; border: 1px solid #e7def7; box-shadow: 0 18px 42px rgba(88, 28, 135, 0.06); display: grid; gap: 10px; }
-        .tech-ticket-stat__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-        .tech-ticket-stat__icon { width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center; font-size: 18px; font-weight: 900; }
-        .tech-ticket-stat__icon--info { background: #eef2ff; color: #4f46e5; }
-        .tech-ticket-stat__icon--warning { background: #fff7ed; color: #c2410c; }
-        .tech-ticket-stat__icon--neutral { background: #f5f3ff; color: #7c3aed; }
-        .tech-ticket-stat__icon--success { background: #ecfdf5; color: #047857; }
-        .tech-ticket-stat span { color: #6b6280; font-size: 13px; font-weight: 800; }
-        .tech-ticket-stat strong { color: #1a1625; font-size: 32px; line-height: 1; }
-        .tech-ticket-stat small { color: #8b7fa4; line-height: 1.45; }
-        .tech-ticket-workspace { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 24px; align-items: start; }
-        .tech-ticket-inbox, .tech-ticket-canvas, .tech-ticket-card { background: #ffffff; border: 1px solid #e7def7; border-radius: 24px; box-shadow: 0 18px 42px rgba(88, 28, 135, 0.06); }
-        .tech-ticket-inbox { position: sticky; top: 88px; overflow: hidden; }
-        .tech-ticket-inbox__head { padding: 22px 22px 18px; border-bottom: 1px solid #f0e9fb; }
-        .tech-ticket-inbox__head h2, .tech-ticket-section__title h3 { margin: 0; font-size: 18px; color: #1a1625; }
-        .tech-ticket-inbox__head p, .tech-ticket-section__title p, .tech-ticket-muted { margin: 6px 0 0; color: #7a718e; line-height: 1.55; }
-        .tech-ticket-filters { padding: 18px 22px; display: grid; gap: 12px; border-bottom: 1px solid #f0e9fb; }
-        .tech-ticket-field, .tech-ticket-select, .tech-ticket-textarea { width: 100%; min-height: 46px; padding: 0 14px; border-radius: 14px; border: 1px solid #dcd3ee; background: #fbfaff; color: #1a1625; }
-        .tech-ticket-textarea { min-height: 120px; padding: 14px; resize: vertical; }
-        .tech-ticket-filter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .tech-ticket-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
-        .tech-ticket-tab { min-height: 34px; padding: 0 12px; border-radius: 999px; border: 1px solid #e7def7; background: #ffffff; color: #6b6280; font-size: 12px; font-weight: 900; cursor: pointer; }
-        .tech-ticket-tab.is-active { background: #f3e8ff; border-color: #c4b5fd; color: #7c3aed; }
-        .tech-ticket-list { max-height: calc(100vh - 320px); overflow-y: auto; display: grid; gap: 10px; padding: 16px; }
-        .tech-ticket-inbox-item { width: 100%; padding: 16px; border-radius: 18px; border: 1px solid #ede5fb; background: #ffffff; display: grid; gap: 10px; text-align: left; cursor: pointer; transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
-        .tech-ticket-inbox-item:hover { transform: translateY(-1px); border-color: #c4b5fd; box-shadow: 0 14px 30px rgba(76, 29, 149, 0.09); }
-        .tech-ticket-inbox-item--active { border-color: #8b5cf6; background: linear-gradient(180deg, #ffffff 0%, #faf5ff 100%); box-shadow: 0 18px 34px rgba(124, 58, 237, 0.12); }
-        .tech-ticket-inbox-item__top, .tech-ticket-inline { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-        .tech-ticket-id { font-size: 12px; font-weight: 900; color: #7c3aed; letter-spacing: 0.05em; text-transform: uppercase; }
-        .tech-ticket-title { font-size: 16px; line-height: 1.45; font-weight: 900; color: #1a1625; }
-        .tech-ticket-sub { font-size: 13px; color: #7a718e; }
-        .tech-ticket-pill, .tech-ticket-badge, .tech-ticket-priority { display: inline-flex; align-items: center; justify-content: center; min-height: 28px; padding: 0 10px; border-radius: 999px; font-size: 12px; font-weight: 900; }
-        .tech-ticket-badge { background: #eef2ff; color: #4338ca; }
-        .tech-ticket-badge--warn { background: #fff7ed; color: #c2410c; }
-        .tech-ticket-badge--danger { background: #fef2f2; color: #b91c1c; }
-        .tech-ticket-pill--info { background: #eef2ff; color: #4338ca; }
-        .tech-ticket-pill--warning { background: #fff7ed; color: #c2410c; }
-        .tech-ticket-pill--success { background: #ecfdf5; color: #047857; }
-        .tech-ticket-pill--neutral { background: #f5f3ff; color: #6d28d9; }
-        .tech-ticket-priority--danger { color: #b91c1c; background: #fef2f2; }
-        .tech-ticket-priority--warning { color: #c2410c; background: #fff7ed; }
-        .tech-ticket-priority--info { color: #1d4ed8; background: #eff6ff; }
-        .tech-ticket-priority--neutral { color: #64748b; background: #f8fafc; }
-        .tech-ticket-canvas { padding: 24px; display: grid; gap: 18px; }
-        .tech-ticket-detail-head { padding: 24px; border-radius: 22px; background: linear-gradient(135deg, #1e1b4b 0%, #7c3aed 100%); color: #ffffff; display: grid; gap: 18px; }
-        .tech-ticket-detail-head__top { display: flex; justify-content: space-between; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
-        .tech-ticket-detail-head__top h2 { margin: 8px 0 0; font-size: 30px; line-height: 1.08; letter-spacing: 0; }
-        .tech-ticket-detail-head__top p { margin: 8px 0 0; color: rgba(255,255,255,0.82); line-height: 1.6; }
-        .tech-ticket-meta-cluster { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-        .tech-ticket-detail-actions { display: flex; flex-wrap: wrap; gap: 10px; }
-        .tech-ticket-btn { min-height: 42px; padding: 0 14px; border-radius: 12px; border: 1px solid transparent; cursor: pointer; font-weight: 900; display: inline-flex; align-items: center; justify-content: center; gap: 8px; transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease; }
-        .tech-ticket-btn:hover:not(:disabled) { transform: translateY(-1px); }
-        .tech-ticket-btn:disabled { opacity: .55; cursor: not-allowed; }
-        .tech-ticket-btn__spinner { width: 15px; height: 15px; border-radius: 999px; border: 2px solid currentColor; border-right-color: transparent; animation: techTicketSpin .75s linear infinite; }
-        .tech-ticket-btn--primary { color: #fff; background: linear-gradient(135deg, #2563eb, #1d4ed8); box-shadow: 0 10px 22px rgba(37, 99, 235, 0.18); }
-        .tech-ticket-btn--secondary { color: #1a1625; background: #ffffff; border-color: #ddd6fe; }
-        .tech-ticket-btn--ghost { color: #fff; background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.18); }
-        .tech-ticket-btn--danger { color: #fff; background: linear-gradient(135deg, #dc2626, #b91c1c); box-shadow: 0 10px 22px rgba(220, 38, 38, 0.18); }
-        .tech-ticket-progress { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
-        .tech-ticket-progress-step { position: relative; overflow: hidden; padding: 14px 12px; border-radius: 16px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.16); display: grid; gap: 8px; min-height: 118px; color: rgba(255,255,255,0.88); transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease, background .18s ease; }
-        .tech-ticket-progress-step::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: rgba(255,255,255,0.18); transition: background .18s ease; }
-        .tech-ticket-progress-step > * { position: relative; z-index: 1; }
-        .tech-ticket-progress-step__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-        .tech-ticket-progress-step__icon { width: 30px; height: 30px; border-radius: 999px; display: grid; place-items: center; font-weight: 950; background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.22); color: rgba(255,255,255,0.86); }
-        .tech-ticket-progress-step__state { padding: 4px 8px; border-radius: 999px; font-size: 10px; font-weight: 950; letter-spacing: .04em; text-transform: uppercase; background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.76); white-space: nowrap; }
-        .tech-ticket-progress-step strong { font-size: 14px; line-height: 1.25; }
-        .tech-ticket-progress-step span, .tech-ticket-progress-step small { color: rgba(255,255,255,0.78); line-height: 1.4; }
-        .tech-ticket-progress-step--completed { background: rgba(255,255,255,0.14); border-color: rgba(167,243,208,0.5); }
-        .tech-ticket-progress-step--completed::before { background: #34d399; }
-        .tech-ticket-progress-step--completed .tech-ticket-progress-step__icon { background: #dcfce7; color: #047857; border-color: rgba(255,255,255,0.76); }
-        .tech-ticket-progress-step--completed .tech-ticket-progress-step__state { background: rgba(220,252,231,0.95); color: #047857; }
-        .tech-ticket-progress-step--current { transform: translateY(-1px); background: rgba(37,99,235,0.2); border-color: rgba(147,197,253,0.9); box-shadow: 0 12px 28px rgba(37,99,235,0.18); }
-        .tech-ticket-progress-step--current::before { background: #60a5fa; }
-        .tech-ticket-progress-step--current .tech-ticket-progress-step__icon { background: #ffffff; color: #2563eb; border-color: rgba(255,255,255,0.88); }
-        .tech-ticket-progress-step--current .tech-ticket-progress-step__state { background: #eff6ff; color: #1d4ed8; }
-        .tech-ticket-progress-step--pending { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.12); opacity: .72; }
-        .tech-ticket-progress-step--pending .tech-ticket-progress-step__icon { color: rgba(255,255,255,0.66); }
-        .tech-ticket-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) 340px; gap: 18px; align-items: start; }
-        .tech-ticket-stack { display: grid; gap: 18px; }
-        .tech-ticket-card { padding: 20px; }
-        .tech-ticket-section__title { display: flex; justify-content: space-between; gap: 12px; align-items: start; margin-bottom: 14px; }
-        .tech-ticket-rich-text { color: #433b55; line-height: 1.7; }
-        .tech-ticket-rich-text--soft { color: #7a718e; }
-        .tech-ticket-data-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-        .tech-ticket-data-card { padding: 14px 16px; border-radius: 16px; background: #faf8ff; border: 1px solid #eee6fb; display: grid; gap: 6px; }
-        .tech-ticket-data-card span { font-size: 12px; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; color: #7a718e; }
-        .tech-ticket-data-card strong { color: #1a1625; line-height: 1.5; }
-        .tech-ticket-attachments { display: grid; gap: 12px; }
-        .tech-ticket-attachment { padding: 14px 16px; border-radius: 16px; background: #faf8ff; border: 1px solid #eee6fb; display: flex; gap: 12px; align-items: center; }
-        .tech-ticket-attachment__icon { width: 56px; height: 56px; flex: 0 0 56px; border-radius: 14px; display: grid; place-items: center; background: #ede9fe; color: #6d28d9; font-weight: 900; text-decoration: none; }
-        .tech-ticket-attachment__preview { width: 72px; height: 72px; flex: 0 0 72px; border-radius: 16px; overflow: hidden; border: 1px solid #e4dcfb; background: #fff; display: block; box-shadow: 0 10px 24px rgba(109,40,217,0.12); }
-        .tech-ticket-attachment__preview--compact { width: 44px; height: 44px; flex-basis: 44px; border-radius: 12px; box-shadow: none; }
-        .tech-ticket-attachment__preview img,
-        .tech-ticket-attachment__preview video { width: 100%; height: 100%; object-fit: cover; display: block; }
-        .tech-ticket-attachment__actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
-        .tech-ticket-attachment__actions a, .tech-ticket-attachment__actions button { padding: 7px 10px; border-radius: 999px; background: #fff; border: 1px solid #ddd6fe; color: #5b21b6; font-size: 12px; font-family: inherit; font-weight: 900; text-decoration: none; cursor: pointer; }
-        .tech-ticket-thread { display: grid; gap: 14px; }
-        .tech-ticket-thread__meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-        .tech-ticket-messages { max-height: 440px; overflow-y: auto; display: grid; gap: 12px; padding-right: 4px; }
-        .tech-ticket-message-row { display: grid; gap: 6px; justify-items: start; }
-        .tech-ticket-message-row--tech { justify-items: end; }
-        .tech-ticket-message-meta { font-size: 12px; color: #7a718e; font-weight: 800; }
-        .tech-ticket-message-bubble { max-width: min(78%, 680px); padding: 14px 16px; border-radius: 18px; background: #f8f5ff; border: 1px solid #ede5fb; color: #31293f; line-height: 1.65; white-space: pre-wrap; }
-        .tech-ticket-message-bubble--tech { background: linear-gradient(135deg, #ede9fe, #eff6ff); border-color: #c7d2fe; }
-        .tech-ticket-quick-replies { display: flex; gap: 8px; flex-wrap: wrap; }
-        .tech-ticket-quick-reply { padding: 8px 12px; border-radius: 999px; border: 1px solid #e6def5; background: #faf8ff; color: #5c5470; font-size: 12px; font-weight: 800; cursor: pointer; }
-        .tech-ticket-quick-reply:hover { border-color: #c4b5fd; color: #7c3aed; background: #f5f3ff; }
-        .tech-ticket-reply-grid { display: grid; grid-template-columns: 1fr 220px; gap: 14px; align-items: start; }
-        .tech-ticket-reply-sidebar { display: grid; gap: 12px; }
-        .tech-ticket-status-selects { display: grid; gap: 10px; }
-        .tech-ticket-empty { padding: 34px; border-radius: 20px; background: #faf8ff; border: 1px dashed #d8ccf1; color: #7a718e; text-align: center; }
-        .tech-ticket-empty__icon { width: 68px; height: 68px; margin: 0 auto 12px; border-radius: 20px; display: grid; place-items: center; background: #f3e8ff; color: #7c3aed; font-size: 26px; }
-        .tech-ticket-side-stack { display: grid; gap: 18px; }
-        .tech-ticket-activity { display: grid; gap: 12px; }
-        .tech-ticket-activity-item { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 12px; align-items: start; }
-        .tech-ticket-activity-dot { width: 12px; height: 12px; margin-top: 5px; border-radius: 999px; background: linear-gradient(135deg, #7c3aed, #2563eb); box-shadow: 0 0 0 5px #f3e8ff; }
-        .tech-ticket-note-caption { font-size: 12px; color: #8b7fa4; line-height: 1.5; }
-        .tech-ticket-modal { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.48); display: grid; place-items: center; padding: 20px; z-index: 80; }
-        .tech-ticket-modal__panel { width: min(420px, 100%); padding: 22px; border-radius: 22px; background: #fff; border: 1px solid #ece3fb; box-shadow: 0 28px 60px rgba(15, 23, 42, 0.22); display: grid; gap: 12px; }
-        .tech-ticket-modal__panel h3 { margin: 0; font-size: 22px; color: #1a1625; }
-        .tech-ticket-modal__panel p { margin: 0; color: #6b6280; line-height: 1.65; }
-        .tech-ticket-modal__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
-        .tech-ticket-skeleton-list, .tech-ticket-workspace-skeleton { display: grid; gap: 12px; }
-        .tech-ticket-skeleton-card, .tech-ticket-workspace-skeleton__hero, .tech-ticket-workspace-skeleton__panel { border-radius: 18px; background: linear-gradient(90deg, #f4effb 25%, #fbf8ff 50%, #f4effb 75%); background-size: 240px 100%; animation: techTicketShimmer 1.3s linear infinite; }
-        .tech-ticket-skeleton-card { padding: 16px; min-height: 138px; border: 1px solid #efe7fb; }
-        .tech-ticket-skeleton-card__line { height: 12px; border-radius: 999px; background: rgba(255,255,255,0.7); margin-top: 10px; }
-        .tech-ticket-skeleton-card__line--short { width: 42%; margin-top: 0; }
-        .tech-ticket-skeleton-card__line--tiny { width: 28%; }
-        .tech-ticket-workspace-skeleton__hero { min-height: 240px; }
-        .tech-ticket-workspace-skeleton__grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 18px; }
-        .tech-ticket-workspace-skeleton__panel { min-height: 320px; }
-        @keyframes techTicketShimmer { 0% { background-position: -240px 0; } 100% { background-position: calc(100% + 240px) 0; } }
-        @keyframes techTicketSpin { to { transform: rotate(360deg); } }
+        @keyframes hdShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .hd-shell { width: 100%; display: flex; flex-direction: column; gap: 20px; }
+        .hd-kpi-btn { text-align: left; cursor: pointer; font-family: inherit; width: 100%; }
+        .hd-workspace { display: grid; grid-template-columns: 385px minmax(0, 1fr); gap: 20px; align-items: start; }
+        .hd-inbox { position: sticky; top: 82px; border-radius: 18px; border: 1px solid #e2e8f0; background: #ffffff; box-shadow: 0 12px 30px -22px rgba(15, 23, 42, 0.25); overflow: hidden; display: flex; flex-direction: column; }
+        .hd-inbox-head { padding: 18px 18px 14px; border-bottom: 1px solid #f1f5f9; background: #fafcff; display: flex; flex-direction: column; gap: 11px; }
+        .hd-inbox-head h2 { margin: 0; font-size: 16px; font-weight: 800; color: #0f172a; }
+        .hd-inbox-head p { margin: 2px 0 0; font-size: 12px; color: #64748b; }
+        .hd-scope-seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 3px; border-radius: 10px; background: #f1f5f9; border: 1px solid #e2e8f0; }
+        .hd-scope-btn { padding: 6px 8px; border-radius: 7px; border: none; background: transparent; color: #475569; font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.14s ease; }
+        .hd-scope-btn.is-active { background: #ffffff; color: #0f172a; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08); }
+        .hd-filter-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .hd-select { width: 100%; padding: 8px 10px; border-radius: 9px; border: 1px solid #cbd5e1; background: #ffffff; color: #0f172a; font-size: 12px; font-weight: 600; outline: none; }
+        .hd-select:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.11); }
+        .hd-quick-tabs { display: flex; gap: 5px; flex-wrap: wrap; }
+        .hd-quick-tab { padding: 5px 10px; border-radius: 999px; border: 1px solid #e2e8f0; background: #ffffff; color: #475569; font-size: 11.5px; font-weight: 700; cursor: pointer; }
+        .hd-quick-tab.is-active { background: #0f172a; border-color: #0f172a; color: #ffffff; }
+        .hd-inbox-list { padding: 14px; display: flex; flex-direction: column; gap: 10px; max-height: calc(100vh - 330px); overflow-y: auto; }
+        .hd-ticket-item { position: relative; width: 100%; text-align: left; padding: 13px 14px; border-radius: 13px; border: 1px solid #e2e8f0; background: #ffffff; display: flex; flex-direction: column; gap: 7px; cursor: pointer; transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease; }
+        .hd-ticket-item:hover { border-color: #93c5fd; transform: translateY(-1px); box-shadow: 0 10px 20px -14px rgba(37, 99, 235, 0.25); }
+        .hd-ticket-item.is-active { border-color: #2563eb; background: linear-gradient(180deg, #ffffff 0%, #f5f9ff 100%); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14); }
+        .hd-ticket-item.is-active::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3.5px; border-radius: 0 4px 4px 0; background: #2563eb; }
+        .hd-row-between { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+        .hd-ticket-id { font-family: ui-monospace, monospace; font-size: 12px; font-weight: 800; color: #0f172a; background: #f1f5f9; border: 1px solid #e2e8f0; padding: 2px 7px; border-radius: 6px; }
+        .hd-ticket-title { font-size: 13.5px; font-weight: 750; color: #0f172a; line-height: 1.4; }
+        .hd-ticket-sub { font-size: 12px; color: #64748b; }
+        .hd-pill { display: inline-flex; align-items: center; justify-content: center; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 750; white-space: nowrap; }
+        .hd-pill--info { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+        .hd-pill--warning { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+        .hd-pill--success { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+        .hd-pill--danger { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+        .hd-pill--neutral { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+        .hd-canvas { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+        .hd-detail-hero { position: relative; overflow: hidden; border-radius: 18px; padding: 22px 24px; background: radial-gradient(500px 220px at 90% 0%, rgba(56, 189, 248, 0.16), transparent 65%), linear-gradient(135deg, #0b1220 0%, #16233d 60%, #1e293b 100%); border: 1px solid rgba(148, 163, 184, 0.2); color: #f8fafc; display: flex; flex-direction: column; gap: 18px; box-shadow: 0 18px 36px -22px rgba(9, 15, 30, 0.55); }
+        .hd-detail-hero__top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+        .hd-detail-hero h2 { margin: 10px 0 0; font-size: 22px; font-weight: 800; color: #ffffff; line-height: 1.25; }
+        .hd-detail-hero p { margin: 5px 0 0; font-size: 12.5px; color: #94a3b8; }
+        .hd-detail-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .hd-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 13px; border-radius: 10px; border: 1px solid transparent; font-size: 12.5px; font-weight: 700; cursor: pointer; transition: all 0.15s ease; }
+        .hd-btn:hover:not(:disabled) { transform: translateY(-1px); }
+        .hd-btn:disabled { opacity: 0.42; cursor: not-allowed; }
+        .hd-btn--glass { background: rgba(255, 255, 255, 0.09); border-color: rgba(255, 255, 255, 0.16); color: #f8fafc; }
+        .hd-btn--glass:hover:not(:disabled) { background: rgba(255, 255, 255, 0.16); }
+        .hd-btn--primary { background: linear-gradient(135deg, #2563eb, #4f46e5); color: #ffffff; box-shadow: 0 8px 18px -8px rgba(37, 99, 235, 0.6); }
+        .hd-btn--emerald { background: linear-gradient(135deg, #059669, #10b981); color: #ffffff; }
+        .hd-btn--light { background: #ffffff; color: #0f172a; border-color: #cbd5e1; }
+        .hd-btn--danger { background: rgba(239, 68, 68, 0.18); border-color: rgba(248, 113, 113, 0.45); color: #fecaca; }
+        .hd-btn--danger-solid { background: #dc2626; color: #ffffff; }
+        .hd-progress-track { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; padding-top: 14px; border-top: 1px solid rgba(148, 163, 184, 0.16); }
+        .hd-step { padding: 10px 11px; border-radius: 12px; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+        .hd-step.is-done { background: rgba(16, 185, 129, 0.1); border-color: rgba(52, 211, 153, 0.35); }
+        .hd-step.is-current { background: rgba(56, 189, 248, 0.14); border-color: rgba(56, 189, 248, 0.55); box-shadow: 0 8px 20px -12px rgba(56, 189, 248, 0.6); }
+        .hd-step.is-pending { opacity: 0.52; }
+        .hd-step__dot { width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center; font-size: 11px; font-weight: 800; background: rgba(255,255,255,0.12); color: #e2e8f0; }
+        .hd-step.is-done .hd-step__dot { background: #10b981; color: #ffffff; }
+        .hd-step.is-current .hd-step__dot { background: #38bdf8; color: #090f1e; }
+        .hd-step strong { font-size: 12px; color: #ffffff; line-height: 1.25; }
+        .hd-step span { font-size: 11px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .hd-step small { font-size: 10px; color: #64748b; }
+        .hd-main-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) 330px; gap: 16px; align-items: start; }
+        .hd-col-stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+        .hd-card { border-radius: 16px; border: 1px solid #e2e8f0; background: #ffffff; padding: 18px 20px; box-shadow: 0 10px 24px -22px rgba(15, 23, 42, 0.22); display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+        .hd-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+        .hd-card-head h3 { margin: 0; font-size: 15px; font-weight: 800; color: #0f172a; }
+        .hd-card-head p { margin: 3px 0 0; font-size: 12px; color: #64748b; }
+        .hd-data-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .hd-data-tile { padding: 11px 13px; border-radius: 11px; background: #f8fafc; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+        .hd-data-tile span { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; }
+        .hd-data-tile strong { font-size: 13.5px; font-weight: 700; color: #0f172a; word-break: break-word; }
+        .hd-messages { max-height: 420px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 4px 4px 4px 0; }
+        .hd-msg-row { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+        .hd-msg-row.is-tech { align-items: flex-end; }
+        .hd-msg-meta { font-size: 11.5px; font-weight: 700; color: #64748b; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .hd-msg-bubble { max-width: min(82%, 640px); padding: 12px 15px; border-radius: 14px; background: #f8fafc; border: 1px solid #e2e8f0; color: #1e293b; font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; }
+        .hd-msg-bubble.is-tech { background: #eff6ff; border-color: #bfdbfe; color: #0f172a; }
+        .hd-msg-bubble.is-internal { background: #fffbeb; border-color: #fcd34d; color: #78350f; }
+        .hd-reply-grid { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 12px; align-items: start; }
+        .hd-att-item { display: flex; gap: 11px; align-items: center; padding: 10px 12px; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; }
+        .hd-att-icon { width: 46px; height: 46px; flex: 0 0 46px; border-radius: 10px; display: grid; place-items: center; background: #eff6ff; color: #1d4ed8; font-size: 11px; font-weight: 800; text-decoration: none; }
+        .hd-att-preview { width: 58px; height: 58px; flex: 0 0 58px; border-radius: 10px; overflow: hidden; border: 1px solid #cbd5e1; background: #fff; display: block; }
+        .hd-att-preview.is-compact { width: 42px; height: 42px; flex-basis: 42px; }
+        .hd-att-preview img, .hd-att-preview video { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .hd-activity-list { display: flex; flex-direction: column; gap: 12px; }
+        .hd-activity-item { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 11px; align-items: start; }
+        .hd-activity-dot { width: 10px; height: 10px; margin-top: 4px; border-radius: 999px; background: #2563eb; box-shadow: 0 0 0 4px #eff6ff; }
+        .hd-empty { padding: 28px 18px; border-radius: 12px; background: #f8fafc; border: 1px dashed #cbd5e1; color: #64748b; text-align: center; font-size: 13px; }
+        .hd-alert { padding: 12px 16px; border-radius: 12px; font-size: 13px; font-weight: 700; }
+        .hd-alert--error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+        .hd-alert--success { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
         @media (max-width: 1280px) {
-          .tech-ticket-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-          .tech-ticket-workspace { grid-template-columns: 320px minmax(0, 1fr); }
-          .tech-ticket-grid { grid-template-columns: 1fr; }
-          .tech-ticket-progress { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-          .tech-ticket-reply-grid { grid-template-columns: 1fr; }
+          .hd-workspace { grid-template-columns: 335px minmax(0, 1fr); }
+          .hd-main-grid { grid-template-columns: 1fr; }
+          .hd-progress-track { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+          .hd-reply-grid { grid-template-columns: 1fr; }
         }
-        @media (max-width: 1080px) {
-          .tech-ticket-workspace { grid-template-columns: 1fr; }
-          .tech-ticket-inbox { position: static; }
-          .tech-ticket-list { max-height: 520px; }
-          .tech-ticket-workspace-skeleton__grid { grid-template-columns: 1fr; }
-        }
-        @media (max-width: 768px) {
-          .tech-ticket-stats, .tech-ticket-filter-grid, .tech-ticket-data-grid, .tech-ticket-modal__actions, .tech-ticket-progress { grid-template-columns: 1fr; }
-          .tech-ticket-detail-head, .tech-ticket-card, .tech-ticket-canvas, .tech-ticket-inbox__head, .tech-ticket-filters { padding-left: 16px; padding-right: 16px; }
-          .tech-ticket-detail-head__top h2 { font-size: 24px; }
-          .tech-ticket-message-bubble { max-width: 100%; }
+        @media (max-width: 960px) {
+          .hd-workspace { grid-template-columns: 1fr; }
+          .hd-inbox { position: static; }
+          .hd-inbox-list { max-height: 440px; }
+          .hd-data-grid, .hd-progress-track { grid-template-columns: 1fr 1fr; }
         }
       `}</style>
 
-      <section className="tech-page-head">
-        <div>
-          <p className="tech-eyebrow">Nhân viên kỹ thuật</p>
-          <h1>Ticket Center / Helpdesk</h1>
-          <p>Theo dõi inbox kỹ thuật, tiếp nhận ticket, phản hồi khách hàng và cập nhật tiến độ xử lý trên cùng một workspace.</p>
-        </div>
-        <div className="tech-head-actions">
-          <button
-            type="button"
-            className="tech-ticket-btn tech-ticket-btn--secondary"
-            onClick={refreshAll}
-            disabled={Boolean(actionLoading) || refreshing}
-          >
-            {refreshing ? (
-              <>
-                <span className="tech-ticket-btn__spinner" />
-                Đang cập nhật...
-              </>
-            ) : (
-              "Làm mới"
-            )}
-          </button>
-          <Link to="/tech/compatibility" className="tech-ticket-btn tech-ticket-btn--secondary">
-            Luật tương thích
-          </Link>
-        </div>
-      </section>
-
-      <section className="tech-ticket-stats" aria-label="Thống kê ticket kỹ thuật">
-        {statsCards.map((card) => (
-          <article key={card.label} className="tech-ticket-stat">
-            <div className="tech-ticket-stat__top">
-              <div>
-                <span>{card.label}</span>
-                <strong>{card.value}</strong>
-              </div>
-              <div className={`tech-ticket-stat__icon tech-ticket-stat__icon--${card.tone}`}>{card.icon}</div>
+      {/* ==================== EXECUTIVE TECH HELPDESK HERO ==================== */}
+      <section className="ai-studio-hero">
+        <div className="ai-studio-hero-top">
+          <div>
+            <div className="ai-studio-hero-badges">
+              <span className="ai-studio-live-pill">
+                <span className="ai-studio-live-dot" />
+                Technical Helpdesk • Socket.io Live
+              </span>
+              <span className="ai-studio-tech-pill">Hỗ trợ phần cứng • Chẩn đoán • Bảo hành</span>
             </div>
-            <small>{card.helper}</small>
-          </article>
-        ))}
-      </section>
-
-      {errorMessage ? <div className="tech-alert tech-alert--error">{errorMessage}</div> : null}
-      {successMessage ? <div className="tech-alert tech-alert--success">{successMessage}</div> : null}
-
-      <div className="tech-ticket-workspace">
-        <aside className="tech-ticket-inbox">
-          <div className="tech-ticket-inbox__head">
-            <h2>Inbox ticket</h2>
-            <p>Chọn ticket để mở workspace kỹ thuật chi tiết.</p>
+            <h1 className="ai-studio-hero-title">Trung Tâm Hỗ Trợ Kỹ Thuật &amp; Helpdesk</h1>
+            <p className="ai-studio-hero-desc">
+              Theo dõi hộp thư ticket theo thời gian thực, tiếp nhận yêu cầu từ khách hàng, phản hồi kèm hình ảnh/video và kiểm soát toàn bộ tiến độ xử lý trên một workspace tập trung.
+            </p>
           </div>
 
-          <div className="tech-ticket-filters">
-            <input
-              className="tech-ticket-field"
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-              placeholder="Tìm mã ticket, tiêu đề, khách hàng, email..."
-              aria-label="Tìm ticket"
-            />
-            <div className="tech-ticket-filter-grid">
-              <select className="tech-ticket-select" value={scope} onChange={(event) => setScope(event.target.value)} aria-label="Phạm vi ticket">
-                {SCOPE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <Link
+              to="/tech/compatibility"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 7,
+                padding: "10px 15px",
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,0.18)",
+                background: "rgba(255,255,255,0.08)",
+                color: "#f8fafc",
+                fontSize: 13,
+                fontWeight: 700,
+                textDecoration: "none",
+                backdropFilter: "blur(8px)"
+              }}
+            >
+              Luật tương thích ↗
+            </Link>
+            <button
+              type="button"
+              className="ai-studio-hero-cta"
+              onClick={refreshAll}
+              disabled={Boolean(actionLoading) || refreshing}
+            >
+              <svg className={refreshing ? "ai-studio-spin" : ""} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                <path d="M21 3v5h-5" />
+              </svg>
+              <span>{refreshing ? "Đang cập nhật..." : "Làm Mới Inbox"}</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="ai-studio-kpi-grid">
+          <button
+            type="button"
+            className="ai-studio-kpi hd-kpi-btn"
+            style={{ "--kpi-accent": "#38bdf8" }}
+            onClick={() => setStatusFilter("OPEN")}
+          >
+            <div className="ai-studio-kpi-head">
+              <span className="ai-studio-kpi-label">Ticket mới</span>
+              <span className="ai-studio-kpi-icon">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>
+              </span>
+            </div>
+            <div className="ai-studio-kpi-value" style={{ color: kpiStats.open > 0 ? "#7dd3fc" : "#ffffff" }}>
+              {kpiStats.open}
+            </div>
+            <div className="ai-studio-kpi-hint">Ưu tiên tiếp nhận xử lý</div>
+          </button>
+
+          <button
+            type="button"
+            className="ai-studio-kpi hd-kpi-btn"
+            style={{ "--kpi-accent": "#fbbf24" }}
+            onClick={() => setStatusFilter("IN_PROGRESS")}
+          >
+            <div className="ai-studio-kpi-head">
+              <span className="ai-studio-kpi-label">Đang xử lý</span>
+              <span className="ai-studio-kpi-icon">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+              </span>
+            </div>
+            <div className="ai-studio-kpi-value">{kpiStats.inProgress}</div>
+            <div className="ai-studio-kpi-hint">Đội kỹ thuật đang phụ trách</div>
+          </button>
+
+          <div className="ai-studio-kpi" style={{ "--kpi-accent": "#a78bfa" }}>
+            <div className="ai-studio-kpi-head">
+              <span className="ai-studio-kpi-label">Chờ phản hồi khách</span>
+              <span className="ai-studio-kpi-icon">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+              </span>
+            </div>
+            <div className="ai-studio-kpi-value">{kpiStats.waitingCustomer}</div>
+            <div className="ai-studio-kpi-hint">Đã gửi hướng dẫn khắc phục</div>
+          </div>
+
+          <div className="ai-studio-kpi" style={{ "--kpi-accent": "#34d399" }}>
+            <div className="ai-studio-kpi-head">
+              <span className="ai-studio-kpi-label">Giải quyết hôm nay</span>
+              <span className="ai-studio-kpi-icon">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><polyline points="20 6 9 17 4 12" /></svg>
+              </span>
+            </div>
+            <div className="ai-studio-kpi-value" style={{ color: "#6ee7b7" }}>{kpiStats.resolvedToday}</div>
+            <div className="ai-studio-kpi-hint">Hoàn tất trong ngày</div>
+          </div>
+        </div>
+      </section>
+
+      {errorMessage ? <div className="hd-alert hd-alert--error">{errorMessage}</div> : null}
+      {successMessage ? <div className="hd-alert hd-alert--success">{successMessage}</div> : null}
+
+      {/* ==================== SPLIT HELPDESK WORKSPACE ==================== */}
+      <div className="hd-workspace">
+        <aside className="hd-inbox">
+          <div className="hd-inbox-head">
+            <div className="hd-row-between">
+              <div>
+                <h2>Inbox Ticket</h2>
+                <p>Chọn ticket để mở khung chẩn đoán &amp; hội thoại.</p>
+              </div>
+              <span className="hd-pill hd-pill--info">{visibleTickets.length}</span>
+            </div>
+
+            {/* Scope segmented switch */}
+            <div className="hd-scope-seg" role="tablist" aria-label="Phạm vi ticket">
+              {SCOPE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  className={`hd-scope-btn${scope === opt.value ? " is-active" : ""}`}
+                  onClick={() => setScope(opt.value)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Search */}
+            <div className="cat-search-wrap" style={{ width: "100%", minWidth: 0 }}>
+              <svg className="cat-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input
+                className="cat-input cat-input--search"
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder="Tìm #ticket, tiêu đề, khách hàng..."
+                aria-label="Tìm ticket"
+              />
+            </div>
+
+            {/* Non-truncated 2-col dropdowns */}
+            <div className="hd-filter-row">
+              <select className="hd-select" value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} aria-label="Lọc ưu tiên">
+                <option value="">Ưu tiên: Tất cả</option>
+                {PRIORITY_OPTIONS.map((p) => (
+                  <option key={p} value={p}>{getTicketPriorityMeta(p).label}</option>
                 ))}
               </select>
-              <select className="tech-ticket-select" value={sortBy} onChange={(event) => setSortBy(event.target.value)} aria-label="Sắp xếp ticket">
-                {SORT_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
+              <select className="hd-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="Sắp xếp ticket">
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
             </div>
-            <div className="tech-ticket-filter-grid">
-              <select className="tech-ticket-select" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Lọc trạng thái">
-                <option value="">Tất cả trạng thái</option>
-                {STATUS_OPTIONS.map((status) => (
-                  <option key={status} value={status}>
-                    {getTicketStatusMeta(status).label}
-                  </option>
-                ))}
-              </select>
-              <select className="tech-ticket-select" value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)} aria-label="Lọc ưu tiên">
-                <option value="">Tất cả ưu tiên</option>
-                {PRIORITY_OPTIONS.map((priority) => (
-                  <option key={priority} value={priority}>
-                    {getTicketPriorityMeta(priority).label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="tech-ticket-tabs" role="tablist" aria-label="Quick filters">
+
+            {/* Status quick pills */}
+            <div className="hd-quick-tabs" role="tablist" aria-label="Lọc trạng thái nhanh">
               {[
                 { value: "", label: "Tất cả" },
                 { value: "OPEN", label: "Mới" },
                 { value: "IN_PROGRESS", label: "Đang xử lý" },
-                { value: "RESOLVED", label: "Đã giải quyết" }
+                { value: "RESOLVED", label: "Đã giải quyết" },
+                { value: "CLOSED", label: "Đã đóng" }
               ].map((tab) => (
                 <button
                   key={tab.value || "all"}
                   type="button"
-                  className={`tech-ticket-tab${statusFilter === tab.value ? " is-active" : ""}`}
+                  className={`hd-quick-tab${statusFilter === tab.value ? " is-active" : ""}`}
                   onClick={() => setStatusFilter(tab.value)}
                 >
                   {tab.label}
@@ -1027,14 +1023,11 @@ export function TechTicketsPage() {
             </div>
           </div>
 
-          <div className="tech-ticket-list">
+          <div className="hd-inbox-list">
             {loading ? (
               <TicketListSkeleton />
             ) : visibleTickets.length === 0 ? (
-              <div className="tech-ticket-empty">
-                <div className="tech-ticket-empty__icon">⌂</div>
-                Không có ticket phù hợp với bộ lọc hiện tại.
-              </div>
+              <div className="hd-empty">Không có ticket nào khớp bộ lọc hiện tại.</div>
             ) : (
               visibleTickets.map((ticket) => {
                 const statusMeta = getTicketStatusMeta(ticket.status);
@@ -1046,25 +1039,28 @@ export function TechTicketsPage() {
                   <button
                     key={ticket.id}
                     type="button"
-                    className={`tech-ticket-inbox-item${isActive ? " tech-ticket-inbox-item--active" : ""}`}
+                    className={`hd-ticket-item${isActive ? " is-active" : ""}`}
                     onClick={() => setSelectedTicketId(ticket.id)}
                   >
-                    <div className="tech-ticket-inbox-item__top">
-                      <span className="tech-ticket-id">#{ticket.id}</span>
-                      <div className="tech-ticket-inline">
-                        {ticket.attachmentMentions.length ? <span className="tech-ticket-badge">{ticket.attachmentMentions.length} tệp</span> : null}
-                        {ticket.needsTechAttention ? <span className="tech-ticket-badge tech-ticket-badge--warn">Tin nhắn mới</span> : null}
-                        <span className={`tech-ticket-priority tech-ticket-priority--${priorityMeta.tone}`}>{priorityMeta.label}</span>
+                    <div className="hd-row-between">
+                      <span className="hd-ticket-id">#{ticket.id}</span>
+                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        {ticket.attachmentMentions.length > 0 && (
+                          <span className="hd-pill hd-pill--neutral">{ticket.attachmentMentions.length} tệp</span>
+                        )}
+                        {ticket.needsTechAttention && (
+                          <span className="hd-pill hd-pill--warning">Tin mới</span>
+                        )}
+                        <span className={`hd-pill hd-pill--${priorityMeta.tone}`}>{priorityMeta.label}</span>
                       </div>
                     </div>
-                    <div className="tech-ticket-title">{normalizeTicketText(ticket.title)}</div>
-                    <div className="tech-ticket-sub">{ticket.reporter?.fullName || ticket.reporter?.email || "Khách hàng"}</div>
-                    <div className="tech-ticket-inline">
-                      <span className={`tech-ticket-pill tech-ticket-pill--${statusMeta.tone}`}>{statusMeta.label}</span>
-                      <span className="tech-ticket-sub">{formatDateTime(lastMessage?.createdAt || ticket.createdAt)}</span>
-                    </div>
-                    <div className="tech-ticket-sub">
-                      {ticket.assignee?.fullName ? `Phụ trách: ${ticket.assignee.fullName}` : "Chưa có kỹ thuật nhận xử lý"}
+
+                    <div className="hd-ticket-title">{normalizeTicketText(ticket.title)}</div>
+                    <div className="hd-ticket-sub">{ticket.reporter?.fullName || ticket.reporter?.email || "Khách hàng"}</div>
+
+                    <div className="hd-row-between" style={{ paddingTop: 6, borderTop: "1px solid #f1f5f9", marginTop: 2 }}>
+                      <span className={`hd-pill hd-pill--${statusMeta.tone}`}>{statusMeta.label}</span>
+                      <span className="hd-ticket-sub" style={{ fontSize: 11 }}>{formatDateTime(lastMessage?.createdAt || ticket.createdAt)}</span>
                     </div>
                   </button>
                 );
@@ -1073,407 +1069,377 @@ export function TechTicketsPage() {
           </div>
         </aside>
 
-        <main className="tech-ticket-canvas">
+        <main className="hd-canvas">
           {detailLoading ? (
             <WorkspaceSkeleton />
           ) : !selectedTicketResolved ? (
-            <div className="tech-ticket-empty">
-              <div className="tech-ticket-empty__icon">🎫</div>
-              Chọn một ticket từ inbox để mở workspace xử lý.
+            <div className="hd-card">
+              <div className="hd-empty">
+                <strong style={{ display: "block", color: "#0f172a", marginBottom: 4, fontSize: 15 }}>Chưa chọn ticket</strong>
+                Chọn một ticket từ danh sách Inbox bên trái để mở workspace hỗ trợ kỹ thuật.
+              </div>
             </div>
           ) : (
             <>
-              <section className="tech-ticket-detail-head">
-                <div className="tech-ticket-detail-head__top">
-                  <div>
-                    <div className="tech-ticket-meta-cluster">
-                      <span className={`tech-ticket-pill tech-ticket-pill--${selectedStatusMeta.tone}`}>{selectedStatusMeta.label}</span>
-                      <span className={`tech-ticket-priority tech-ticket-priority--${selectedPriorityMeta.tone}`}>{selectedPriorityMeta.label}</span>
-                      <span className="tech-ticket-pill tech-ticket-pill--neutral">
+              {/* ==================== OBSIDIAN TICKET COMMAND HEADER ==================== */}
+              <section className="hd-detail-hero">
+                <div className="hd-detail-hero__top">
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center" }}>
+                      <span className={`hd-pill hd-pill--${selectedStatusMeta.tone}`}>{selectedStatusMeta.label}</span>
+                      <span className={`hd-pill hd-pill--${selectedPriorityMeta.tone}`}>{selectedPriorityMeta.label}</span>
+                      <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: "rgba(255,255,255,0.1)", color: "#e2e8f0", border: "1px solid rgba(255,255,255,0.16)" }}>
                         {selectedTicketResolved.assignee?.fullName ? `Phụ trách: ${selectedTicketResolved.assignee.fullName}` : "Chưa có kỹ thuật nhận"}
                       </span>
                     </div>
                     <h2>{normalizeTicketText(selectedTicketResolved.title)}</h2>
                     <p>
-                      Ticket #{selectedTicketResolved.id} · tạo lúc {formatDateTime(selectedTicketResolved.createdAt)} · cập nhật {formatDateTime(selectedTicketResolved.updatedAt)}
+                      Ticket #{selectedTicketResolved.id} · Tạo lúc {formatDateTime(selectedTicketResolved.createdAt)} · Cập nhật {formatDateTime(selectedTicketResolved.updatedAt)}
                     </p>
                   </div>
-                  <div className="tech-ticket-detail-actions">
+
+                  <div className="hd-detail-actions">
                     <button
                       type="button"
-                      className="tech-ticket-btn tech-ticket-btn--ghost"
+                      className="hd-btn hd-btn--glass"
                       onClick={handleAssignToMe}
                       disabled={!canAssignSelf || Boolean(actionLoading)}
-                      title={canAssignSelf ? "Nhận ticket này để xử lý" : "Ticket đã có người nhận hoặc không hợp lệ"}
+                      title={canAssignSelf ? "Nhận ticket này để xử lý" : "Ticket đã có người nhận"}
                     >
                       Nhận xử lý
                     </button>
                     <button
                       type="button"
-                      className="tech-ticket-btn tech-ticket-btn--ghost"
+                      className="hd-btn hd-btn--glass"
                       onClick={setNeedMoreInfoTemplate}
                       disabled={selectedTicketResolved.status === "CLOSED"}
-                      title="Chèn nhanh phản hồi cần thêm thông tin"
                     >
                       Cần thêm thông tin
                     </button>
                     <button
                       type="button"
-                      className="tech-ticket-btn tech-ticket-btn--ghost"
+                      className="hd-btn hd-btn--glass"
                       onClick={() => replyTextareaRef.current?.focus()}
                       disabled={selectedTicketResolved.status === "CLOSED"}
-                      title="Chuyển nhanh xuống vùng hội thoại để phản hồi"
                     >
-                      Gửi phản hồi
+                      Phản hồi nhanh
                     </button>
                     <button
                       type="button"
-                      className="tech-ticket-btn tech-ticket-btn--primary"
+                      className="hd-btn hd-btn--emerald"
                       onClick={handleResolve}
                       disabled={!isMine || ["RESOLVED", "CLOSED"].includes(selectedTicketResolved.status) || Boolean(actionLoading)}
                       title={isMine ? "Đánh dấu ticket đã xử lý xong" : "Chỉ kỹ thuật đang phụ trách mới có thể giải quyết ticket"}
                     >
-                      Đã xử lý xong
+                      ✓ Đã xử lý xong
                     </button>
                     <button
                       type="button"
-                      className="tech-ticket-btn tech-ticket-btn--secondary"
+                      className="hd-btn hd-btn--light"
                       onClick={handleTransferOrUnassign}
                       disabled={!selectedTicketResolved.assignedToId || selectedTicketResolved.status === "CLOSED" || Boolean(actionLoading)}
-                      title={
-                        !selectedTicketResolved.assignedToId
-                          ? "Ticket đang ở hàng chờ chung"
-                          : isMine
-                            ? "Trả ticket về hàng chờ chung để kỹ thuật viên khác tiếp nhận"
-                            : "Nhận tiếp quản ticket này từ kỹ thuật viên khác"
-                      }
                     >
                       {isMine ? "Trả về hàng chờ" : "Nhận tiếp quản"}
                     </button>
                     <button
                       type="button"
-                      className="tech-ticket-btn tech-ticket-btn--danger"
+                      className="hd-btn hd-btn--danger"
                       onClick={handleClose}
                       disabled={selectedTicketResolved.status === "CLOSED" || Boolean(actionLoading)}
-                      title={selectedTicketResolved.status === "CLOSED" ? "Ticket đã đóng" : "Đóng ticket sau khi đã xử lý xong"}
                     >
                       Đóng ticket
                     </button>
                   </div>
                 </div>
 
-                <div className="tech-ticket-progress" aria-label="Trạng thái xử lý ticket">
+                {/* Compact 6-step Progress Track */}
+                <div className="hd-progress-track" aria-label="Tiến độ xử lý ticket">
                   {stageSteps.map((step, index) => {
-                    const visualState = step.current ? "current" : step.active ? "completed" : "pending";
-                    const stateLabel = step.current ? "Đang xử lý" : step.active ? "Hoàn tất" : "Chưa tới";
-                    const stateIcon = step.current ? index + 1 : step.active ? "✓" : index + 1;
-
+                    const cls = step.current ? "is-current" : step.active ? "is-done" : "is-pending";
                     return (
-                    <article
-                      key={step.key}
-                      className={`tech-ticket-progress-step tech-ticket-progress-step--${visualState}`}
-                    >
-                      <div className="tech-ticket-progress-step__top">
-                        <span className="tech-ticket-progress-step__icon">{stateIcon}</span>
-                        <span className="tech-ticket-progress-step__state">{stateLabel}</span>
-                      </div>
-                      <strong>{step.label}</strong>
-                      <span>{step.helper}</span>
-                      <small>{step.timestamp ? formatDateTime(step.timestamp) : "Chưa có mốc thời gian"}</small>
-                    </article>
+                      <article key={step.key} className={`hd-step ${cls}`}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                          <span className="hd-step__dot">{step.active && !step.current ? "✓" : index + 1}</span>
+                          <strong>{step.label}</strong>
+                        </div>
+                        <span title={step.helper}>{step.helper}</span>
+                        <small>{step.timestamp ? formatDateTime(step.timestamp) : "—"}</small>
+                      </article>
                     );
                   })}
                 </div>
               </section>
 
-              <div className="tech-ticket-grid">
-                <div className="tech-ticket-stack">
-                  <section className="tech-ticket-card">
-                    <div className="tech-ticket-section__title">
+              {/* ==================== WORKSPACE DETAIL GRID ==================== */}
+              <div className="hd-main-grid">
+                <div className="hd-col-stack">
+                  {/* Summary */}
+                  <section className="hd-card">
+                    <div className="hd-card-head">
                       <div>
-                        <h3>Tóm tắt ticket</h3>
-                        <p>Tầng thông tin chính để kỹ thuật nắm nhanh tình trạng và khách hàng liên quan.</p>
+                        <h3>Tóm Tắt Yêu Cầu</h3>
+                        <p>Thông tin khách hàng, phụ trách kỹ thuật và mức ưu tiên.</p>
                       </div>
                     </div>
-
-                    <div className="tech-ticket-data-grid">
-                      <article className="tech-ticket-data-card">
+                    <div className="hd-data-grid">
+                      <div className="hd-data-tile">
                         <span>Khách hàng</span>
                         <strong>{selectedTicketResolved.reporter?.fullName || "Khách hàng"}</strong>
-                      </article>
-                      <article className="tech-ticket-data-card">
+                      </div>
+                      <div className="hd-data-tile">
                         <span>Email liên hệ</span>
                         <strong>{selectedTicketResolved.reporter?.email || "Chưa có"}</strong>
-                      </article>
-                      <article className="tech-ticket-data-card">
-                        <span>Người xử lý</span>
+                      </div>
+                      <div className="hd-data-tile">
+                        <span>Người phụ trách</span>
                         <strong>{selectedTicketResolved.assignee?.fullName || "Chưa phân công"}</strong>
-                      </article>
-                      <article className="tech-ticket-data-card">
+                      </div>
+                      <div className="hd-data-tile">
                         <span>Mức ưu tiên</span>
                         <strong>{selectedPriorityMeta.label}</strong>
-                      </article>
+                      </div>
                     </div>
                   </section>
 
-                  <section className="tech-ticket-card">
-                    <div className="tech-ticket-section__title">
+                  {/* Error Description */}
+                  <section className="hd-card">
+                    <div className="hd-card-head">
                       <div>
-                        <h3>Mô tả lỗi</h3>
-                        <p>Nội dung khách hàng gửi ban đầu và bối cảnh lỗi.</p>
+                        <h3>Mô Tả Lỗi Từ Khách Hàng</h3>
+                        <p>Nội dung phản ánh ban đầu và bối cảnh phát sinh sự cố.</p>
                       </div>
                     </div>
-                    <div className="tech-ticket-rich-text">
+                    <div style={{ padding: "13px 15px", borderRadius: 12, background: "#f8fafc", border: "1px solid #e2e8f0", color: "#1e293b", fontSize: 13.5, lineHeight: 1.65, whiteSpace: "pre-wrap" }}>
                       {normalizeTicketText(selectedTicketResolved.description) || "Khách hàng chưa mô tả chi tiết."}
                     </div>
                   </section>
 
-                  <section className="tech-ticket-card">
-                    <div className="tech-ticket-section__title">
+                  {/* Support Thread */}
+                  <section className="hd-card">
+                    <div className="hd-card-head">
                       <div>
-                        <h3>Hội thoại hỗ trợ</h3>
-                        <p>Phản hồi khách hàng ngay trong ticket, không reload toàn trang.</p>
+                        <h3>Hội Thoại Hỗ Trợ</h3>
+                        <p>Trao đổi trực tiếp thời gian thực với khách hàng, hỗ trợ gửi tệp đính kèm.</p>
                       </div>
-                      <div className="tech-ticket-thread__meta">
-                        <span className="tech-ticket-badge">
-                          {selectedTicketResolved.messages?.length || 0} tin nhắn
-                        </span>
-                        {selectedTicketResolved.status === "CLOSED" ? <span className="tech-ticket-badge tech-ticket-badge--danger">Đã khóa hội thoại</span> : null}
-                      </div>
-                    </div>
-
-                    <div className="tech-ticket-thread">
-                      <div className="tech-ticket-messages" ref={messageListRef}>
-                        {(selectedTicketResolved.messages || []).length === 0 ? (
-                          <div className="tech-ticket-empty">Chưa có hội thoại phát sinh.</div>
-                        ) : (
-                          (selectedTicketResolved.messages || []).map((message) => {
-                            const isTech = isTechSender(message.sender?.role);
-                            const isInternal = String(message.visibility || "PUBLIC").toUpperCase() === "INTERNAL";
-                            const attachmentMentions = extractAttachmentMentions(message.message);
-                            return (
-                              <article key={message.id} className={`tech-ticket-message-row${isTech ? " tech-ticket-message-row--tech" : ""}`}>
-                                <div className="tech-ticket-message-meta">
-                                  {message.sender?.fullName || message.sender?.email || "Người dùng"} · {formatTime(message.createdAt)}
-                                  {isInternal ? (
-                                    <span
-                                      style={{
-                                        marginLeft: 8,
-                                        padding: "2px 8px",
-                                        borderRadius: 999,
-                                        background: "#fef3c7",
-                                        color: "#b45309",
-                                        fontSize: 11,
-                                        fontWeight: 900
-                                      }}
-                                    >
-                                      🔒 Ghi chú nội bộ (Khách không thấy)
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div
-                                  className={`tech-ticket-message-bubble${isTech ? " tech-ticket-message-bubble--tech" : ""}`}
-                                  style={
-                                    isInternal
-                                      ? {
-                                          background: "#fffbeb",
-                                          borderColor: "#fcd34d",
-                                          color: "#78350f"
-                                        }
-                                      : undefined
-                                  }
-                                >
-                                  {normalizeTicketText(message.message) || "Khách hàng đã gửi metadata tệp đính kèm."}
-                                  {attachmentMentions.length ? (
-                                    <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-                                      {attachmentMentions.map((attachment) => {
-                                        const fileUrl = getAttachmentUrl(attachment);
-                                        return (
-                                          <div key={attachment.id} className="tech-ticket-attachment">
-                                            <TicketAttachmentPreview attachment={attachment} compact />
-                                            <div style={{ minWidth: 0 }}>
-                                              <strong style={{ display: "block", color: "#1a1625" }}>{attachment.name}</strong>
-                                              <div className="tech-ticket-rich-text--soft">
-                                                {attachment.sizeLabel || "Không có dung lượng"}
-                                              </div>
-                                              {fileUrl ? (
-                                                  <div className="tech-ticket-attachment__actions">
-                                                    <a href={fileUrl} target="_blank" rel="noreferrer">Xem</a>
-                                                    <button type="button" onClick={() => downloadAttachment(attachment)}>Tải xuống</button>
-                                                  </div>
-                                              ) : null}
-                                            </div>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              </article>
-                            );
-                          })
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        <span className="hd-pill hd-pill--info">{selectedTicketResolved.messages?.length || 0} tin nhắn</span>
+                        {selectedTicketResolved.status === "CLOSED" && (
+                          <span className="hd-pill hd-pill--danger">Đã khóa</span>
                         )}
                       </div>
+                    </div>
 
-                      {selectedTicketResolved.status !== "CLOSED" ? (
-                        <>
-                          <div className="tech-ticket-quick-replies">
-                            {TICKET_REPLY_TEMPLATES.map((text) => (
-                              <button key={text} type="button" className="tech-ticket-quick-reply" onClick={() => setReplyMessage(text)}>
-                                {text}
-                              </button>
-                            ))}
-                          </div>
-
-                          <div className="tech-ticket-reply-grid">
-                            <div style={{ display: "grid", gap: 10 }}>
-                              <textarea
-                                ref={replyTextareaRef}
-                                className="tech-ticket-textarea"
-                                value={replyMessage}
-                                onChange={(event) => setReplyMessage(event.target.value)}
-                                placeholder={`Phản hồi khách hàng với tư cách ${techName}...`}
-                                disabled={Boolean(actionLoading)}
-                              />
-                              <div className="tech-ticket-inline">
-                                <input
-                                  ref={replyFileInputRef}
-                                  type="file"
-                                  multiple
-                                  accept=".jpg,.jpeg,.png,.gif,.mp4,.webm,.mov,.pdf,image/*,video/*,application/pdf"
-                                  style={{ display: "none" }}
-                                  onChange={(event) => {
-                                    const files = Array.from(event.target.files || []).slice(0, 5);
-                                    setReplyFiles(files);
-                                  }}
-                                />
-                                <button
-                                  type="button"
-                                  className="tech-ticket-btn tech-ticket-btn--secondary"
-                                  onClick={() => replyFileInputRef.current?.click()}
-                                  disabled={Boolean(actionLoading)}
-                                  title="Đính kèm ảnh, video hoặc tài liệu PDF (tối đa 5 tệp)"
-                                >
-                                  📎 Đính kèm tệp {replyFiles.length > 0 ? `(${replyFiles.length})` : ""}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="tech-ticket-btn tech-ticket-btn--primary"
-                                  onClick={handleSendReply}
-                                  disabled={(!replyMessage.trim() && replyFiles.length === 0) || actionLoading === "reply"}
-                                >
-                                  {actionLoading === "reply" ? "Đang gửi..." : "Gửi phản hồi"}
-                                </button>
-                              </div>
-                              {replyFiles.length > 0 ? (
-                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12, color: "#5b21b6", fontWeight: 700 }}>
-                                  {replyFiles.map((f) => (
-                                    <span key={`${f.name}-${f.size}`} style={{ padding: "4px 10px", background: "#f3e8ff", borderRadius: 999 }}>
-                                      {f.name}
-                                    </span>
-                                  ))}
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setReplyFiles([]);
-                                      if (replyFileInputRef.current) replyFileInputRef.current.value = "";
-                                    }}
-                                    style={{ border: "none", background: "transparent", color: "#dc2626", cursor: "pointer", fontWeight: 800 }}
-                                  >
-                                    ✕ Xóa tệp
-                                  </button>
-                                </div>
-                              ) : null}
-                            </div>
-
-                            <div className="tech-ticket-reply-sidebar">
-                              <div className="tech-ticket-status-selects">
-                                <select
-                                  className="tech-ticket-select"
-                                  value={selectedTicketResolved.status}
-                                  onChange={(event) => handleAction("status", { status: event.target.value })}
-                                  disabled={Boolean(actionLoading)}
-                                  aria-label="Chuyển trạng thái ticket"
-                                >
-                                  {STATUS_OPTIONS.map((status) => (
-                                    <option key={status} value={status}>
-                                      {getTicketStatusMeta(status).label}
-                                    </option>
-                                  ))}
-                                </select>
-                                <select
-                                  className="tech-ticket-select"
-                                  value={selectedTicketResolved.priority}
-                                  onChange={(event) => handleAction("priority", { priority: event.target.value })}
-                                  disabled={Boolean(actionLoading)}
-                                  aria-label="Cập nhật độ ưu tiên"
-                                >
-                                  {PRIORITY_OPTIONS.map((priority) => (
-                                    <option key={priority} value={priority}>
-                                      {getTicketPriorityMeta(priority).label}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                              <div className="tech-ticket-note-caption">
-                                Thao tác đổi trạng thái hoặc ưu tiên sẽ cập nhật ngay vào inbox mà không reload toàn trang.
-                              </div>
-                            </div>
-                          </div>
-                        </>
+                    <div className="hd-messages" ref={messageListRef}>
+                      {(selectedTicketResolved.messages || []).length === 0 ? (
+                        <div className="hd-empty">Chưa có hội thoại phát sinh.</div>
                       ) : (
-                        <div className="tech-ticket-empty">Ticket đã đóng. Không thể gửi thêm phản hồi.</div>
+                        (selectedTicketResolved.messages || []).map((message) => {
+                          const isTech = isTechSender(message.sender?.role);
+                          const isInternal = String(message.visibility || "PUBLIC").toUpperCase() === "INTERNAL";
+                          const attachmentMentions = extractAttachmentMentions(message.message);
+
+                          return (
+                            <article key={message.id} className={`hd-msg-row${isTech ? " is-tech" : ""}`}>
+                              <div className="hd-msg-meta">
+                                <span>{message.sender?.fullName || message.sender?.email || "Người dùng"} · {formatTime(message.createdAt)}</span>
+                                {isInternal && (
+                                  <span style={{ padding: "2px 8px", borderRadius: 999, background: "#fef3c7", color: "#b45309", fontSize: 10.5, fontWeight: 800 }}>
+                                    Ghi chú nội bộ (Ẩn với khách)
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className={`hd-msg-bubble${isInternal ? " is-internal" : isTech ? " is-tech" : ""}`}>
+                                {normalizeTicketText(message.message) || "Khách hàng đã gửi tệp đính kèm."}
+                                {attachmentMentions.length > 0 && (
+                                  <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                                    {attachmentMentions.map((att) => {
+                                      const fileUrl = getAttachmentUrl(att);
+                                      return (
+                                        <div key={att.id} className="hd-att-item">
+                                          <TicketAttachmentPreview attachment={att} compact />
+                                          <div style={{ minWidth: 0 }}>
+                                            <strong style={{ display: "block", fontSize: 12.5, color: "#0f172a" }}>{att.name}</strong>
+                                            <span style={{ fontSize: 11.5, color: "#64748b" }}>{att.sizeLabel || "Tệp đính kèm"}</span>
+                                            {fileUrl && (
+                                              <div style={{ display: "flex", gap: 6, marginTop: 5 }}>
+                                                <a href={fileUrl} target="_blank" rel="noreferrer" className="cat-warranty-chip" style={{ textDecoration: "none" }}>Xem</a>
+                                                <button type="button" className="cat-warranty-chip" onClick={() => downloadAttachment(att)}>Tải xuống</button>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            </article>
+                          );
+                        })
                       )}
                     </div>
+
+                    {selectedTicketResolved.status !== "CLOSED" ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingTop: 12, borderTop: "1px solid #f1f5f9" }}>
+                        <div className="cat-warranty-presets" style={{ marginTop: 0 }}>
+                          {TICKET_REPLY_TEMPLATES.map((text) => (
+                            <button key={text} type="button" className="cat-warranty-chip" onClick={() => setReplyMessage(text)}>
+                              {text}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="hd-reply-grid">
+                          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                            <textarea
+                              ref={replyTextareaRef}
+                              className="cat-input"
+                              style={{ minHeight: 108, resize: "vertical", fontFamily: "inherit" }}
+                              value={replyMessage}
+                              onChange={(event) => setReplyMessage(event.target.value)}
+                              placeholder={`Phản hồi khách hàng với tư cách ${techName}...`}
+                              disabled={Boolean(actionLoading)}
+                            />
+                            <div className="hd-row-between">
+                              <input
+                                ref={replyFileInputRef}
+                                type="file"
+                                multiple
+                                accept=".jpg,.jpeg,.png,.gif,.mp4,.webm,.mov,.pdf,image/*,video/*,application/pdf"
+                                style={{ display: "none" }}
+                                onChange={(event) => {
+                                  const files = Array.from(event.target.files || []).slice(0, 5);
+                                  setReplyFiles(files);
+                                }}
+                              />
+                              <button
+                                type="button"
+                                className="ai-action-btn ai-action-btn--ghost"
+                                onClick={() => replyFileInputRef.current?.click()}
+                                disabled={Boolean(actionLoading)}
+                              >
+                                Đính kèm tệp {replyFiles.length > 0 ? `(${replyFiles.length})` : ""}
+                              </button>
+                              <button
+                                type="button"
+                                className="hd-btn hd-btn--primary"
+                                onClick={handleSendReply}
+                                disabled={(!replyMessage.trim() && replyFiles.length === 0) || actionLoading === "reply"}
+                              >
+                                {actionLoading === "reply" ? "Đang gửi..." : "Gửi phản hồi"}
+                              </button>
+                            </div>
+
+                            {replyFiles.length > 0 && (
+                              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                                {replyFiles.map((f) => (
+                                  <span key={`${f.name}-${f.size}`} className="hd-pill hd-pill--info">{f.name}</span>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setReplyFiles([]);
+                                    if (replyFileInputRef.current) replyFileInputRef.current.value = "";
+                                  }}
+                                  style={{ border: "none", background: "transparent", color: "#dc2626", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                                >
+                                  ✕ Xóa tệp
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: 12, borderRadius: 12, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                            <div>
+                              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", marginBottom: 4 }}>
+                                Trạng thái
+                              </label>
+                              <select
+                                className="hd-select"
+                                value={selectedTicketResolved.status}
+                                onChange={(event) => handleAction("status", { status: event.target.value })}
+                                disabled={Boolean(actionLoading)}
+                              >
+                                {STATUS_OPTIONS.map((status) => (
+                                  <option key={status} value={status}>{getTicketStatusMeta(status).label}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", marginBottom: 4 }}>
+                                Độ ưu tiên
+                              </label>
+                              <select
+                                className="hd-select"
+                                value={selectedTicketResolved.priority}
+                                onChange={(event) => handleAction("priority", { priority: event.target.value })}
+                                disabled={Boolean(actionLoading)}
+                              >
+                                {PRIORITY_OPTIONS.map((priority) => (
+                                  <option key={priority} value={priority}>{getTicketPriorityMeta(priority).label}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <span style={{ fontSize: 11.5, color: "#64748b", lineHeight: 1.45 }}>
+                              Thay đổi trạng thái hoặc ưu tiên sẽ đồng bộ tức thì vào Inbox.
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="hd-empty">Ticket đã đóng. Không thể gửi thêm phản hồi.</div>
+                    )}
                   </section>
                 </div>
 
-                <aside className="tech-ticket-side-stack">
-                  <section className="tech-ticket-card">
-                    <div className="tech-ticket-section__title">
+                {/* ==================== RIGHT CONTEXT SIDEBAR ==================== */}
+                <aside className="hd-col-stack">
+                  <section className="hd-card">
+                    <div className="hd-card-head">
                       <div>
-                        <h3>Tệp đính kèm</h3>
-                        <p>Hiển thị các tệp khách đã khai báo trong ticket hiện có.</p>
+                        <h3>Tệp Đính Kèm ({selectedTicketResolved.attachmentMentions.length})</h3>
+                        <p>Ảnh chụp lỗi, video hoặc nhật ký do khách gửi.</p>
                       </div>
                     </div>
-                    {selectedTicketResolved.attachmentMentions.length ? (
-                      <div className="tech-ticket-attachments">
-                        {selectedTicketResolved.attachmentMentions.map((attachment) => {
-                          const fileUrl = getAttachmentUrl(attachment);
+                    {selectedTicketResolved.attachmentMentions.length > 0 ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {selectedTicketResolved.attachmentMentions.map((att) => {
+                          const fileUrl = getAttachmentUrl(att);
                           return (
-                            <article key={attachment.id} className="tech-ticket-attachment">
-                              <TicketAttachmentPreview attachment={attachment} />
+                            <article key={att.id} className="hd-att-item">
+                              <TicketAttachmentPreview attachment={att} />
                               <div style={{ minWidth: 0 }}>
-                                <strong style={{ display: "block", color: "#1a1625" }}>{attachment.name}</strong>
-                                <div className="tech-ticket-rich-text--soft">
-                                  {attachment.sizeLabel || "Không có dung lượng"}
-                                  {fileUrl ? " · Có thể xem/tải xuống" : " · chỉ có metadata, chưa có file thật"}
+                                <strong style={{ display: "block", fontSize: 12.5, color: "#0f172a", wordBreak: "break-word" }}>{att.name}</strong>
+                                <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>
+                                  {att.sizeLabel || "Không rõ dung lượng"}
                                 </div>
-                                {fileUrl ? (
-                                  <div className="tech-ticket-attachment__actions">
-                                    <a href={fileUrl} target="_blank" rel="noreferrer">Xem tệp</a>
-                                    <button type="button" onClick={() => downloadAttachment(attachment)}>Tải xuống</button>
+                                {fileUrl && (
+                                  <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                                    <a href={fileUrl} target="_blank" rel="noreferrer" className="cat-warranty-chip" style={{ textDecoration: "none" }}>Xem tệp</a>
+                                    <button type="button" className="cat-warranty-chip" onClick={() => downloadAttachment(att)}>Tải xuống</button>
                                   </div>
-                                ) : null}
+                                )}
                               </div>
                             </article>
                           );
                         })}
                       </div>
                     ) : (
-                      <div className="tech-ticket-empty">Chưa có tệp đính kèm được đồng bộ trong ticket này.</div>
+                      <div className="hd-empty">Chưa có tệp đính kèm trong ticket này.</div>
                     )}
                   </section>
 
-                  <section className="tech-ticket-card">
-                    <div className="tech-ticket-section__title">
+                  <section className="hd-card">
+                    <div className="hd-card-head">
                       <div>
-                        <h3>Ghi chú nội bộ</h3>
-                        <p>Ghi chú chỉ hiển thị cho bộ phận kỹ thuật trên trình duyệt hiện tại.</p>
+                        <h3>Ghi Chú Nội Bộ</h3>
+                        <p>Đồng bộ hệ thống và ẩn hoàn toàn với khách hàng.</p>
                       </div>
                     </div>
                     <textarea
-                      className="tech-ticket-textarea"
+                      className="cat-input"
+                      style={{ minHeight: 96, resize: "vertical", fontFamily: "inherit" }}
                       value={internalNotes[selectedTicketResolved.id] || ""}
                       onChange={(event) =>
                         setInternalNotes((prev) => ({
@@ -1481,13 +1447,12 @@ export function TechTicketsPage() {
                           [selectedTicketResolved.id]: event.target.value
                         }))
                       }
-                      placeholder="Ví dụ: đã hướng dẫn khách cập nhật BIOS, chờ khách xác nhận lại..."
+                      placeholder="VD: Đã hướng dẫn khách cập nhật BIOS, chờ xác nhận lại..."
                     />
-                    <div className="tech-ticket-inline">
-                      <span className="tech-ticket-note-caption">Ghi chú nội bộ được đồng bộ lên hệ thống và ẩn hoàn toàn với khách hàng.</span>
+                    <div style={{ display: "flex", justifyContent: "flex-end" }}>
                       <button
                         type="button"
-                        className="tech-ticket-btn tech-ticket-btn--secondary"
+                        className="cat-btn-dark"
                         onClick={saveInternalNote}
                         disabled={Boolean(actionLoading)}
                       >
@@ -1496,20 +1461,20 @@ export function TechTicketsPage() {
                     </div>
                   </section>
 
-                  <section className="tech-ticket-card">
-                    <div className="tech-ticket-section__title">
+                  <section className="hd-card">
+                    <div className="hd-card-head">
                       <div>
-                        <h3>Lịch sử xử lý</h3>
-                        <p>Các mốc chính được suy ra từ trạng thái ticket và hội thoại hiện có.</p>
+                        <h3>Lịch Sử Xử Lý</h3>
+                        <p>Dòng thời gian cập nhật của ticket.</p>
                       </div>
                     </div>
-                    <div className="tech-ticket-activity">
+                    <div className="hd-activity-list">
                       {activityFeed.map((event) => (
-                        <article key={event.id} className="tech-ticket-activity-item">
-                          <div className="tech-ticket-activity-dot" />
+                        <article key={event.id} className="hd-activity-item">
+                          <div className="hd-activity-dot" />
                           <div>
-                            <strong style={{ display: "block", color: "#1a1625" }}>{event.label}</strong>
-                            <div className="tech-ticket-rich-text--soft">
+                            <strong style={{ display: "block", fontSize: 13, color: "#0f172a" }}>{event.label}</strong>
+                            <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>
                               {event.helper} · {formatDateTime(event.timestamp)}
                             </div>
                           </div>
@@ -1518,33 +1483,33 @@ export function TechTicketsPage() {
                     </div>
                   </section>
 
-                  <section className="tech-ticket-card">
-                    <div className="tech-ticket-section__title">
+                  <section className="hd-card">
+                    <div className="hd-card-head">
                       <div>
-                        <h3>Liên quan bảo hành</h3>
-                        <p>Chỉ hiển thị khi ticket có dấu hiệu liên quan serial hoặc bảo hành.</p>
+                        <h3>Liên Kết Bảo Hành</h3>
+                        <p>Tự động trích xuất Serial / Mã bảo hành từ nội dung.</p>
                       </div>
                     </div>
                     {ticketContext.isWarrantyRelated ? (
-                      <div className="tech-ticket-data-grid" style={{ gridTemplateColumns: "1fr" }}>
-                        <article className="tech-ticket-data-card">
+                      <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+                        <div className="hd-data-tile">
                           <span>Mã bảo hành</span>
-                          <strong>{ticketContext.warrantyCode || "Chưa có trong nội dung ticket"}</strong>
-                        </article>
-                        <article className="tech-ticket-data-card">
-                          <span>Serial</span>
-                          <strong>{ticketContext.serial || "Chưa có trong nội dung ticket"}</strong>
-                        </article>
-                        <article className="tech-ticket-data-card">
-                          <span>Mã đơn</span>
-                          <strong>{ticketContext.orderCode || "Chưa có trong nội dung ticket"}</strong>
-                        </article>
-                        <Link to="/tech/warranties" className="tech-ticket-btn tech-ticket-btn--secondary">
-                          Mở hồ sơ bảo hành
+                          <strong>{ticketContext.warrantyCode || "Chưa có trong nội dung"}</strong>
+                        </div>
+                        <div className="hd-data-tile">
+                          <span>Serial Number</span>
+                          <strong>{ticketContext.serial || "Chưa có trong nội dung"}</strong>
+                        </div>
+                        <div className="hd-data-tile">
+                          <span>Mã đơn hàng</span>
+                          <strong>{ticketContext.orderCode || "Chưa có trong nội dung"}</strong>
+                        </div>
+                        <Link to="/tech/warranties" className="ai-action-btn ai-action-btn--ghost" style={{ justifyContent: "center", textDecoration: "none" }}>
+                          Mở hồ sơ bảo hành ↗
                         </Link>
                       </div>
                     ) : (
-                      <div className="tech-ticket-empty">Ticket này hiện không có dữ liệu bảo hành hoặc serial để liên kết.</div>
+                      <div className="hd-empty">Ticket hiện không chứa dữ liệu Serial hoặc bảo hành liên kết.</div>
                     )}
                   </section>
                 </aside>
@@ -1554,25 +1519,46 @@ export function TechTicketsPage() {
         </main>
       </div>
 
+      {/* ==================== OBSIDIAN CLOSE TICKET MODAL ==================== */}
       {showCloseModal ? (
-        <div className="tech-ticket-modal" role="dialog" aria-modal="true" aria-labelledby="tech-close-ticket-title">
-          <div className="tech-ticket-modal__panel">
-            <h3 id="tech-close-ticket-title">Đóng ticket này?</h3>
-            <p>Ticket sẽ chuyển sang trạng thái đóng và khách hàng không thể tiếp tục trao đổi trong hội thoại hiện tại.</p>
-            <div className="tech-ticket-modal__actions">
-              <button type="button" className="tech-ticket-btn tech-ticket-btn--secondary" onClick={() => setShowCloseModal(false)}>
-                Quay lại
-              </button>
+        <div className="ai-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="tech-close-ticket-title" onClick={() => setShowCloseModal(false)}>
+          <div className="ai-chunk-modal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div className="ai-chunk-modal-head">
+              <div>
+                <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2px 9px", borderRadius: 999, background: "rgba(248,113,113,0.2)", color: "#fca5a5", letterSpacing: "0.05em", textTransform: "uppercase" }}>
+                  Kết thúc hỗ trợ
+                </span>
+                <h3 id="tech-close-ticket-title" style={{ margin: "6px 0 0", fontSize: 18, fontWeight: 800, color: "#ffffff" }}>
+                  Đóng Ticket #{selectedTicketResolved?.id}?
+                </h3>
+              </div>
               <button
                 type="button"
-                className="tech-ticket-btn tech-ticket-btn--danger"
-                onClick={() => {
-                  setShowCloseModal(false);
-                  handleAction("close", { status: "CLOSED" });
-                }}
+                onClick={() => setShowCloseModal(false)}
+                style={{ width: 34, height: 34, borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.1)", color: "#e2e8f0", cursor: "pointer" }}
               >
-                Xác nhận đóng
+                ✕
               </button>
+            </div>
+            <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+              <p style={{ margin: 0, fontSize: 13.5, color: "#475569", lineHeight: 1.6 }}>
+                Ticket sẽ chuyển sang trạng thái <strong>Đã đóng</strong> và khóa khung hội thoại để khách hàng không thể gửi thêm tin nhắn mới.
+              </p>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button type="button" className="cat-btn-clear" onClick={() => setShowCloseModal(false)}>
+                  Quay lại
+                </button>
+                <button
+                  type="button"
+                  className="hd-btn hd-btn--danger-solid"
+                  onClick={() => {
+                    setShowCloseModal(false);
+                    handleAction("close", { status: "CLOSED" });
+                  }}
+                >
+                  Xác nhận đóng ticket
+                </button>
+              </div>
             </div>
           </div>
         </div>

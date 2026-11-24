@@ -44,38 +44,48 @@ export async function streamAiResponse(endpoint, payload, { onChunk, onDone, onE
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
 
+    const processLine = (line) => {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith("data:")) return;
+      const jsonStr = trimmed.substring(5).trim();
+      if (jsonStr === "[DONE]") return;
+
+      try {
+        const parsed = JSON.parse(jsonStr);
+        if (parsed.type === "chunk" && parsed.text) {
+          if (typeof onChunk === "function") {
+            onChunk(parsed.text);
+          }
+        } else if (parsed.type === "done") {
+          if (typeof onDone === "function") {
+            onDone(parsed);
+          }
+        } else if (parsed.type === "error") {
+          if (typeof onError === "function") {
+            onError(new Error(parsed.error || "Lỗi xử lý AI"));
+          }
+        }
+      } catch (_jsonErr) {
+        // Bỏ qua nếu dòng JSON chưa trọn vẹn
+      }
+    };
+
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        buffer += decoder.decode();
+        if (buffer.trim()) {
+          for (const line of buffer.split("\n")) processLine(line);
+        }
+        break;
+      }
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop() || ""; // Giữ lại dòng cuối nếu chưa hoàn thiện
 
       for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith("data:")) continue;
-        const jsonStr = trimmed.substring(5).trim();
-        if (jsonStr === "[DONE]") continue;
-
-        try {
-          const parsed = JSON.parse(jsonStr);
-          if (parsed.type === "chunk" && parsed.text) {
-            if (typeof onChunk === "function") {
-              onChunk(parsed.text);
-            }
-          } else if (parsed.type === "done") {
-            if (typeof onDone === "function") {
-              onDone(parsed);
-            }
-          } else if (parsed.type === "error") {
-            if (typeof onError === "function") {
-              onError(new Error(parsed.error || "Lỗi xử lý AI"));
-            }
-          }
-        } catch (_jsonErr) {
-          // Bỏ qua nếu dòng JSON chưa trọn vẹn
-        }
+        processLine(line);
       }
     }
   } catch (err) {

@@ -50,6 +50,7 @@ router.put("/admin/prompts/:scope", verifyToken, requireRole(ROLES.ADMIN), ruleC
 router.post("/admin/test-filter", verifyToken, requireRole(ROLES.ADMIN), ruleController.testFilter);
 router.get("/admin/system-config", verifyToken, requireRole(ROLES.ADMIN), ruleController.getSystemConfig);
 router.put("/admin/system-config", verifyToken, requireRole(ROLES.ADMIN), ruleController.updateSystemConfig);
+router.post("/admin/test-connection", verifyToken, requireRole(ROLES.ADMIN), ruleController.testLlmConnection);
 
 // Admin RAG Knowledge & Vector Document Management (Python AI Service)
 router.get("/admin/documents", verifyToken, requireRole(ROLES.ADMIN), aiDocumentController.listDocuments);

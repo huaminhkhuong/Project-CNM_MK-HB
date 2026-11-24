@@ -112,21 +112,32 @@ export class AiLlmProvider {
     jsonMode: boolean;
     timeoutMs: number;
   }): Promise<LlmResponse | null> {
-    const primaryModel = process.env.GEMINI_MODEL || process.env.LLM_MODEL || "gemini-3.5-flash-lite";
-    const candidateModels = Array.from(new Set([primaryModel, "gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.8-flash", "gemini-flash-latest"]));
+    const primaryModel = process.env.GEMINI_MODEL || process.env.LLM_MODEL || "gemini-3-flash-preview";
+    const candidateModels = Array.from(new Set([
+      "gemini-3-flash-preview",
+      primaryModel,
+      "gemini-flash-lite-latest",
+      "gemini-3.5-flash-lite",
+      "gemini-3.5-flash",
+      "gemini-flash-latest"
+    ]));
 
     for (const model of candidateModels) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), args.timeoutMs);
 
       try {
+        const generationConfig: any = {
+          temperature: args.temperature,
+          maxOutputTokens: Math.max(Number(args.maxTokens || 2048), 4096),
+          ...(args.jsonMode ? { responseMimeType: "application/json" } : {})
+        };
+        if (/^gemini-3-flash/i.test(model)) {
+          generationConfig.thinkingConfig = { thinkingBudget: 0 };
+        }
         const bodyPayload: any = {
           contents: [{ role: "user", parts: [{ text: args.userPrompt }] }],
-          generationConfig: {
-            temperature: args.temperature,
-            maxOutputTokens: args.maxTokens,
-            ...(args.jsonMode ? { responseMimeType: "application/json" } : {})
-          }
+          generationConfig
         };
 
         if (args.systemPrompt && args.systemPrompt.trim()) {
@@ -150,7 +161,12 @@ export class AiLlmProvider {
         }
 
         const data: any = await response.json();
-        const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+        const parts = data?.candidates?.[0]?.content?.parts || [];
+        const rawText = parts
+          .filter((p: any) => !p?.thought && typeof p?.text === "string")
+          .map((p: any) => p.text)
+          .join("")
+          .trim();
 
         if (!rawText) continue;
 

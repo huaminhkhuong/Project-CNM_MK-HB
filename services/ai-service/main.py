@@ -24,7 +24,7 @@ from src.retrieval.hybrid_engine import HybridRAGEngine
 from src.generation.prompt_builder import build_grounded_system_prompt
 from src.generation.question_engine import generate_dynamic_questions
 
-DOCS_DIR = BASE_DIR / "data" / "docs"
+DOCS_DIR = Path(os.environ.get("RAG_DOCS_DIR") or (BASE_DIR / "data_store" / "docs"))
 DOCS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Biến global lưu trữ service singletons

@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import axios from "axios";
 
 import { ProductCard } from "../../components/common/ProductCard";
-import { getProductFilterOptions, getProducts } from "../../services/catalog.service";
+import { getBrands, getCategories, getProductFilterOptions, getProducts } from "../../services/catalog.service";
 import { resolveProductImage } from "../../utils/productImage";
 
 /* ── Helpers ─────────────────────────────────────────────────── */
@@ -254,20 +254,35 @@ export function ProductListPage() {
   }
 
   useEffect(() => {
+    let active = true;
     async function loadFilterData() {
       try {
-        const response = await getProductFilterOptions({ category_id: filters.category_id });
+        const response = await getProductFilterOptions(filters.category_id ? { category_id: filters.category_id } : {});
+        if (!active) return;
         const normalized = normalizeFilterOptions(response);
         setCategories(normalized.categories);
         setBrands(normalized.brands);
         setAttributes(normalized.attributes);
       } catch {
-        setCategories([]);
-        setBrands([]);
-        setAttributes([]);
+        // Fallback an toàn sang /categories và /brands nếu /filter-options gặp lỗi tạm thời
+        try {
+          const [catRes, brandRes] = await Promise.all([getCategories(), getBrands()]);
+          if (!active) return;
+          const catList = catRes?.data || catRes;
+          const brandList = brandRes?.data || brandRes;
+          setCategories(Array.isArray(catList) ? catList : []);
+          setBrands(Array.isArray(brandList) ? brandList : []);
+          setAttributes([]);
+        } catch {
+          if (!active) return;
+          setCategories([]);
+          setBrands([]);
+          setAttributes([]);
+        }
       }
     }
     loadFilterData();
+    return () => { active = false; };
   }, [filters.category_id]);
 
   useEffect(() => {
@@ -567,7 +582,7 @@ export function ProductListPage() {
 
             {/* Brand */}
             {brands.length > 0 && (
-              <FilterSection title="Thương hiệu" icon="🏷️" defaultOpen={false}>
+              <FilterSection title="Thương hiệu" icon="🏷️" defaultOpen={true}>
                 <div style={{ marginBottom: 8 }}>
                   <input
                     type="text"

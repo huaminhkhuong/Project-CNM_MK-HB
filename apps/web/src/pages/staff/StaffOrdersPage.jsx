@@ -14,6 +14,8 @@ import {
   autoGenerateStaffOrderSerials
 } from "../../services/staff.service";
 import { approvePaymentProof } from "../../services/order.service";
+import "../../styles/admin-ai-studio.css";
+import "../../styles/admin-catalog-studio.css";
 
 const API_ORIGIN = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/api\/?$/, "");
 
@@ -38,8 +40,8 @@ const ORDER_STATUS_OPTIONS = ["", "PENDING", "PROCESSING", "SHIPPED", "DELIVERED
 const ORDER_FLOW = ["PENDING", "PROCESSING", "SHIPPED", "DELIVERED", "COMPLETED"];
 
 const SHIPPING_CARRIERS = [
-  { id: "GHTK", label: "GHTK" },
-  { id: "VNPOST", label: "VNPost" },
+  { id: "GHTK", label: "GHTK (Giao Hàng Tiết Kiệm)" },
+  { id: "VNPOST", label: "VNPost (Bưu Điện Việt Nam)" },
   { id: "JT", label: "J&T Express" }
 ];
 
@@ -48,6 +50,12 @@ const NOTE_TEMPLATES = [
   "Khách yêu cầu giao cuối tuần, ưu tiên khung giờ 9h-12h.",
   "Đã tư vấn nâng cấp linh kiện, khách giữ nguyên cấu hình hiện tại.",
   "Đơn thanh toán online, đã xác nhận giao dịch trước khi xuất kho."
+];
+
+const CANCEL_REASON_PRESETS = [
+  "Khách hàng liên hệ yêu cầu hủy đơn",
+  "Không liên hệ được khách hàng sau 3 lần gọi xác nhận",
+  "Sản phẩm tạm hết hàng trong kho"
 ];
 
 function buildMockTrackingCode(orderId, carrier = "GHTK") {
@@ -184,17 +192,17 @@ function getTodayTotalValue(orders) {
 
 function OrderListSkeleton() {
   return (
-    <div style={{ display: "grid", gap: 12 }}>
+    <div style={{ display: "grid", gap: 10 }}>
       {Array.from({ length: 5 }).map((_, index) => (
         <div
           key={index}
           style={{
-            height: 112,
-            borderRadius: 18,
+            height: 106,
+            borderRadius: 14,
             border: "1px solid #e2e8f0",
-            background: "linear-gradient(90deg, #f8fafc 25%, #eef2ff 50%, #f8fafc 75%)",
+            background: "linear-gradient(90deg, #f8fafc 25%, #f1f5f9 50%, #f8fafc 75%)",
             backgroundSize: "200% 100%",
-            animation: "staffOrderPulse 1.5s ease-in-out infinite"
+            animation: "staffOrderPulse 1.4s ease-in-out infinite"
           }}
         />
       ))}
@@ -204,17 +212,17 @@ function OrderListSkeleton() {
 
 function DetailSkeleton() {
   return (
-    <div style={{ display: "grid", gap: 18 }}>
-      {Array.from({ length: 5 }).map((_, index) => (
+    <div style={{ display: "grid", gap: 16 }}>
+      {Array.from({ length: 4 }).map((_, index) => (
         <div
           key={index}
           style={{
-            height: index === 0 ? 148 : 128,
-            borderRadius: 24,
+            height: index === 0 ? 140 : 124,
+            borderRadius: 16,
             border: "1px solid #e2e8f0",
-            background: "linear-gradient(90deg, #f8fafc 25%, #eef2ff 50%, #f8fafc 75%)",
+            background: "linear-gradient(90deg, #f8fafc 25%, #f1f5f9 50%, #f8fafc 75%)",
             backgroundSize: "200% 100%",
-            animation: "staffOrderPulse 1.5s ease-in-out infinite"
+            animation: "staffOrderPulse 1.4s ease-in-out infinite"
           }}
         />
       ))}
@@ -222,13 +230,13 @@ function DetailSkeleton() {
   );
 }
 
-function InfoList({ rows }) {
+function InfoGrid({ rows }) {
   return (
-    <div className="staff-info-list">
+    <div className="oms-info-grid">
       {rows.map((row) => (
-        <div key={row.label} className={`staff-info-row${row.full ? " is-full" : ""}`}>
-          <span>{row.label}</span>
-          <strong className={row.wrap ? "staff-wrap-anywhere" : ""}>{row.value}</strong>
+        <div key={row.label} className={`oms-info-tile${row.full ? " is-full" : ""}`}>
+          <span className="oms-info-label">{row.label}</span>
+          <strong className={`oms-info-value${row.wrap ? " staff-wrap-anywhere" : ""}`}>{row.value}</strong>
         </div>
       ))}
     </div>
@@ -246,81 +254,88 @@ function StaffOrderQueue({
   setSelectedOrderId
 }) {
   return (
-    <aside className="staff-orders-panel staff-orders-panel--sticky">
-      <div className="staff-orders-panel__body">
-        <div className="staff-orders-panel__stickyArea">
-          <div className="staff-orders-panel__head">
-            <div>
-              <h2>Danh sách đơn hàng</h2>
-              <p>Tìm kiếm, lọc trạng thái và chọn đơn để thao tác.</p>
-            </div>
+    <aside className="oms-queue-panel">
+      <div className="oms-queue-head">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <div>
+            <h3>Danh Sách Đơn Hàng</h3>
+            <p>Tìm kiếm, lọc nhanh theo trạng thái và chọn đơn xử lý.</p>
           </div>
+          <span className="oms-count-pill">{filteredOrders.length}</span>
+        </div>
 
-          <div className="staff-orders-toolbar">
-            <input
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-              placeholder="Tìm mã đơn, khách hàng, email, vận đơn..."
-              aria-label="Tìm đơn hàng"
-            />
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Lọc trạng thái đơn hàng">
-              {ORDER_STATUS_OPTIONS.map((status) => (
-                <option key={status || "all"} value={status}>
-                  {status ? getStatusMeta(status).label : "Tất cả trạng thái"}
-                </option>
-              ))}
-            </select>
+        <div className="cat-search-wrap" style={{ marginTop: 12, width: "100%", minWidth: 0 }}>
+          <svg className="cat-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            className="cat-input cat-input--search"
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+            placeholder="Tìm #mã đơn, khách hàng, SĐT, vận đơn..."
+            aria-label="Tìm đơn hàng"
+          />
+        </div>
+
+        <div className="oms-status-pills" role="tablist" aria-label="Lọc trạng thái đơn hàng">
+          {ORDER_STATUS_OPTIONS.map((status) => (
+            <button
+              key={status || "all"}
+              type="button"
+              className={`oms-pill-btn${statusFilter === status ? " is-active" : ""}`}
+              onClick={() => setStatusFilter(status)}
+            >
+              {status ? getStatusMeta(status).label : "Tất cả"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="oms-queue-list">
+        {loading ? (
+          <OrderListSkeleton />
+        ) : filteredOrders.length === 0 ? (
+          <div className="oms-empty-box">
+            <strong style={{ display: "block", marginBottom: 4, color: "#0f172a" }}>Không có đơn hàng phù hợp</strong>
+            <span>Thử đổi bộ lọc trạng thái hoặc xóa từ khóa tìm kiếm.</span>
           </div>
-
-          <div className="staff-orders-tabs">
-            {ORDER_STATUS_OPTIONS.map((status) => (
+        ) : (
+          filteredOrders.map((order) => {
+            const isActive = order.id === selectedOrderId;
+            const statusMeta = getStatusMeta(order.status);
+            return (
               <button
-                key={status || "all"}
+                key={order.id}
                 type="button"
-                className={statusFilter === status ? "is-active" : ""}
-                onClick={() => setStatusFilter(status)}
+                className={`oms-order-card${isActive ? " is-active" : ""}`}
+                onClick={() => setSelectedOrderId(order.id)}
               >
-                {status ? getStatusMeta(status).label : "Tất cả"}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="staff-orders-list">
-          {loading ? (
-            <OrderListSkeleton />
-          ) : filteredOrders.length === 0 ? (
-            <div className="staff-orders-empty">
-              <strong style={{ display: "block", marginBottom: 8, color: "#0f172a" }}>Chưa có đơn phù hợp</strong>
-              Thử đổi bộ lọc trạng thái hoặc từ khóa tìm kiếm.
-            </div>
-          ) : (
-            filteredOrders.map((order) => {
-              const isActive = order.id === selectedOrderId;
-              const statusMeta = getStatusMeta(order.status);
-              return (
-                <button
-                  key={order.id}
-                  type="button"
-                  className={`staff-order-card${isActive ? " staff-order-card--active" : ""}`}
-                  onClick={() => setSelectedOrderId(order.id)}
-                >
-                  <div className="staff-order-card__row">
+                <div className="oms-order-card__top">
+                  <span className="oms-order-id">#{order.id}</span>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
                     <span className={`staff-badge staff-badge--${statusMeta.tone}`}>{statusMeta.label}</span>
-                    <span className={`staff-badge staff-badge--${getPaymentTone(order.paymentStatus)}`}>{getPaymentLabel(order.paymentStatus)}</span>
+                    <span className={`staff-badge staff-badge--${getPaymentTone(order.paymentStatus)}`}>
+                      {getPaymentLabel(order.paymentStatus)}
+                    </span>
                   </div>
-                  <div className="staff-order-card__title">Đơn #{order.id}</div>
-                  <div className="staff-order-card__customer">{order.customer?.fullName || "Khách hàng"}</div>
-                  <div className="staff-order-card__meta">{order.paymentMethod || "COD"} · {formatShortDate(order.createdAt)}</div>
-                  <div className="staff-order-card__row">
-                    <span className="staff-order-card__meta staff-wrap-anywhere">{order.customer?.email || "Không có email"}</span>
-                    <span className="staff-order-card__amount">{formatCurrency(getOrderAmount(order))} đ</span>
-                  </div>
-                </button>
-              );
-            })
-          )}
-        </div>
+                </div>
+
+                <div className="oms-order-customer">{order.customer?.fullName || "Khách hàng"}</div>
+                <div className="oms-order-sub staff-wrap-anywhere">
+                  {order.customer?.email || order.customer?.phone || "Không có thông tin liên hệ"}
+                </div>
+
+                <div className="oms-order-foot">
+                  <span className="oms-order-meta">
+                    {order.paymentMethod || "COD"} · {formatShortDate(order.createdAt)}
+                  </span>
+                  <span className="oms-order-amount">{formatCurrency(getOrderAmount(order))} đ</span>
+                </div>
+              </button>
+            );
+          })
+        )}
       </div>
     </aside>
   );
@@ -328,36 +343,46 @@ function StaffOrderQueue({
 
 function StaffOrderHeader({ selectedOrder, selectedStatusMeta, customer, actionButtons }) {
   return (
-    <header className="staff-detail-header">
-      <div className="staff-detail-header__top">
+    <header className="oms-detail-header">
+      <div className="oms-detail-header__top">
         <div>
-          <span className={`staff-badge staff-badge--${selectedStatusMeta.tone}`}>{selectedStatusMeta.label}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span className={`staff-badge staff-badge--${selectedStatusMeta.tone}`}>{selectedStatusMeta.label}</span>
+            <span className={`staff-badge staff-badge--${getPaymentTone(selectedOrder.paymentStatus)}`}>
+              {getPaymentLabel(selectedOrder.paymentStatus)}
+            </span>
+            <span className="oms-method-chip">{selectedOrder.paymentMethod || "COD"}</span>
+          </div>
           <h2>Đơn hàng #{selectedOrder.id}</h2>
-          <p>Tạo lúc {formatDate(selectedOrder.createdAt)} · Khách {customer.fullName || "Không rõ"}</p>
+          <p>
+            Tạo lúc {formatDate(selectedOrder.createdAt)} · Khách hàng <strong>{customer.fullName || "Không rõ"}</strong>
+          </p>
         </div>
-        <div className="staff-detail-header__summary">
-          <div className="staff-detail-header__summaryLabel">Tổng thanh toán</div>
-          <div className="staff-detail-header__summaryValue">{formatCurrency(getOrderAmount(selectedOrder))} đ</div>
+
+        <div className="oms-detail-total-box">
+          <span className="oms-detail-total-label">Tổng thanh toán</span>
+          <strong className="oms-detail-total-value">{formatCurrency(getOrderAmount(selectedOrder))} đ</strong>
         </div>
       </div>
-      <div className="staff-detail-header__actions">{actionButtons}</div>
+
+      <div className="oms-detail-actions">{actionButtons}</div>
     </header>
   );
 }
 
 function StaffOrderTimeline({ orderTimeline }) {
   return (
-    <section className="staff-card">
-      <div className="staff-orders-section__head">
+    <section className="oms-card">
+      <div className="oms-section-head">
         <div>
-          <h3>Lịch sử xử lý</h3>
-          <p>Trạng thái đơn theo quy trình vận hành nội bộ.</p>
+          <h3>Tiến Độ Xử Lý Đơn Hàng</h3>
+          <p>Theo dõi từng mốc trạng thái vận hành nội bộ từ tiếp nhận đến hoàn tất.</p>
         </div>
       </div>
-      <div className="staff-stepper">
+      <div className="oms-stepper">
         {orderTimeline.map((step, index) => (
-          <article key={step.status} className={`staff-step${step.isDone ? " staff-step--done" : ""}`}>
-            <div className="staff-step__index">{index + 1}</div>
+          <article key={step.status} className={`oms-step${step.isDone ? " is-done" : ""}`}>
+            <div className="oms-step__badge">{step.isDone ? "✓" : index + 1}</div>
             <strong>{step.meta.label}</strong>
             <small>{step.timestamp ? formatDate(step.timestamp) : "Đang chờ cập nhật"}</small>
           </article>
@@ -369,21 +394,21 @@ function StaffOrderTimeline({ orderTimeline }) {
 
 function StaffCustomerInfo({ selectedOrder, customer, selectedStatusMeta }) {
   return (
-    <section className="staff-card">
-      <div className="staff-orders-section__head">
+    <section className="oms-card">
+      <div className="oms-section-head">
         <div>
-          <h3>Thông tin khách hàng</h3>
-          <p>Thông tin liên hệ và địa chỉ giao hàng của đơn.</p>
+          <h3>Thông Tin Khách Hàng &amp; Giao Nhận</h3>
+          <p>Liên hệ người nhận và địa chỉ giao hàng của đơn.</p>
         </div>
       </div>
-      <InfoList
+      <InfoGrid
         rows={[
-          { label: "Tên khách", value: customer.fullName || "Không rõ" },
-          { label: "Email", value: customer.email || "Không rõ", wrap: true },
+          { label: "Họ tên khách hàng", value: customer.fullName || "Không rõ" },
           { label: "Số điện thoại", value: customer.phone || "Không rõ" },
+          { label: "Email liên hệ", value: customer.email || "Không rõ", wrap: true },
+          { label: "Trạng thái hiện tại", value: selectedStatusMeta.label },
           { label: "Địa chỉ giao hàng", value: selectedOrder.shippingAddress || "Chưa có địa chỉ giao hàng", wrap: true, full: true },
-          { label: "Trạng thái đơn", value: selectedStatusMeta.label },
-          { label: "Ghi chú hiện tại", value: selectedOrder.note || "Chưa có ghi chú", wrap: true, full: true }
+          { label: "Ghi chú đơn hàng", value: selectedOrder.note || "Chưa có ghi chú", wrap: true, full: true }
         ]}
       />
     </section>
@@ -392,50 +417,45 @@ function StaffCustomerInfo({ selectedOrder, customer, selectedStatusMeta }) {
 
 function StaffOrderItemsTable({ selectedOrder }) {
   return (
-    <section className="staff-card">
-      <div className="staff-orders-section__head">
+    <section className="oms-card">
+      <div className="oms-section-head">
         <div>
-          <h3>Danh sách sản phẩm</h3>
-          <p>Kiểm tra lại cấu hình, số lượng và giá trị trước khi giao.</p>
+          <h3>Danh Sách Linh Kiện &amp; Sản Phẩm ({(selectedOrder.items || []).length})</h3>
+          <p>Kiểm tra cấu hình, mã SKU, số lượng và đơn giá trước khi xuất kho.</p>
         </div>
       </div>
 
       {(selectedOrder.items || []).length === 0 ? (
-        <div className="staff-orders-empty">Đơn hàng chưa có dòng sản phẩm.</div>
+        <div className="oms-empty-box">Đơn hàng chưa có dòng sản phẩm.</div>
       ) : (
-        <div className="staff-items-table">
-          <div className="staff-items-table__head">
-            <span />
-            <span>Sản phẩm</span>
-            <span>SL</span>
-            <span>Đơn giá</span>
-            <span>Thành tiền</span>
-          </div>
-          <div className="staff-order-items">
-            {(selectedOrder.items || []).map((item) => (
-              <article key={item.id || `${item.productName}-${item.sku}`} className="staff-order-item">
-                <div className="staff-order-thumb">
-                  {getItemThumbnail(item) ? <img src={getItemThumbnail(item)} alt={item.productName || "Sản phẩm"} loading="lazy" /> : <span>PC Mall</span>}
-                </div>
-                <div className="staff-order-item__name">
-                  <strong>{item.productName || "Sản phẩm"}</strong>
-                  <span>SKU: {item.sku || "Không rõ"}</span>
-                </div>
-                <div className="staff-order-item__metric">
-                  <span className="staff-order-item__mobileLabel">SL</span>
-                  <strong>{item.quantity || 0}</strong>
-                </div>
-                <div className="staff-order-item__metric">
-                  <span className="staff-order-item__mobileLabel">Đơn giá</span>
-                  <strong>{formatCurrency(getItemUnitPrice(item))} đ</strong>
-                </div>
-                <div className="staff-order-item__metric">
-                  <span className="staff-order-item__mobileLabel">Thành tiền</span>
-                  <strong>{formatCurrency(getLineAmount(item))} đ</strong>
-                </div>
-              </article>
-            ))}
-          </div>
+        <div className="oms-items-list">
+          {(selectedOrder.items || []).map((item) => (
+            <article key={item.id || `${item.productName}-${item.sku}`} className="oms-item-row">
+              <div className="oms-item-thumb">
+                {getItemThumbnail(item) ? (
+                  <img src={getItemThumbnail(item)} alt={item.productName || "Sản phẩm"} loading="lazy" />
+                ) : (
+                  <span>PC Mall</span>
+                )}
+              </div>
+              <div className="oms-item-info">
+                <strong>{item.productName || "Sản phẩm"}</strong>
+                <span className="cat-prod-slug" style={{ marginTop: 4 }}>SKU: {item.sku || "Không rõ"}</span>
+              </div>
+              <div className="oms-item-metric">
+                <span>SL</span>
+                <strong>×{item.quantity || 0}</strong>
+              </div>
+              <div className="oms-item-metric">
+                <span>Đơn giá</span>
+                <strong>{formatCurrency(getItemUnitPrice(item))} đ</strong>
+              </div>
+              <div className="oms-item-metric is-total">
+                <span>Thành tiền</span>
+                <strong>{formatCurrency(getLineAmount(item))} đ</strong>
+              </div>
+            </article>
+          ))}
         </div>
       )}
     </section>
@@ -460,10 +480,7 @@ function StaffSerialNumbersManager({
     setSerialInputs((prev) => {
       const currentList = [...(prev[orderItemId] || [])];
       currentList[slotIndex] = value;
-      return {
-        ...prev,
-        [orderItemId]: currentList
-      };
+      return { ...prev, [orderItemId]: currentList };
     });
   };
 
@@ -472,66 +489,56 @@ function StaffSerialNumbersManager({
   const totalAssigned = orderSerialsInfo?.totalAssignedSerials || 0;
 
   return (
-    <section className="staff-card staff-serials-manager" style={{ border: isComplete ? "1px solid #bbf7d0" : "1px solid #fde68a" }}>
-      <div className="staff-orders-section__head" style={{ flexWrap: "wrap", gap: 12 }}>
+    <section className="oms-card" style={{ borderColor: isComplete ? "#a7f3d0" : "#fde68a" }}>
+      <div className="oms-section-head" style={{ flexWrap: "wrap" }}>
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <h3 style={{ margin: 0 }}>Quản trị Serial Number / IMEI xuất kho</h3>
-            <span
-              className={`staff-badge ${isComplete ? "staff-badge--success" : "staff-badge--warning"}`}
-              style={{ fontSize: 13, padding: "3px 12px" }}
-            >
-              {isComplete ? `✅ Đã gán đủ ${totalAssigned}/${totalRequired} S/N` : `⚠️ Chưa đủ (${totalAssigned}/${totalRequired} S/N)`}
+          <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+            <h3>Quản Trị Serial Number / IMEI Xuất Kho</h3>
+            <span className={`staff-badge ${isComplete ? "staff-badge--success" : "staff-badge--warning"}`}>
+              {isComplete ? `✓ Đã gán đủ ${totalAssigned}/${totalRequired} S/N` : `Chưa đủ (${totalAssigned}/${totalRequired} S/N)`}
             </span>
           </div>
-          <p style={{ margin: "4px 0 0", color: "#64748b" }}>
-            Gán Serial Number thực tế in trên vỏ hộp & thân linh kiện để đồng bộ bảo hành điện tử chính hãng 1:1 khi xuất kho.
-          </p>
+          <p>Gán Serial Number thực tế trên vỏ hộp &amp; linh kiện để kích hoạt bảo hành điện tử chính hãng 1:1.</p>
         </div>
 
         {!isCanceled && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
               type="button"
-              className="staff-btn staff-btn--secondary"
+              className="ai-action-btn ai-action-btn--ghost"
               onClick={handleAutoGenerateSerials}
               disabled={serialsSaving || serialsLoading}
               title="Tự động sinh mã Serial Number thực tế mẫu cho demo kho"
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 }}
             >
-              🎲 Tự động điền S/N mẫu
+              Tự động điền S/N mẫu
             </button>
             <button
               type="button"
-              className="staff-btn staff-btn--primary"
+              className="cat-btn-dark"
+              style={{ background: "linear-gradient(135deg, #2563eb, #4f46e5)", padding: "8px 14px", fontSize: 12.5 }}
               onClick={handleSaveSerials}
               disabled={serialsSaving || serialsLoading}
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 }}
             >
-              {serialsSaving ? "Đang lưu..." : "💾 Lưu Serial Number"}
+              {serialsSaving ? "Đang lưu..." : "Lưu Serial Number"}
             </button>
           </div>
         )}
       </div>
 
-      {serialsError ? (
-        <div className="staff-orders-alert staff-orders-alert--error" style={{ fontSize: 14 }}>
-          {serialsError}
-        </div>
-      ) : null}
+      {serialsError ? <div className="oms-alert oms-alert--error">{serialsError}</div> : null}
 
       {!isComplete && !isCanceled && selectedOrder?.status === "PROCESSING" ? (
-        <div style={{ padding: "10px 14px", borderRadius: 12, background: "#fffbeb", border: "1px solid #fef08a", color: "#854d0e", fontSize: 13, fontWeight: 700 }}>
-          ⚠️ Bắt buộc: Nhân viên kho cần gán đủ Serial Number cho tất cả linh kiện trước khi bấm "Chuyển sang giao hàng (SHIPPED)".
+        <div style={{ padding: "10px 14px", borderRadius: 10, background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e", fontSize: 12.5, fontWeight: 700 }}>
+          Bắt buộc: Cần gán đủ Serial Number cho toàn bộ linh kiện trước khi bấm "Chuyển sang giao hàng".
         </div>
       ) : null}
 
       {serialsLoading ? (
-        <div style={{ padding: 20, textAlign: "center", color: "#64748b" }}>Đang tải danh sách Serial Number...</div>
+        <div style={{ padding: 20, textAlign: "center", color: "#64748b", fontSize: 13 }}>Đang tải danh sách Serial Number...</div>
       ) : (orderSerialsInfo?.items || []).length === 0 ? (
-        <div className="staff-orders-empty">Đơn hàng không có linh kiện cần gán Serial Number.</div>
+        <div className="oms-empty-box">Đơn hàng không có linh kiện cần gán Serial Number.</div>
       ) : (
-        <div style={{ display: "grid", gap: 16 }}>
+        <div style={{ display: "grid", gap: 12 }}>
           {(orderSerialsInfo?.items || []).map((item) => {
             const assigned = item.assignedSerials || [];
             const required = item.requiredQuantity || 1;
@@ -541,60 +548,50 @@ function StaffSerialNumbersManager({
               <div
                 key={item.orderItemId}
                 style={{
-                  padding: 16,
-                  borderRadius: 16,
+                  padding: 14,
+                  borderRadius: 12,
                   background: "#f8fafc",
                   border: item.isComplete ? "1px solid #cbd5e1" : "1px solid #fde047"
                 }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
                   <div>
-                    <strong style={{ fontSize: 15, color: "#0f172a" }}>{item.productName}</strong>
-                    <div style={{ fontSize: 13, color: "#64748b", marginTop: 2 }}>
-                      SKU: <code style={{ background: "#e2e8f0", padding: "1px 6px", borderRadius: 4 }}>{item.sku}</code> • Số lượng: <strong>{required} cái</strong>
+                    <strong style={{ fontSize: 13.5, color: "#0f172a" }}>{item.productName}</strong>
+                    <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                      SKU: <code style={{ background: "#e2e8f0", padding: "1px 6px", borderRadius: 5 }}>{item.sku}</code> · SL: <strong>{required}</strong>
                     </div>
                   </div>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 800,
-                      padding: "4px 10px",
-                      borderRadius: 8,
-                      background: item.isComplete ? "#dcfce7" : "#fef9c3",
-                      color: item.isComplete ? "#166534" : "#854d0e"
-                    }}
-                  >
-                    {item.isComplete ? `Đã đủ ${assigned.length}/${required}` : `Chưa đủ (${assigned.length}/${required})`}
+                  <span className={`staff-badge ${item.isComplete ? "staff-badge--success" : "staff-badge--warning"}`}>
+                    {item.isComplete ? `Đủ ${assigned.length}/${required}` : `Thiếu (${assigned.length}/${required})`}
                   </span>
                 </div>
 
-                <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
+                <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
                   {Array.from({ length: required }).map((_, slotIdx) => {
                     const assignedRecord = assigned[slotIdx];
-                    const val = currentInputs[slotIdx] !== undefined ? currentInputs[slotIdx] : (assignedRecord?.serialNumber || "");
+                    const val = currentInputs[slotIdx] !== undefined ? currentInputs[slotIdx] : assignedRecord?.serialNumber || "";
                     const isAssigned = Boolean(assignedRecord?.serialNumber);
 
                     return (
                       <div key={slotIdx} style={{ display: "grid", gap: 4 }}>
-                        <label style={{ fontSize: 12, fontWeight: 700, color: "#475569", display: "flex", justifyContent: "space-between" }}>
-                          <span>🏷️ Serial / IMEI #{slotIdx + 1}</span>
+                        <label style={{ fontSize: 11.5, fontWeight: 700, color: "#475569", display: "flex", justifyContent: "space-between" }}>
+                          <span>Serial / IMEI #{slotIdx + 1}</span>
                           {assignedRecord?.warrantyId ? (
-                            <span style={{ color: "#059669", fontSize: 11 }}>Đã kích hoạt BH</span>
+                            <span style={{ color: "#059669" }}>Đã kích hoạt BH</span>
                           ) : isAssigned ? (
-                            <span style={{ color: "#2563eb", fontSize: 11 }}>Đã gán</span>
+                            <span style={{ color: "#2563eb" }}>Đã gán</span>
                           ) : null}
                         </label>
                         <input
                           type="text"
-                          className="staff-orders-field"
+                          className="cat-input"
                           placeholder={`Nhập/Quét S/N #${slotIdx + 1}`}
                           value={val}
                           disabled={isCanceled || isDeliveredOrCompleted}
                           onChange={(e) => handleInputChange(item.orderItemId, slotIdx, e.target.value)}
                           style={{
-                            fontFamily: "monospace",
+                            fontFamily: "ui-monospace, monospace",
                             fontWeight: 700,
-                            background: val ? "#ffffff" : "#f1f5f9",
                             borderColor: val ? "#3b82f6" : "#cbd5e1"
                           }}
                         />
@@ -638,7 +635,8 @@ function StaffPaymentPanel({ selectedOrder, onApprovePaymentProof, actionLoading
         </span>
       )
     },
-    { label: "Tạm tính linh kiện", value: `${formatCurrency(selectedOrder.totalAmount || getOrderAmount(selectedOrder))} đ` }
+    { label: "Tạm tính linh kiện", value: `${formatCurrency(selectedOrder.totalAmount || getOrderAmount(selectedOrder))} đ` },
+    { label: "Phí vận chuyển", value: `${formatCurrency(selectedOrder.shippingFee)} đ` }
   ];
 
   if (Number(selectedOrder.discountAmount || 0) > 0 || selectedOrder.couponCode) {
@@ -649,32 +647,32 @@ function StaffPaymentPanel({ selectedOrder, onApprovePaymentProof, actionLoading
   }
 
   rows.push(
-    { label: "Phí vận chuyển", value: `${formatCurrency(selectedOrder.shippingFee)} đ` },
     { label: "Tổng thanh toán", value: `${formatCurrency(getOrderAmount(selectedOrder))} đ` },
     { label: "Mã giao dịch", value: selectedOrder.transactionCode || selectedOrder.paymentTransactionId || "—", wrap: true, full: true }
   );
 
   return (
-    <section className="staff-card">
-      <div className="staff-orders-section__head">
+    <section className="oms-card">
+      <div className="oms-section-head">
         <div>
-          <h3>Thanh toán & Minh chứng</h3>
-          <p>Trạng thái chi phí, mã giảm giá và duyệt biên lai chuyển khoản.</p>
+          <h3>Thanh Toán &amp; Minh Chứng</h3>
+          <p>Chi tiết công nợ, mã giảm giá và kiểm duyệt biên lai chuyển khoản.</p>
         </div>
       </div>
-      <InfoList rows={rows} />
+      <InfoGrid rows={rows} />
 
       {isBankTransfer ? (
-        <div style={{ padding: 16, borderRadius: 16, background: "#f8fafc", border: "1px solid #e2e8f0", display: "grid", gap: 12 }}>
+        <div style={{ padding: 14, borderRadius: 12, background: "#f8fafc", border: "1px solid #e2e8f0", display: "grid", gap: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <strong style={{ fontSize: 14, color: "#0f172a" }}>📸 Biên lai / Minh chứng chuyển khoản QR</strong>
+            <strong style={{ fontSize: 13.5, color: "#0f172a" }}>Biên lai / Minh chứng chuyển khoản VietQR</strong>
             {paymentProofUrl ? (
               <button
                 type="button"
+                className="ai-action-btn ai-action-btn--ghost"
+                style={{ padding: "4px 10px", fontSize: 11.5 }}
                 onClick={() => onZoomProof?.(paymentProofUrl)}
-                style={{ fontSize: 12, fontWeight: 800, color: "#2563eb", background: "none", border: "none", cursor: "pointer" }}
               >
-                🔍 Phóng to toàn màn hình
+                Phóng to toàn màn hình ↗
               </button>
             ) : null}
           </div>
@@ -687,7 +685,7 @@ function StaffPaymentPanel({ selectedOrder, onApprovePaymentProof, actionLoading
                 borderRadius: 12,
                 overflow: "hidden",
                 cursor: "zoom-in",
-                background: "#fff",
+                background: "#0f172a",
                 maxHeight: 280,
                 display: "grid",
                 placeItems: "center"
@@ -701,8 +699,8 @@ function StaffPaymentPanel({ selectedOrder, onApprovePaymentProof, actionLoading
               />
             </div>
           ) : (
-            <div style={{ fontSize: 13, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", padding: "10px 14px", borderRadius: 12 }}>
-              ⚠️ Khách hàng chưa tải lên ảnh biên lai chuyển khoản cho đơn hàng này.
+            <div style={{ fontSize: 12.5, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", padding: "10px 14px", borderRadius: 10 }}>
+              Khách hàng chưa tải lên ảnh biên lai chuyển khoản cho đơn hàng này.
             </div>
           )}
 
@@ -710,21 +708,21 @@ function StaffPaymentPanel({ selectedOrder, onApprovePaymentProof, actionLoading
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <button
                 type="button"
-                className="staff-btn staff-btn--success"
+                className="oms-btn oms-btn--success"
                 disabled={Boolean(actionLoading)}
                 onClick={() => onApprovePaymentProof?.(true)}
                 style={{ flex: 1 }}
               >
-                {actionLoading === "approve_payment" ? "Đang duyệt..." : "✅ Duyệt thanh toán & Chuyển xử lý"}
+                {actionLoading === "approve_payment" ? "Đang duyệt..." : "✓ Duyệt thanh toán & Chuyển xử lý"}
               </button>
               <button
                 type="button"
-                className="staff-btn staff-btn--danger"
+                className="oms-btn oms-btn--danger"
                 disabled={Boolean(actionLoading)}
                 onClick={() => onApprovePaymentProof?.(false)}
                 style={{ flex: 1 }}
               >
-                {actionLoading === "reject_payment" ? "Đang từ chối..." : "❌ Từ chối biên lai"}
+                {actionLoading === "reject_payment" ? "Đang từ chối..." : "✕ Từ chối biên lai"}
               </button>
             </div>
           ) : null}
@@ -744,69 +742,89 @@ function StaffShipmentPanel({
   handleGenerateTracking
 }) {
   return (
-    <section className="staff-card">
-      <div className="staff-orders-section__head">
+    <section className="oms-card">
+      <div className="oms-section-head">
         <div>
-          <h3>Vận đơn</h3>
-          <p>Nhập mã vận đơn và cập nhật giao hàng đúng bước.</p>
+          <h3>Vận Đơn Giao Hàng</h3>
+          <p>Chọn hãng vận chuyển và cập nhật mã vận đơn trước khi xuất kho.</p>
         </div>
       </div>
-      <InfoList
+
+      <InfoGrid
         rows={[
           { label: "Trạng thái vận đơn", value: selectedOrder.shipment?.status || "Chưa tạo vận đơn" },
           { label: "Mã vận đơn hiện tại", value: selectedOrder.shipment?.trackingCode || "Chưa có", wrap: true }
         ]}
       />
-      <div className="staff-field-stack">
-        <label htmlFor="staff-carrier" className="staff-field-label">Đơn vị vận chuyển</label>
-        <select id="staff-carrier" className="staff-orders-field" value={shippingCarrier} onChange={(event) => setShippingCarrier(event.target.value)}>
-          {SHIPPING_CARRIERS.map((item) => (
-            <option key={item.id} value={item.id}>{item.label}</option>
-          ))}
-        </select>
-        <input
-          className="staff-orders-field"
-          value={trackingCode}
-          onChange={(event) => setTrackingCode(event.target.value)}
-          placeholder="Nhập mã vận đơn"
-        />
+
+      <div style={{ display: "grid", gap: 10 }}>
+        <div>
+          <label htmlFor="staff-carrier" style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 5 }}>
+            Đơn vị vận chuyển
+          </label>
+          <select id="staff-carrier" className="cat-input" value={shippingCarrier} onChange={(event) => setShippingCarrier(event.target.value)}>
+            {SHIPPING_CARRIERS.map((item) => (
+              <option key={item.id} value={item.id}>{item.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="staff-tracking" style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 5 }}>
+            Mã vận đơn
+          </label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              id="staff-tracking"
+              className="cat-input"
+              style={{ fontFamily: "ui-monospace, monospace" }}
+              value={trackingCode}
+              onChange={(event) => setTrackingCode(event.target.value)}
+              placeholder="VD: GHTK-2026-..."
+            />
+            <button type="button" className="ai-action-btn ai-action-btn--ghost" style={{ whiteSpace: "nowrap" }} onClick={handleGenerateTracking}>
+              Tạo mã demo
+            </button>
+          </div>
+        </div>
       </div>
-      {trackingError ? <div className="staff-orders-alert staff-orders-alert--error">{trackingError}</div> : null}
-      <div className="staff-inline-actions">
-        <button type="button" className="staff-btn staff-btn--secondary" onClick={handleGenerateTracking}>
-          Tạo mã demo
-        </button>
-      </div>
+
+      {trackingError ? <div className="oms-alert oms-alert--error">{trackingError}</div> : null}
     </section>
   );
 }
 
 function StaffInternalNotes({ consultationNote, setConsultationNote, applyNoteTemplate, handleSaveNote, actionLoading }) {
   return (
-    <section className="staff-card">
-      <div className="staff-orders-section__head">
+    <section className="oms-card">
+      <div className="oms-section-head">
         <div>
-          <h3>Ghi chú nội bộ</h3>
-          <p>Ghi chú tư vấn, hẹn giao và lưu ý đặc biệt cho đơn hàng.</p>
+          <h3>Ghi Chú Vận Hành Nội Bộ</h3>
+          <p>Lưu lịch hẹn giao, ghi chú tư vấn và dặn dò đóng gói.</p>
         </div>
       </div>
-      <div className="staff-note-templates">
+
+      <div className="cat-warranty-presets" style={{ marginTop: 0 }}>
         {NOTE_TEMPLATES.map((text) => (
-          <button key={text} type="button" onClick={() => applyNoteTemplate(text)}>
-            {text}
+          <button key={text} type="button" className="cat-warranty-chip" onClick={() => applyNoteTemplate(text)}>
+            + {text}
           </button>
         ))}
       </div>
+
       <textarea
-        className="staff-orders-textarea"
+        className="cat-input"
+        style={{ minHeight: 112, resize: "vertical", fontFamily: "inherit" }}
         value={consultationNote}
         onChange={(event) => setConsultationNote(event.target.value)}
-        rows={6}
-        placeholder="Nhập ghi chú xử lý đơn hàng"
+        rows={5}
+        placeholder="Nhập ghi chú xử lý đơn hàng..."
       />
-      <button type="button" className="staff-btn staff-btn--dark" onClick={handleSaveNote} disabled={Boolean(actionLoading)}>
-        {actionLoading === "note" ? "Đang lưu..." : "Lưu ghi chú"}
-      </button>
+
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button type="button" className="cat-btn-dark" onClick={handleSaveNote} disabled={Boolean(actionLoading)}>
+          {actionLoading === "note" ? "Đang lưu..." : "Lưu ghi chú"}
+        </button>
+      </div>
     </section>
   );
 }
@@ -869,6 +887,7 @@ export function StaffOrdersPage() {
     const matched = orders.filter((order) => {
       const customer = order.customer || {};
       const searchable = [
+        `#${order.id}`,
         order.id,
         order.status,
         order.shippingAddress,
@@ -885,7 +904,7 @@ export function StaffOrdersPage() {
       return searchable.includes(query);
     });
 
-    const numericQuery = Number(query);
+    const numericQuery = Number(query.replace(/^#/, ""));
     if (Number.isInteger(numericQuery) && numericQuery > 0) {
       return matched.sort((a, b) => {
         const aExact = Number(a.id) === numericQuery ? 1 : 0;
@@ -908,7 +927,7 @@ export function StaffOrdersPage() {
       return;
     }
 
-    const numericQuery = Number(query);
+    const numericQuery = Number(query.replace(/^#/, ""));
     if (Number.isInteger(numericQuery) && numericQuery > 0) {
       const exactOrder = filteredOrders.find((order) => Number(order.id) === numericQuery);
       if (exactOrder && exactOrder.id !== selectedOrderId) {
@@ -1073,13 +1092,15 @@ export function StaffOrdersPage() {
   }
 
   async function refreshCurrentOrder() {
-    if (!selectedOrderId) return;
-    await Promise.all([loadOrderDetail(selectedOrderId), loadOrders(), loadStatsOrders()]);
+    if (selectedOrderId) {
+      await Promise.all([loadOrderDetail(selectedOrderId), loadOrders(), loadStatsOrders()]);
+    } else {
+      await Promise.all([loadOrders(), loadStatsOrders()]);
+    }
   }
 
   async function handleMoveToProcessing() {
     if (!selectedOrder) return;
-
     try {
       setActionLoading("processing");
       setErrorMessage("");
@@ -1099,7 +1120,6 @@ export function StaffOrdersPage() {
   async function handleShipOrder() {
     if (!selectedOrder) return;
 
-    // Strict validation: Require serial numbers for all hardware items before shipping
     if (orderSerialsInfo && !orderSerialsInfo.isFullyAssigned) {
       setErrorMessage(
         `Không thể xuất kho: Đơn hàng chưa được gán đủ Serial Number cho các linh kiện (${orderSerialsInfo.totalAssignedSerials || 0}/${orderSerialsInfo.totalRequiredSerials || 0} S/N). Vui lòng gán S/N trước khi chuyển sang Đang giao.`
@@ -1163,7 +1183,6 @@ export function StaffOrdersPage() {
 
   async function handleSaveNote() {
     if (!selectedOrder) return;
-
     try {
       setActionLoading("note");
       setErrorMessage("");
@@ -1245,8 +1264,8 @@ export function StaffOrdersPage() {
   const actionHelp = {
     processing: canMoveToProcessing ? "Xác nhận đơn và chuyển sang bước xử lý." : "Chỉ đơn chờ xử lý mới có thể xác nhận.",
     ship: canShip ? "Nhập mã vận đơn và chuyển đơn sang đang giao." : "Đơn phải ở trạng thái Đang xử lý trước khi giao hàng.",
-    delivered: canMarkDelivered ? "Xác nhận đơn vị vận chuyển đã giao hàng. Khách hàng sẽ bấm xác nhận đã nhận hàng để hoàn tất." : "Đơn phải ở trạng thái Đang giao trước khi xác nhận đã giao.",
-    cancel: canCancel ? "Hủy đơn trước khi xuất kho và tự động hoàn trả tồn kho." : "Chỉ đơn chờ xử lý hoặc đang xử lý (chưa giao) mới được hủy."
+    delivered: canMarkDelivered ? "Xác nhận đơn vị vận chuyển đã giao hàng." : "Đơn phải ở trạng thái Đang giao trước khi xác nhận đã giao.",
+    cancel: canCancel ? "Hủy đơn trước khi xuất kho và tự động hoàn trả tồn kho." : "Chỉ đơn chờ xử lý hoặc đang xử lý mới được hủy."
   };
 
   function handleGenerateTracking() {
@@ -1284,31 +1303,26 @@ export function StaffOrdersPage() {
           ? selectedOrder?.updatedAt || selectedOrder?.shipment?.updatedAt || null
           : null;
 
-    return {
-      status,
-      meta: getStatusMeta(status),
-      isDone,
-      timestamp
-    };
+    return { status, meta: getStatusMeta(status), isDone, timestamp };
   });
 
   const actionButtons = [
     renderActionButton({
       key: "processing",
       enabled: canMoveToProcessing,
-      label: "Xác nhận xử lý",
+      label: "✓ Xác nhận xử lý",
       loadingLabel: "Đang cập nhật...",
       onClick: handleMoveToProcessing,
-      className: "staff-btn staff-btn--primary",
+      className: "oms-btn oms-btn--primary",
       title: actionHelp.processing
     }),
     renderActionButton({
       key: "ship",
       enabled: canShip,
-      label: "Chuyển sang giao hàng",
+      label: "Chuyển giao hàng",
       loadingLabel: "Đang cập nhật...",
       onClick: handleShipOrder,
-      className: "staff-btn staff-btn--shipping",
+      className: "oms-btn oms-btn--shipping",
       title: actionHelp.ship
     }),
     renderActionButton({
@@ -1317,7 +1331,7 @@ export function StaffOrdersPage() {
       label: "Xác nhận đã giao",
       loadingLabel: "Đang cập nhật...",
       onClick: handleMarkDelivered,
-      className: "staff-btn staff-btn--success",
+      className: "oms-btn oms-btn--success",
       title: actionHelp.delivered
     }),
     renderActionButton({
@@ -1326,181 +1340,234 @@ export function StaffOrdersPage() {
       label: "Hủy đơn",
       loadingLabel: "Đang xử lý...",
       onClick: () => setShowCancelDialog(true),
-      className: "staff-btn staff-btn--danger",
+      className: "oms-btn oms-btn--danger",
       title: actionHelp.cancel
     })
   ];
 
   return (
-    <div className="staff-orders-dashboard">
+    <div className="oms-shell">
       <style>{`
         @keyframes staffOrderPulse { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-        .staff-orders-dashboard { width: min(1440px, calc(100% - 32px)); margin: 0 auto; display: grid; gap: 24px; padding: 24px 0 40px; }
-        .staff-orders-hero { display: flex; justify-content: space-between; gap: 24px; align-items: center; padding: 28px 30px; border-radius: 28px; background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 100%); color: #fff; box-shadow: 0 22px 44px rgba(15, 23, 42, 0.16); }
-        .staff-orders-hero__copy { max-width: 760px; }
-        .staff-orders-hero__copy p { margin: 10px 0 0; color: #cbd5e1; line-height: 1.7; }
-        .staff-orders-hero__actions { display: flex; flex-wrap: wrap; gap: 12px; justify-content: flex-end; }
-        .staff-orders-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
-        .staff-orders-stat { padding: 20px; border-radius: 22px; border: 1px solid #dbe4ef; background: #fff; box-shadow: 0 16px 36px rgba(15, 23, 42, 0.06); display: grid; gap: 8px; }
-        .staff-orders-stat__top { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: #64748b; font-size: 13px; font-weight: 800; }
-        .staff-orders-stat strong { font-size: 34px; color: #0f172a; line-height: 1; }
-        .staff-orders-stat small { color: #64748b; }
-        .staff-orders-layout { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 24px; align-items: start; }
-        .staff-orders-panel, .staff-orders-detail { min-width: 0; border-radius: 24px; border: 1px solid #dbe4ef; background: rgba(255,255,255,0.94); box-shadow: 0 18px 42px rgba(15, 23, 42, 0.06); }
-        .staff-orders-panel--sticky { position: sticky; top: 18px; }
-        .staff-orders-panel__body, .staff-orders-detail__body { padding: 22px; display: grid; gap: 18px; min-width: 0; }
-        .staff-orders-panel__stickyArea { display: grid; gap: 12px; position: sticky; top: 0; background: rgba(255,255,255,0.96); z-index: 2; }
-        .staff-orders-panel__head, .staff-orders-section__head { display: flex; justify-content: space-between; gap: 16px; align-items: start; }
-        .staff-orders-panel__head h2, .staff-orders-section__head h2, .staff-orders-section__head h3 { margin: 0; color: #0f172a; }
-        .staff-orders-panel__head p, .staff-orders-section__head p { margin: 6px 0 0; color: #64748b; line-height: 1.6; }
-        .staff-orders-toolbar { display: grid; gap: 12px; }
-        .staff-orders-toolbar input, .staff-orders-toolbar select, .staff-orders-field, .staff-orders-textarea { width: 100%; box-sizing: border-box; border: 1px solid #dbe4ef; border-radius: 14px; background: #f8fafc; color: #0f172a; }
-        .staff-orders-toolbar input, .staff-orders-toolbar select, .staff-orders-field { min-height: 46px; padding: 0 14px; font-weight: 650; }
-        .staff-orders-tabs { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
-        .staff-orders-tabs button { border: 1px solid #dbe4ef; background: #fff; color: #475569; border-radius: 999px; min-height: 38px; padding: 0 14px; font-weight: 800; cursor: pointer; white-space: nowrap; }
-        .staff-orders-tabs button.is-active { color: #1d4ed8; border-color: #93c5fd; background: #eff6ff; }
-        .staff-orders-list { display: grid; gap: 12px; max-height: calc(100vh - 360px); overflow-y: auto; padding-right: 4px; }
-        .staff-order-card { width: 100%; text-align: left; border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; padding: 16px; display: grid; gap: 10px; cursor: pointer; transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
-        .staff-order-card:hover { transform: translateY(-1px); box-shadow: 0 14px 28px rgba(37, 99, 235, 0.10); }
-        .staff-order-card--active { border-color: #60a5fa; box-shadow: 0 18px 30px rgba(37, 99, 235, 0.12); background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%); }
-        .staff-order-card__row { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; min-width: 0; }
-        .staff-order-card__title { font-size: 16px; font-weight: 900; color: #0f172a; }
-        .staff-order-card__customer { color: #0f172a; font-weight: 800; }
-        .staff-order-card__meta { color: #64748b; font-size: 13px; min-width: 0; }
-        .staff-order-card__amount { color: #1d4ed8; font-size: 18px; font-weight: 900; white-space: nowrap; }
-        .staff-badge { display: inline-flex; align-items: center; justify-content: center; min-height: 28px; padding: 0 10px; border-radius: 999px; font-size: 12px; font-weight: 900; white-space: nowrap; }
-        .staff-badge--warning { color: #b45309; background: #fff7ed; }
-        .staff-badge--info { color: #1d4ed8; background: #eff6ff; }
-        .staff-badge--shipping { color: #6d28d9; background: #f5f3ff; }
-        .staff-badge--success { color: #047857; background: #ecfdf5; }
-        .staff-badge--danger { color: #b91c1c; background: #fef2f2; }
-        .staff-badge--neutral { color: #475569; background: #f8fafc; }
-        .staff-orders-empty { padding: 32px 20px; border-radius: 18px; background: #f8fafc; text-align: center; color: #64748b; }
-        .staff-orders-alert { padding: 14px 16px; border-radius: 16px; font-weight: 800; }
-        .staff-orders-alert--error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
-        .staff-orders-alert--success { background: #ecfdf5; color: #047857; border: 1px solid #bbf7d0; }
-        .staff-detail-header { position: sticky; top: 0; z-index: 3; display: grid; gap: 18px; padding: 24px; border-bottom: 1px solid #e2e8f0; background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%); }
-        .staff-detail-header__top { display: flex; justify-content: space-between; gap: 18px; align-items: start; flex-wrap: wrap; }
-        .staff-detail-header__top h2 { margin: 8px 0 0; font-size: 30px; color: #0f172a; }
-        .staff-detail-header__top p { margin: 8px 0 0; color: #64748b; }
-        .staff-detail-header__summary { text-align: right; }
-        .staff-detail-header__summaryLabel { color: #64748b; font-size: 13px; font-weight: 800; }
-        .staff-detail-header__summaryValue { margin-top: 6px; color: #1d4ed8; font-size: 30px; font-weight: 900; }
-        .staff-detail-header__actions { display: flex; gap: 10px; flex-wrap: wrap; }
-        .staff-btn { min-height: 44px; border-radius: 14px; border: 1px solid transparent; cursor: pointer; padding: 0 16px; font-weight: 900; transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease; }
-        .staff-btn:hover:not(:disabled) { transform: translateY(-1px); }
-        .staff-btn:disabled { cursor: not-allowed; opacity: .55; }
-        .staff-btn--primary { background: linear-gradient(135deg, #2563eb, #1d4ed8); color: #fff; box-shadow: 0 14px 26px rgba(37, 99, 235, 0.18); }
-        .staff-btn--secondary { background: #fff; color: #0f172a; border-color: #dbe4ef; }
-        .staff-btn--shipping { background: #0f766e; color: #fff; }
-        .staff-btn--success { background: #059669; color: #fff; }
-        .staff-btn--danger { background: #fff; color: #b91c1c; border-color: #fecaca; }
-        .staff-btn--danger-fill { background: #dc2626; color: #fff; }
-        .staff-btn--dark { background: #0f172a; color: #fff; }
-        .staff-detail-grid { display: grid; gap: 20px; min-width: 0; }
-        .staff-card { width: 100%; min-width: 0; border: 1px solid #e2e8f0; border-radius: 22px; background: #fff; padding: 20px; display: grid; gap: 16px; }
-        .staff-info-list { display: grid; gap: 10px; min-width: 0; }
-        .staff-info-row { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 12px; align-items: start; padding: 14px 16px; border-radius: 16px; background: #f8fafc; border: 1px solid #e2e8f0; min-width: 0; }
-        .staff-info-row.is-full { grid-template-columns: 180px minmax(0, 1fr); }
-        .staff-info-row span { color: #64748b; font-size: 12px; font-weight: 800; }
-        .staff-info-row strong { color: #0f172a; font-size: 15px; line-height: 1.55; min-width: 0; }
-        .staff-workspace-section { display: grid; gap: 20px; min-width: 0; }
-        .staff-stepper { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
-        .staff-step { padding: 14px; border-radius: 16px; border: 1px solid #e2e8f0; background: #fff; display: grid; gap: 8px; min-width: 0; }
-        .staff-step--done { background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%); border-color: #bfdbfe; }
-        .staff-step__index { width: 34px; height: 34px; border-radius: 999px; display: grid; place-items: center; font-weight: 900; background: #e2e8f0; color: #0f172a; }
-        .staff-step--done .staff-step__index { background: linear-gradient(135deg, #2563eb, #1d4ed8); color: #fff; }
-        .staff-step strong { color: #0f172a; }
-        .staff-step small { color: #64748b; line-height: 1.5; }
-        .staff-items-table { display: grid; gap: 12px; min-width: 0; }
-        .staff-items-table__head { display: grid; grid-template-columns: 72px minmax(0, 1fr) 72px 132px 132px; gap: 14px; padding: 0 16px; color: #64748b; font-size: 12px; font-weight: 800; }
-        .staff-order-items { display: grid; gap: 12px; min-width: 0; }
-        .staff-order-item { display: grid; grid-template-columns: 72px minmax(0, 1fr) 72px 132px 132px; gap: 14px; align-items: center; padding: 14px 16px; border-radius: 16px; background: #f8fafc; border: 1px solid #e2e8f0; min-width: 0; }
-        .staff-order-item > * { min-width: 0; }
-        .staff-order-thumb { width: 64px; height: 64px; border-radius: 14px; border: 1px solid #dbe4ef; background: #fff; display: grid; place-items: center; overflow: hidden; }
-        .staff-order-thumb img { width: 100%; height: 100%; object-fit: contain; }
-        .staff-order-thumb span { color: #94a3b8; font-size: 11px; font-weight: 900; }
-        .staff-order-item__name strong { display: block; color: #0f172a; font-size: 15px; line-height: 1.45; word-break: normal; overflow-wrap: normal; }
-        .staff-order-item__name span { display: block; margin-top: 4px; color: #64748b; font-size: 13px; }
-        .staff-order-item__metric { display: grid; gap: 4px; justify-items: end; text-align: right; }
-        .staff-order-item__metric strong { color: #0f172a; font-size: 15px; }
-        .staff-order-item__mobileLabel { display: none; color: #64748b; font-size: 12px; font-weight: 800; }
+        .oms-shell { width: 100%; display: flex; flex-direction: column; gap: 20px; }
+        .oms-hero-kpi-btn { text-align: left; cursor: pointer; font-family: inherit; width: 100%; }
+        .oms-layout { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 20px; align-items: start; }
+        .oms-queue-panel { position: sticky; top: 82px; border-radius: 18px; border: 1px solid #e2e8f0; background: #ffffff; box-shadow: 0 12px 30px -22px rgba(15, 23, 42, 0.28); overflow: hidden; display: flex; flex-direction: column; }
+        .oms-queue-head { padding: 18px 18px 14px; border-bottom: 1px solid #f1f5f9; background: #fafcff; }
+        .oms-queue-head h3 { margin: 0; font-size: 16px; font-weight: 800; color: #0f172a; }
+        .oms-queue-head p { margin: 3px 0 0; font-size: 12px; color: #64748b; }
+        .oms-count-pill { padding: 3px 10px; border-radius: 999px; background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8; font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; }
+        .oms-status-pills { display: flex; gap: 6px; overflow-x: auto; padding: 11px 0 2px; scrollbar-width: thin; }
+        .oms-pill-btn { padding: 6px 11px; border-radius: 999px; border: 1px solid #e2e8f0; background: #ffffff; color: #475569; font-size: 11.5px; font-weight: 700; cursor: pointer; white-space: nowrap; transition: all 0.14s ease; }
+        .oms-pill-btn:hover { border-color: #cbd5e1; color: #0f172a; }
+        .oms-pill-btn.is-active { background: #0f172a; border-color: #0f172a; color: #ffffff; }
+        .oms-queue-list { padding: 14px; display: flex; flex-direction: column; gap: 10px; max-height: calc(100vh - 290px); overflow-y: auto; }
+        .oms-order-card { position: relative; width: 100%; text-align: left; padding: 13px 14px; border-radius: 13px; border: 1px solid #e2e8f0; background: #ffffff; display: flex; flex-direction: column; gap: 6px; cursor: pointer; transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease; }
+        .oms-order-card:hover { border-color: #93c5fd; transform: translateY(-1px); box-shadow: 0 10px 20px -14px rgba(37, 99, 235, 0.3); }
+        .oms-order-card.is-active { border-color: #2563eb; background: linear-gradient(180deg, #ffffff 0%, #f5f9ff 100%); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14); }
+        .oms-order-card.is-active::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3.5px; border-radius: 0 4px 4px 0; background: #2563eb; }
+        .oms-order-card__top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+        .oms-order-id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; font-weight: 800; color: #0f172a; background: #f1f5f9; border: 1px solid #e2e8f0; padding: 2px 8px; border-radius: 6px; }
+        .oms-order-customer { font-size: 13.5px; font-weight: 750; color: #0f172a; }
+        .oms-order-sub { font-size: 12px; color: #64748b; }
+        .oms-order-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding-top: 6px; border-top: 1px solid #f1f5f9; margin-top: 2px; }
+        .oms-order-meta { font-size: 11.5px; color: #64748b; font-weight: 600; }
+        .oms-order-amount { font-size: 14.5px; font-weight: 800; color: #1d4ed8; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .staff-badge { display: inline-flex; align-items: center; justify-content: center; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 750; white-space: nowrap; }
+        .staff-badge--warning { color: #b45309; background: #fffbeb; border: 1px solid #fde68a; }
+        .staff-badge--info { color: #1d4ed8; background: #eff6ff; border: 1px solid #bfdbfe; }
+        .staff-badge--shipping { color: #6d28d9; background: #f5f3ff; border: 1px solid #ddd6fe; }
+        .staff-badge--success { color: #047857; background: #ecfdf5; border: 1px solid #a7f3d0; }
+        .staff-badge--danger { color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; }
+        .staff-badge--neutral { color: #475569; background: #f1f5f9; border: 1px solid #cbd5e1; }
+        .oms-method-chip { font-family: ui-monospace, monospace; font-size: 11px; font-weight: 700; color: #334155; background: #f1f5f9; border: 1px solid #e2e8f0; padding: 2px 8px; border-radius: 6px; }
+        .oms-detail-pane { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+        .oms-detail-header { border-radius: 18px; border: 1px solid #e2e8f0; background: #ffffff; padding: 20px 22px; box-shadow: 0 12px 30px -22px rgba(15, 23, 42, 0.25); display: flex; flex-direction: column; gap: 16px; }
+        .oms-detail-header__top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+        .oms-detail-header h2 { margin: 8px 0 0; font-size: 24px; font-weight: 850; color: #0f172a; letter-spacing: -0.02em; }
+        .oms-detail-header p { margin: 4px 0 0; font-size: 13px; color: #64748b; }
+        .oms-detail-total-box { text-align: right; padding: 10px 16px; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; }
+        .oms-detail-total-label { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; }
+        .oms-detail-total-value { display: block; margin-top: 2px; font-size: 24px; font-weight: 850; color: #1d4ed8; font-variant-numeric: tabular-nums; }
+        .oms-detail-actions { display: flex; gap: 9px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid #f1f5f9; }
+        .oms-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 16px; border-radius: 10px; border: 1px solid transparent; font-size: 13px; font-weight: 750; cursor: pointer; transition: all 0.15s ease; }
+        .oms-btn:hover:not(:disabled) { transform: translateY(-1px); }
+        .oms-btn:disabled { opacity: 0.42; cursor: not-allowed; filter: grayscale(0.25); }
+        .oms-btn--primary { background: linear-gradient(135deg, #2563eb, #4f46e5); color: #ffffff; box-shadow: 0 8px 18px -8px rgba(37, 99, 235, 0.55); }
+        .oms-btn--shipping { background: linear-gradient(135deg, #0d9488, #0f766e); color: #ffffff; }
+        .oms-btn--success { background: linear-gradient(135deg, #059669, #10b981); color: #ffffff; }
+        .oms-btn--danger { background: #fef2f2; color: #b91c1c; border-color: #fca5a5; }
+        .oms-btn--danger-fill { background: #dc2626; color: #ffffff; }
+        .oms-card { border-radius: 16px; border: 1px solid #e2e8f0; background: #ffffff; padding: 18px 20px; box-shadow: 0 10px 24px -22px rgba(15, 23, 42, 0.22); display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+        .oms-section-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+        .oms-section-head h3 { margin: 0; font-size: 15.5px; font-weight: 800; color: #0f172a; }
+        .oms-section-head p { margin: 3px 0 0; font-size: 12.5px; color: #64748b; }
+        .oms-stepper { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+        .oms-step { padding: 12px; border-radius: 12px; border: 1px solid #e2e8f0; background: #f8fafc; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+        .oms-step.is-done { background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%); border-color: #93c5fd; }
+        .oms-step__badge { width: 28px; height: 28px; border-radius: 999px; display: grid; place-items: center; font-size: 12px; font-weight: 800; background: #e2e8f0; color: #475569; }
+        .oms-step.is-done .oms-step__badge { background: linear-gradient(135deg, #2563eb, #4f46e5); color: #ffffff; }
+        .oms-step strong { font-size: 13px; color: #0f172a; }
+        .oms-step small { font-size: 11px; color: #64748b; line-height: 1.35; }
+        .oms-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .oms-info-tile { padding: 11px 13px; border-radius: 11px; background: #f8fafc; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+        .oms-info-tile.is-full { grid-column: 1 / -1; }
+        .oms-info-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; }
+        .oms-info-value { font-size: 13.5px; font-weight: 700; color: #0f172a; line-height: 1.45; }
+        .oms-items-list { display: flex; flex-direction: column; gap: 10px; }
+        .oms-item-row { display: grid; grid-template-columns: 56px minmax(0, 1fr) 64px 124px 128px; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; }
+        .oms-item-thumb { width: 52px; height: 52px; border-radius: 10px; border: 1px solid #e2e8f0; background: #ffffff; display: grid; place-items: center; overflow: hidden; }
+        .oms-item-thumb img { width: 100%; height: 100%; object-fit: contain; }
+        .oms-item-thumb span { font-size: 10px; font-weight: 800; color: #94a3b8; }
+        .oms-item-info { min-width: 0; }
+        .oms-item-info strong { display: block; font-size: 13.5px; font-weight: 750; color: #0f172a; line-height: 1.35; }
+        .oms-item-metric { text-align: right; display: flex; flex-direction: column; gap: 2px; }
+        .oms-item-metric span { font-size: 11px; color: #64748b; font-weight: 600; }
+        .oms-item-metric strong { font-size: 13.5px; color: #0f172a; font-variant-numeric: tabular-nums; }
+        .oms-item-metric.is-total strong { color: #1d4ed8; }
+        .oms-bottom-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+        .oms-empty-box { padding: 30px 20px; border-radius: 12px; background: #f8fafc; border: 1px dashed #cbd5e1; text-align: center; color: #64748b; font-size: 13px; }
+        .oms-alert { padding: 12px 16px; border-radius: 12px; font-size: 13px; font-weight: 700; }
+        .oms-alert--error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+        .oms-alert--success { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
         .staff-wrap-anywhere { overflow-wrap: anywhere; word-break: break-word; }
-        .staff-field-stack { display: grid; gap: 12px; min-width: 0; }
-        .staff-field-label { font-size: 13px; font-weight: 800; color: #475569; }
-        .staff-orders-field { min-height: 46px; padding: 0 14px; font-weight: 650; }
-        .staff-note-templates { display: flex; flex-wrap: wrap; gap: 10px; }
-        .staff-note-templates button { padding: 10px 14px; border-radius: 999px; border: 1px solid #dbe4ef; background: #fff; color: #334155; cursor: pointer; font-weight: 700; line-height: 1.4; }
-        .staff-orders-textarea { min-height: 138px; padding: 14px; border-radius: 14px; border: 1px solid #dbe4ef; background: #f8fafc; resize: vertical; font: inherit; }
-        .staff-inline-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-        .staff-modal { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.44); display: grid; place-items: center; z-index: 70; padding: 20px; }
-        .staff-modal__panel { width: min(560px, 100%); border-radius: 24px; background: #fff; padding: 24px; border: 1px solid #e2e8f0; box-shadow: 0 26px 60px rgba(15, 23, 42, 0.24); display: grid; gap: 16px; }
-        .staff-modal__panel h2 { margin: 0; color: #0f172a; }
-        .staff-modal__panel p { margin: 0; color: #64748b; line-height: 1.6; }
-        .staff-modal__actions { display: flex; gap: 12px; justify-content: flex-end; flex-wrap: wrap; }
-        @media (max-width: 1279px) {
-          .staff-orders-dashboard { width: min(100%, calc(100% - 24px)); }
-          .staff-orders-layout { grid-template-columns: 320px minmax(0, 1fr); }
-          .staff-orders-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-          .staff-stepper { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-          .staff-items-table__head, .staff-order-item { grid-template-columns: 72px minmax(0, 1fr) 72px 110px 110px; }
+        @media (max-width: 1240px) {
+          .oms-layout { grid-template-columns: 330px minmax(0, 1fr); }
+          .oms-stepper { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+          .oms-bottom-grid { grid-template-columns: 1fr; }
         }
-        @media (max-width: 920px) {
-          .staff-orders-hero, .staff-detail-header__top { display: grid; grid-template-columns: 1fr; }
-          .staff-orders-layout, .staff-orders-stats, .staff-stepper { grid-template-columns: 1fr; }
-          .staff-orders-panel--sticky, .staff-detail-header { position: static; }
-          .staff-orders-list { max-height: none; }
-          .staff-info-row { grid-template-columns: 1fr; }
-          .staff-items-table__head { display: none; }
-          .staff-order-item { grid-template-columns: 72px minmax(0, 1fr); }
-          .staff-order-item__metric { justify-items: start; text-align: left; }
-          .staff-order-item__mobileLabel { display: inline; }
+        @media (max-width: 940px) {
+          .oms-layout, .oms-info-grid, .oms-stepper { grid-template-columns: 1fr; }
+          .oms-queue-panel { position: static; }
+          .oms-queue-list { max-height: 420px; }
+          .oms-item-row { grid-template-columns: 52px minmax(0, 1fr); }
+          .oms-item-metric { text-align: left; }
         }
       `}</style>
 
-      <div className="staff-orders-hero">
-        <div className="staff-orders-hero__copy">
-          <div style={{ fontSize: 13, textTransform: "uppercase", letterSpacing: "0.12em", color: "#93c5fd", fontWeight: 900 }}>Sales OMS</div>
-          <h1 style={{ margin: "10px 0 0", fontSize: 34, lineHeight: 1.08 }}>Trung tâm vận hành đơn hàng</h1>
-          <p>Theo dõi đơn chờ xử lý, cập nhật giao vận, xác nhận hoàn tất và lưu ghi chú tư vấn trong một dashboard vận hành gọn, rõ tầng thông tin.</p>
-        </div>
-        <div className="staff-orders-hero__actions">
-          <Link to="/staff/chat" className="staff-btn staff-btn--secondary" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
-            Ticket tư vấn
-          </Link>
-          <button type="button" className="staff-btn staff-btn--secondary" onClick={refreshCurrentOrder} disabled={Boolean(actionLoading)}>
-            Làm mới dữ liệu
-          </button>
-        </div>
-      </div>
+      {/* ==================== EXECUTIVE SALES OMS HERO ==================== */}
+      <section className="ai-studio-hero">
+        <div className="ai-studio-hero-top">
+          <div>
+            <div className="ai-studio-hero-badges">
+              <span className="ai-studio-live-pill">
+                <span className="ai-studio-live-dot" />
+                Sales OMS • Order Fulfillment
+              </span>
+              <span className="ai-studio-tech-pill">Serial 1:1 • VietQR • Vận đơn</span>
+            </div>
+            <h1 className="ai-studio-hero-title">Trung Tâm Vận Hành Đơn Hàng</h1>
+            <p className="ai-studio-hero-desc">
+              Theo dõi đơn hàng chờ xác nhận, gán Serial Number xuất kho, duyệt minh chứng chuyển khoản, cấp mã vận đơn và cập nhật tiến độ giao hàng theo thời gian thực.
+            </p>
+          </div>
 
-      <section className="staff-orders-stats" aria-label="Tổng quan OMS">
-        <article className="staff-orders-stat">
-          <div className="staff-orders-stat__top"><span>Đơn chờ xử lý</span><span>⏳</span></div>
-          <strong>{stats.pending}</strong>
-          <small>Cần xác nhận và phân luồng xử lý.</small>
-        </article>
-        <article className="staff-orders-stat">
-          <div className="staff-orders-stat__top"><span>Đang xử lý</span><span>🧾</span></div>
-          <strong>{stats.processing}</strong>
-          <small>Đơn đã xác nhận, đang chuẩn bị giao.</small>
-        </article>
-        <article className="staff-orders-stat">
-          <div className="staff-orders-stat__top"><span>Đang giao</span><span>🚚</span></div>
-          <strong>{stats.shipped}</strong>
-          <small>Đơn đã có vận đơn và đang trên đường.</small>
-        </article>
-        <article className="staff-orders-stat">
-          <div className="staff-orders-stat__top"><span>Tổng giá trị hôm nay</span><span>₫</span></div>
-          <strong>{formatCurrency(stats.todayValue)}</strong>
-          <small>Tổng giá trị đơn tạo trong ngày hiện tại.</small>
-        </article>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <Link
+              to="/staff/chat"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 7,
+                padding: "10px 15px",
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,0.18)",
+                background: "rgba(255,255,255,0.08)",
+                color: "#f8fafc",
+                fontSize: 13,
+                fontWeight: 700,
+                textDecoration: "none",
+                backdropFilter: "blur(8px)"
+              }}
+            >
+              Ticket tư vấn ↗
+            </Link>
+            <button
+              type="button"
+              className="ai-studio-hero-cta"
+              onClick={refreshCurrentOrder}
+              disabled={Boolean(actionLoading) || loading}
+            >
+              <svg className={loading ? "ai-studio-spin" : ""} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                <path d="M21 3v5h-5" />
+              </svg>
+              <span>Làm Mới Dữ Liệu</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="ai-studio-kpi-grid">
+          <button
+            type="button"
+            className="ai-studio-kpi oms-hero-kpi-btn"
+            style={{ "--kpi-accent": "#fbbf24" }}
+            onClick={() => setStatusFilter("PENDING")}
+          >
+            <div className="ai-studio-kpi-head">
+              <span className="ai-studio-kpi-label">Đơn chờ xử lý</span>
+              <span className="ai-studio-kpi-icon">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+              </span>
+            </div>
+            <div className="ai-studio-kpi-value" style={{ color: stats.pending > 0 ? "#fcd34d" : "#ffffff" }}>
+              {stats.pending}
+            </div>
+            <div className="ai-studio-kpi-hint">Cần xác nhận và phân luồng</div>
+          </button>
+
+          <button
+            type="button"
+            className="ai-studio-kpi oms-hero-kpi-btn"
+            style={{ "--kpi-accent": "#38bdf8" }}
+            onClick={() => setStatusFilter("PROCESSING")}
+          >
+            <div className="ai-studio-kpi-head">
+              <span className="ai-studio-kpi-label">Đang xử lý kho</span>
+              <span className="ai-studio-kpi-icon">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /></svg>
+              </span>
+            </div>
+            <div className="ai-studio-kpi-value">{stats.processing}</div>
+            <div className="ai-studio-kpi-hint">Đang gán Serial &amp; đóng gói</div>
+          </button>
+
+          <button
+            type="button"
+            className="ai-studio-kpi oms-hero-kpi-btn"
+            style={{ "--kpi-accent": "#a78bfa" }}
+            onClick={() => setStatusFilter("SHIPPED")}
+          >
+            <div className="ai-studio-kpi-head">
+              <span className="ai-studio-kpi-label">Đang vận chuyển</span>
+              <span className="ai-studio-kpi-icon">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><rect x="1" y="3" width="15" height="13" /><polygon points="16 8 20 8 23 11 23 16 16 16 16 8" /><circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" /></svg>
+              </span>
+            </div>
+            <div className="ai-studio-kpi-value">{stats.shipped}</div>
+            <div className="ai-studio-kpi-hint">Đã cấp mã vận đơn giao khách</div>
+          </button>
+
+          <div className="ai-studio-kpi" style={{ "--kpi-accent": "#34d399" }}>
+            <div className="ai-studio-kpi-head">
+              <span className="ai-studio-kpi-label">Giá trị hôm nay</span>
+              <span className="ai-studio-kpi-icon">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+              </span>
+            </div>
+            <div className="ai-studio-kpi-value" style={{ color: "#6ee7b7", fontSize: 21 }}>
+              {formatCurrency(stats.todayValue)} đ
+            </div>
+            <div className="ai-studio-kpi-hint">Tổng giá trị đơn tạo trong ngày</div>
+          </div>
+        </div>
       </section>
 
-      {errorMessage ? <div className="staff-orders-alert staff-orders-alert--error">{errorMessage}</div> : null}
-      {successMessage ? <div className="staff-orders-alert staff-orders-alert--success">{successMessage}</div> : null}
+      {errorMessage ? <div className="oms-alert oms-alert--error">{errorMessage}</div> : null}
+      {successMessage ? <div className="oms-alert oms-alert--success">{successMessage}</div> : null}
 
-      <div className="staff-orders-layout">
+      {/* ==================== MASTER-DETAIL OMS WORKSPACE ==================== */}
+      <div className="oms-layout">
         <StaffOrderQueue
           loading={loading}
           filteredOrders={filteredOrders}
@@ -1512,20 +1579,18 @@ export function StaffOrdersPage() {
           setSelectedOrderId={setSelectedOrderId}
         />
 
-        <main className="staff-orders-detail">
+        <main className="oms-detail-pane">
           {detailLoading ? (
-            <div className="staff-orders-detail__body">
-              <DetailSkeleton />
-            </div>
+            <DetailSkeleton />
           ) : !selectedOrder ? (
-            <div className="staff-orders-detail__body">
-              <div className="staff-orders-empty">
-                <strong style={{ display: "block", marginBottom: 8, color: "#0f172a" }}>Chưa chọn đơn hàng</strong>
-                Chọn một đơn ở cột bên trái để xem chi tiết và thao tác.
+            <div className="oms-card">
+              <div className="oms-empty-box">
+                <strong style={{ display: "block", marginBottom: 6, color: "#0f172a", fontSize: 15 }}>Chưa chọn đơn hàng</strong>
+                <span>Chọn một đơn hàng ở cột bên trái để xem chi tiết, gán Serial và cập nhật giao vận.</span>
               </div>
             </div>
           ) : (
-            <div className="staff-orders-detail__body">
+            <>
               <StaffOrderHeader
                 selectedOrder={selectedOrder}
                 selectedStatusMeta={selectedStatusMeta}
@@ -1533,27 +1598,36 @@ export function StaffOrdersPage() {
                 actionButtons={actionButtons}
               />
 
-              <div className="staff-workspace-section">
-                <StaffOrderTimeline orderTimeline={orderTimeline} />
-                <StaffCustomerInfo selectedOrder={selectedOrder} customer={customer} selectedStatusMeta={selectedStatusMeta} />
-                <StaffOrderItemsTable selectedOrder={selectedOrder} />
-                <StaffSerialNumbersManager
-                  orderSerialsInfo={orderSerialsInfo}
-                  serialsLoading={serialsLoading}
-                  serialsSaving={serialsSaving}
-                  serialsError={serialsError}
-                  serialInputs={serialInputs}
-                  setSerialInputs={setSerialInputs}
-                  handleSaveSerials={handleSaveSerials}
-                  handleAutoGenerateSerials={handleAutoGenerateSerials}
-                  selectedOrder={selectedOrder}
-                />
-                <StaffPaymentPanel
-                  selectedOrder={selectedOrder}
-                  onApprovePaymentProof={handleApprovePaymentProof}
-                  actionLoading={actionLoading}
-                  onZoomProof={setZoomProofUrl}
-                />
+              <StaffOrderTimeline orderTimeline={orderTimeline} />
+
+              <StaffCustomerInfo
+                selectedOrder={selectedOrder}
+                customer={customer}
+                selectedStatusMeta={selectedStatusMeta}
+              />
+
+              <StaffOrderItemsTable selectedOrder={selectedOrder} />
+
+              <StaffSerialNumbersManager
+                orderSerialsInfo={orderSerialsInfo}
+                serialsLoading={serialsLoading}
+                serialsSaving={serialsSaving}
+                serialsError={serialsError}
+                serialInputs={serialInputs}
+                setSerialInputs={setSerialInputs}
+                handleSaveSerials={handleSaveSerials}
+                handleAutoGenerateSerials={handleAutoGenerateSerials}
+                selectedOrder={selectedOrder}
+              />
+
+              <StaffPaymentPanel
+                selectedOrder={selectedOrder}
+                onApprovePaymentProof={handleApprovePaymentProof}
+                actionLoading={actionLoading}
+                onZoomProof={setZoomProofUrl}
+              />
+
+              <div className="oms-bottom-grid">
                 <StaffShipmentPanel
                   selectedOrder={selectedOrder}
                   shippingCarrier={shippingCarrier}
@@ -1571,47 +1645,85 @@ export function StaffOrdersPage() {
                   actionLoading={actionLoading}
                 />
               </div>
-            </div>
+            </>
           )}
         </main>
       </div>
 
+      {/* ==================== LUXURY CANCEL ORDER MODAL ==================== */}
       {showCancelDialog ? (
-        <div className="staff-modal">
-          <div className="staff-modal__panel">
-            <h2>Hủy đơn #{selectedOrder?.id}</h2>
-            <p>Nhập lý do hủy đơn. Tồn kho SKU, lượt dùng voucher và Serial Number đã gán (nếu có) sẽ được tự động hoàn trả.</p>
-            <textarea
-              className="staff-orders-textarea"
-              value={cancelReason}
-              onChange={(event) => setCancelReason(event.target.value)}
-              rows={4}
-              placeholder="Lý do hủy đơn"
-            />
-            <div className="staff-modal__actions">
-              <button type="button" className="staff-btn staff-btn--danger-fill" onClick={handleCancelOrder} disabled={Boolean(actionLoading)}>
-                {actionLoading === "cancel" ? "Đang xử lý..." : "Xác nhận hủy"}
-              </button>
+        <div className="ai-modal-backdrop" onClick={() => setShowCancelDialog(false)}>
+          <div className="ai-chunk-modal" style={{ maxWidth: 540 }} onClick={(e) => e.stopPropagation()}>
+            <div className="ai-chunk-modal-head">
+              <div>
+                <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2px 9px", borderRadius: 999, background: "rgba(248,113,113,0.2)", color: "#fca5a5", letterSpacing: "0.05em", textTransform: "uppercase" }}>
+                  Hủy đơn hàng
+                </span>
+                <h3 style={{ margin: "6px 0 0", fontSize: 18, fontWeight: 800, color: "#ffffff" }}>
+                  Xác Nhận Hủy Đơn #{selectedOrder?.id}
+                </h3>
+              </div>
               <button
                 type="button"
-                className="staff-btn staff-btn--secondary"
-                onClick={() => {
-                  setShowCancelDialog(false);
-                  setCancelReason("");
-                }}
+                onClick={() => setShowCancelDialog(false)}
+                style={{ width: 34, height: 34, borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.1)", color: "#e2e8f0", cursor: "pointer" }}
               >
-                Quay lại
+                ✕
               </button>
+            </div>
+
+            <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+              <p style={{ margin: 0, fontSize: 13, color: "#475569", lineHeight: 1.55 }}>
+                Nhập lý do hủy đơn. Tồn kho SKU, lượt dùng mã giảm giá và Serial Number đã gán (nếu có) sẽ được hệ thống tự động hoàn trả.
+              </p>
+
+              <div className="cat-warranty-presets" style={{ marginTop: 0 }}>
+                {CANCEL_REASON_PRESETS.map((reason) => (
+                  <button key={reason} type="button" className="cat-warranty-chip" onClick={() => setCancelReason(reason)}>
+                    {reason}
+                  </button>
+                ))}
+              </div>
+
+              <textarea
+                className="cat-input"
+                value={cancelReason}
+                onChange={(event) => setCancelReason(event.target.value)}
+                rows={4}
+                placeholder="Nhập lý do hủy đơn chi tiết..."
+              />
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button
+                  type="button"
+                  className="cat-btn-clear"
+                  onClick={() => {
+                    setShowCancelDialog(false);
+                    setCancelReason("");
+                  }}
+                >
+                  Quay lại
+                </button>
+                <button
+                  type="button"
+                  className="oms-btn oms-btn--danger-fill"
+                  onClick={handleCancelOrder}
+                  disabled={Boolean(actionLoading)}
+                >
+                  {actionLoading === "cancel" ? "Đang xử lý..." : "Xác nhận hủy đơn"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       ) : null}
 
+      {/* ==================== FULLSCREEN PROOF LIGHTBOX ==================== */}
       {zoomProofUrl ? (
         <div
-          className="staff-modal"
+          className="ai-modal-backdrop"
           onClick={() => setZoomProofUrl(null)}
-          style={{ background: "rgba(15, 23, 42, 0.85)", cursor: "zoom-out", zIndex: 100 }}
+          style={{ zIndex: 10000, cursor: "zoom-out" }}
         >
           <div style={{ position: "relative", maxWidth: "90vw", maxHeight: "90vh" }} onClick={(e) => e.stopPropagation()}>
             <button
@@ -1619,21 +1731,22 @@ export function StaffOrdersPage() {
               onClick={() => setZoomProofUrl(null)}
               style={{
                 position: "absolute",
-                top: -16,
-                right: -16,
+                top: -14,
+                right: -14,
                 background: "#ef4444",
                 color: "#fff",
                 border: "none",
                 borderRadius: "50%",
-                width: 36,
-                height: 36,
-                fontSize: 20,
-                fontWeight: 900,
-                cursor: "pointer"
+                width: 34,
+                height: 34,
+                fontSize: 18,
+                fontWeight: 800,
+                cursor: "pointer",
+                boxShadow: "0 4px 14px rgba(0,0,0,0.4)"
               }}
               title="Đóng"
             >
-              ×
+              ✕
             </button>
             <img
               src={zoomProofUrl}

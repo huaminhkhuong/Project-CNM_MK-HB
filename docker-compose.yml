@@ -73,6 +73,7 @@ services:
       - ./services/ai-service/data_store:/app/data_store
       - ./data:/app/data:ro
       - ./services/api/src/data:/app/services/api/src/data:ro
+      - ./services/api/.env:/app/.env:ro
 
   frontend:
     build:

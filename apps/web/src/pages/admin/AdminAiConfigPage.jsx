@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
+import "../../styles/admin-ai-studio.css";
 import { useAuth } from "../../hooks/useAuth";
 import {
   AdminAlerts,
@@ -25,6 +26,7 @@ import {
   updateAdminAiPrompt,
   updateAdminAiRule,
   updateAdminAiSystemConfig,
+  testAdminAiConnection,
   getAdminAiDocuments,
   uploadAdminAiDocument,
   deleteAdminAiDocument,
@@ -54,6 +56,73 @@ const MATCH_TYPES = [
   { id: "exact", label: "Khớp chính xác từng chữ (exact)" },
   { id: "budget_threshold", label: "Ngưỡng ngân sách (ví dụ: < 5000000 hoặc > 200000000)" }
 ];
+
+const LLM_PROVIDER_PRESETS = {
+  groq: {
+    id: "groq",
+    title: "⚡ Groq Cloud (Llama 3.3)",
+    badge: "Khuyên dùng • Siêu mượt ~0,4s",
+    badgeBg: "#dcfce7",
+    badgeColor: "#15803d",
+    desc: "Miễn phí ~14.400 lượt/ngày, tốc độ ~500 token/giây, không bị đứt câu hay 503 giờ cao điểm.",
+    defaultModel: "llama-3.3-70b-versatile",
+    keyUrl: "https://console.groq.com/keys",
+    keyPlaceholder: "gsk_... (Lấy miễn phí tại console.groq.com/keys)",
+    models: [
+      { value: "llama-3.3-70b-versatile", label: "llama-3.3-70b-versatile (Khuyên dùng - Thông minh & Siêu nhanh)" },
+      { value: "llama-3.1-8b-instant", label: "llama-3.1-8b-instant (Cực nhanh <0,2s, hạn mức cực cao)" },
+      { value: "qwen/qwen3-32b", label: "qwen/qwen3-32b (Mạnh về tiếng Việt & suy luận kỹ thuật)" }
+    ]
+  },
+  gemini: {
+    id: "gemini",
+    title: "🔷 Google Gemini",
+    badge: "Mặc định • Tích hợp RAG",
+    badgeBg: "#dbeafe",
+    badgeColor: "#1d4ed8",
+    desc: "Tốt cho tiếng Việt & đồng bộ với Gemini Embedding. Nên bật kèm dự phòng Groq tránh lỗi 503/429 Free Tier.",
+    defaultModel: "gemini-3.5-flash-lite",
+    keyUrl: "https://aistudio.google.com/apikey",
+    keyPlaceholder: "AIza... (Lấy tại aistudio.google.com/apikey)",
+    models: [
+      { value: "gemini-3.5-flash-lite", label: "gemini-3.5-flash-lite (Nhanh ~1,4s - Khuyên dùng trên Gemini)" },
+      { value: "gemini-3-flash-preview", label: "gemini-3-flash-preview (Sâu sắc - giới hạn 20 lượt/ngày Free)" },
+      { value: "gemini-3.1-flash-lite", label: "gemini-3.1-flash-lite (Dự phòng)" }
+    ]
+  },
+  openai: {
+    id: "openai",
+    title: "🧠 OpenAI GPT",
+    badge: "Ổn định Production",
+    badgeBg: "#f3e8ff",
+    badgeColor: "#7e22ce",
+    desc: "Độ ổn định thương mại cao, tuân thủ cấu trúc JSON nghiêm ngặt (cần nạp credit trên platform.openai.com).",
+    defaultModel: "gpt-4o-mini",
+    keyUrl: "https://platform.openai.com/api-keys",
+    keyPlaceholder: "sk-... (Lấy tại platform.openai.com/api-keys)",
+    models: [
+      { value: "gpt-4o-mini", label: "gpt-4o-mini (Nhanh, chi phí thấp, rất ổn định)" },
+      { value: "gpt-4.1-mini", label: "gpt-4.1-mini (Đời mới, cân bằng chất lượng & giá)" },
+      { value: "gpt-4o", label: "gpt-4o (Cao cấp nhất)" }
+    ]
+  },
+  ollama: {
+    id: "ollama",
+    title: "💻 Ollama Local",
+    badge: "Offline 100% • 0đ",
+    badgeBg: "#f1f5f9",
+    badgeColor: "#334155",
+    desc: "Chạy ngay trên máy cá nhân tại localhost:11434, không cần API Key, không lo giới hạn quota hay mất mạng.",
+    defaultModel: "qwen2.5:7b",
+    keyUrl: "https://ollama.com/download",
+    keyPlaceholder: "Không cần API Key (chạy trực tiếp trên máy cục bộ)",
+    models: [
+      { value: "qwen2.5:7b", label: "qwen2.5:7b (Mạnh tiếng Việt trên máy 8-16GB RAM)" },
+      { value: "llama3.1:8b", label: "llama3.1:8b (Phổ biến, cân bằng)" },
+      { value: "gemma3:4b", label: "gemma3:4b (Siêu nhẹ cho laptop 8GB RAM)" }
+    ]
+  }
+};
 
 export function AdminAiConfigPage({ initialTab }) {
   const { authState, isAuthenticated } = useAuth();
@@ -121,15 +190,25 @@ export function AdminAiConfigPage({ initialTab }) {
   const [systemConfig, setSystemConfig] = useState({
     provider: "gemini",
     model: "gemini-3.5-flash-lite",
+    fallbackProvider: "groq",
+    fallbackModel: "llama-3.3-70b-versatile",
+    autoFailover: true,
     temperature: 0.4,
-    maxTokens: 2048,
+    maxTokens: 4096,
     maxCatalogProducts: 35,
     retrievalMode: "keyword_and_category",
     apiKeyMasked: "",
-    apiKey: ""
+    hasApiKey: false,
+    apiKey: "",
+    fallbackApiKeyMasked: "",
+    hasFallbackApiKey: false,
+    fallbackApiKey: "",
+    providerKeyStatus: {}
   });
   const [tokenEstimation, setTokenEstimation] = useState(null);
   const [savingSystemConfig, setSavingSystemConfig] = useState(false);
+  const [testingConnTarget, setTestingConnTarget] = useState(null); // "primary" | "fallback" | null
+  const [connTestResult, setConnTestResult] = useState(null);
 
   // RAG Knowledge Document Management States
   const [documents, setDocuments] = useState([]);
@@ -141,6 +220,24 @@ export function AdminAiConfigPage({ initialTab }) {
   const [embeddingModelInfo, setEmbeddingModelInfo] = useState(null);
   const [previewChunksData, setPreviewChunksData] = useState(null);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [docSearchKeyword, setDocSearchKeyword] = useState("");
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const filteredDocuments = useMemo(() => {
+    const q = docSearchKeyword.trim().toLowerCase();
+    if (!q) return documents;
+    return documents.filter((d) =>
+      String(d.title || "").toLowerCase().includes(q) ||
+      String(d.fileName || "").toLowerCase().includes(q) ||
+      String(d.format || "").toLowerCase().includes(q)
+    );
+  }, [documents, docSearchKeyword]);
+
+  const totalRagChunks = useMemo(
+    () => documents.reduce((acc, d) => acc + (d.chunkCount || 0), 0),
+    [documents]
+  );
 
   useAdminToast(successMessage, () => setSuccessMessage(""));
 
@@ -184,16 +281,87 @@ export function AdminAiConfigPage({ initialTab }) {
       const res = await updateAdminAiSystemConfig(systemConfig);
       const data = res?.data || res || {};
       if (data.config) {
-        setSystemConfig((prev) => ({ ...prev, ...data.config, apiKey: "" }));
+        setSystemConfig((prev) => ({ ...prev, ...data.config, apiKey: "", fallbackApiKey: "" }));
       }
       if (data.estimation) {
         setTokenEstimation(data.estimation);
       }
-      setSuccessMessage("Đã lưu và cập nhật cấu hình hệ thống AI thành công!");
+      setSuccessMessage("Đã lưu và đồng bộ cấu hình hệ thống AI + Failover đa nhà cung cấp thành công!");
     } catch (err) {
       setErrorMessage("Lỗi khi lưu cấu hình AI: " + (err.response?.data?.message || err.message));
     } finally {
       setSavingSystemConfig(false);
+    }
+  }
+
+  function handleSelectProvider(nextProvider) {
+    const preset = LLM_PROVIDER_PRESETS[nextProvider] || LLM_PROVIDER_PRESETS.gemini;
+    const keyInfo = systemConfig.providerKeyStatus?.[nextProvider];
+    setConnTestResult(null);
+    setSystemConfig((prev) => {
+      const nextFallback = prev.fallbackProvider === nextProvider
+        ? (nextProvider === "groq" ? "gemini" : "groq")
+        : prev.fallbackProvider;
+      const fbPreset = LLM_PROVIDER_PRESETS[nextFallback];
+      const fbKeyInfo = prev.providerKeyStatus?.[nextFallback];
+      return {
+        ...prev,
+        provider: nextProvider,
+        model: preset.defaultModel,
+        apiKey: "",
+        hasApiKey: nextProvider === "ollama" || Boolean(keyInfo?.hasKey),
+        apiKeyMasked: keyInfo?.masked || "",
+        fallbackProvider: nextFallback,
+        fallbackModel: fbPreset ? (prev.fallbackProvider === nextProvider ? fbPreset.defaultModel : prev.fallbackModel) : "",
+        hasFallbackApiKey: nextFallback === "ollama" || Boolean(fbKeyInfo?.hasKey),
+        fallbackApiKeyMasked: fbKeyInfo?.masked || ""
+      };
+    });
+  }
+
+  function handleSelectFallbackProvider(nextFb) {
+    const preset = LLM_PROVIDER_PRESETS[nextFb];
+    const keyInfo = systemConfig.providerKeyStatus?.[nextFb];
+    setSystemConfig((prev) => ({
+      ...prev,
+      fallbackProvider: nextFb,
+      fallbackModel: preset ? preset.defaultModel : "",
+      fallbackApiKey: "",
+      hasFallbackApiKey: nextFb === "ollama" || Boolean(keyInfo?.hasKey),
+      fallbackApiKeyMasked: keyInfo?.masked || ""
+    }));
+  }
+
+  async function handleTestConnection(target = "primary") {
+    const isFb = target === "fallback";
+    const provider = isFb ? systemConfig.fallbackProvider : systemConfig.provider;
+    const model = isFb ? systemConfig.fallbackModel : systemConfig.model;
+    const apiKey = isFb ? systemConfig.fallbackApiKey : systemConfig.apiKey;
+    if (!provider || provider === "none") {
+      setErrorMessage("Vui lòng chọn nhà cung cấp dự phòng trước khi kiểm tra kết nối.");
+      return;
+    }
+    try {
+      setTestingConnTarget(target);
+      setConnTestResult(null);
+      setErrorMessage("");
+      const res = await testAdminAiConnection({ provider, model, apiKey });
+      const result = res?.data || res;
+      setConnTestResult({ ...result, target });
+      if (result?.ok) {
+        setSuccessMessage(`Kết nối ${provider.toUpperCase()} (${result.model}) thành công trong ${result.latencyMs}ms!`);
+      }
+    } catch (err) {
+      setConnTestResult({
+        ok: false,
+        target,
+        provider,
+        model,
+        latencyMs: 0,
+        error: err.response?.data?.message || err.message || "Không thể gọi kiểm tra kết nối"
+      });
+    } finally {
+      setTestingConnTarget(null);
     }
   }
 
@@ -472,197 +640,205 @@ export function AdminAiConfigPage({ initialTab }) {
 
   return (
     <AdminPage>
-      <AdminPageHead
-        eyebrow={activeTab === "rag" ? "RAG Knowledge & Vector Database" : "AI Management Center"}
-        title={activeTab === "rag" ? "Quản Lý Tài Liệu RAG & Kho Tri Thức AI" : "Quản Trị Lọc Dữ Liệu Đầu Vào & AI Customization"}
-        description={
-          activeTab === "rag"
-            ? "Mở rộng tri thức cho Chatbot & Smart PC Builder bằng mô hình Google Gemini Embedding (models/gemini-embedding-001) kết hợp ChromaDB và tìm kiếm từ khóa BM25Okapi tiếng Việt."
-            : "Kiểm soát đầu vào cho 3 chức năng: Chat Tư Vấn, Đề Xuất Cấu Hình 32 Linh Kiện, và Giám Định Build PC. Tối ưu chi phí Token bằng bộ lọc 2 tầng (Tự trả lời / Chặn / Tiêm Prompt)."
-        }
-        actions={
-          activeTab === "rules" ? (
-            <AdminBtn variant="primary" onClick={handleOpenCreateModal}>
-              ➕ Thêm Quy Tắc Lọc Mới
-            </AdminBtn>
-          ) : activeTab === "rag" ? (
-            <button
-              type="button"
-              onClick={handleReindexAll}
-              disabled={isReindexing}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "10px 18px",
-                background: isReindexing ? "#94a3b8" : "#2563eb",
-                color: "#fff",
-                border: "none",
-                borderRadius: 8,
-                fontWeight: 700,
-                fontSize: 13,
-                cursor: isReindexing ? "not-allowed" : "pointer",
-                boxShadow: "0 2px 6px rgba(37,99,235,0.3)"
-              }}
-            >
-              {isReindexing ? "🔄 Đang tái lập chỉ mục..." : "🔄 Tái Lập Chỉ Mục Toàn Bộ"}
-            </button>
-          ) : null
-        }
-      />
+      <div className="ai-studio-shell">
+        {/* ==================== EXECUTIVE OBSIDIAN HERO HEADER ==================== */}
+        <section className="ai-studio-hero">
+          <div className="ai-studio-hero-top">
+            <div>
+              <div className="ai-studio-hero-badges">
+                <span className="ai-studio-live-pill">
+                  <span className="ai-studio-live-dot" />
+                  {activeTab === "rag" ? "Vector Engine Online • Port 5001" : "AI Gateway & Guardrail Active"}
+                </span>
+                <span className="ai-studio-tech-pill">
+                  {activeTab === "rag"
+                    ? "ChromaDB 3072d + BM25Okapi RRF"
+                    : `Primary: ${String(systemConfig.provider || "gemini").toUpperCase()} (${systemConfig.model || "auto"})`}
+                </span>
+              </div>
+              <h1 className="ai-studio-hero-title">
+                {activeTab === "rag"
+                  ? "Trung Tâm Tri Thức RAG & Vector Database"
+                  : "Trung Tâm Quản Trị AI, Bộ Lọc & Đa Nhà Cung Cấp"}
+              </h1>
+              <p className="ai-studio-hero-desc">
+                {activeTab === "rag"
+                  ? "Nạp tài liệu kỹ thuật, chính sách cửa hàng và luật phần cứng cho Chatbot & Smart PC Builder bằng mô hình Google Gemini Embedding (0MB RAM server) kết hợp truy hồi lai ChromaDB + BM25Okapi."
+                  : "Kiểm soát toàn diện bộ lọc 2 tầng, Prompt chuyên môn, chuyển mạch nhanh đa nhà cung cấp (Groq / Gemini / OpenAI / Ollama) và dự toán chi phí Token tập trung."}
+              </p>
+            </div>
 
-      <AdminAlerts errorMessage={errorMessage} successMessage={successMessage} />
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {activeTab === "rules" ? (
+                <button type="button" className="ai-studio-hero-cta" onClick={handleOpenCreateModal}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
+                  <span>Thêm Quy Tắc Lọc Mới</span>
+                </button>
+              ) : activeTab === "rag" ? (
+                <button
+                  type="button"
+                  className="ai-studio-hero-cta"
+                  onClick={handleReindexAll}
+                  disabled={isReindexing}
+                >
+                  <svg className={isReindexing ? "ai-studio-spin" : ""} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                    <path d="M21 3v5h-5" />
+                  </svg>
+                  <span>{isReindexing ? "Đang tái lập chỉ mục..." : "Tái Lập Chỉ Mục Toàn Bộ"}</span>
+                </button>
+              ) : null}
+            </div>
+          </div>
 
-      {/* Metrics Tổng Quan: Tự động thích ứng theo Tab hiện tại */}
-      {activeTab === "rag" ? (
-        <AdminMetrics>
-          <AdminMetric
-            label="Tài liệu tri thức mở rộng"
-            value={documents.length}
-            hint="Định dạng PDF, Markdown, TXT"
-            tone="primary"
-          />
-          <AdminMetric
-            label="Tổng phân đoạn (Chunks)"
-            value={documents.reduce((acc, d) => acc + (d.chunkCount || 0), 0)}
-            hint="Cắt đoạn ngữ nghĩa 600 ký tự"
-            tone="default"
-          />
-          <AdminMetric
-            label="Mô hình Vector Embedding"
-            value="Gemini Embedding"
-            hint="models/gemini-embedding-001 (0MB RAM)"
-            tone="success"
-          />
-          <AdminMetric
-            label="Phạm vi nghiệp vụ phục vụ"
-            value="2 Chức Năng"
-            hint="Chatbot & Smart PC Builder"
-            tone="default"
-          />
-        </AdminMetrics>
-      ) : (
-        <AdminMetrics>
-          <AdminMetric
-            label="Tổng quy tắc đang chạy"
-            value={rules.length}
-            hint={`${rules.filter((r) => r.isActive).length} quy tắc đang bật`}
-            tone="default"
-          />
-          <AdminMetric
-            label="Quy tắc tự trả lời (0ms, 0$)"
-            value={directReplyCount}
-            hint="Bypass LLM API cho FAQ & chính sách"
-            tone="success"
-          />
-          <AdminMetric
-            label="Quy tắc Chặn / Bảo vệ"
-            value={blockCount}
-            hint="Chặn off-topic, ngân sách ảo"
-            tone="danger"
-          />
-          <AdminMetric
-            label="Lượt bắt trúng (Tiết kiệm Token)"
-            value={totalHitCount}
-            hint="Lượt câu hỏi không cần gọi LLM"
-            tone="primary"
-          />
-        </AdminMetrics>
-      )}
+          {/* 4 Glassmorphic KPI Tiles Integrated in Hero */}
+          {activeTab === "rag" ? (
+            <div className="ai-studio-kpi-grid">
+              <div className="ai-studio-kpi" style={{ "--kpi-accent": "#38bdf8" }}>
+                <div className="ai-studio-kpi-head">
+                  <span className="ai-studio-kpi-label">Tài liệu tri thức</span>
+                  <span className="ai-studio-kpi-icon">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+                  </span>
+                </div>
+                <div className="ai-studio-kpi-value">{documents.length}</div>
+                <div className="ai-studio-kpi-hint">Định dạng PDF, Markdown, TXT</div>
+              </div>
 
-      {/* Tab Navigation */}
-      <div style={{ display: "flex", gap: 10, margin: "20px 0 24px", borderBottom: "2px solid #e2e8f0", paddingBottom: 12 }}>
-        <button
-          type="button"
-          onClick={() => setActiveTab("rules")}
-          style={{
-            padding: "10px 20px",
-            background: activeTab === "rules" ? "#2563eb" : "#f1f5f9",
-            color: activeTab === "rules" ? "#fff" : "#334155",
-            border: "none",
-            borderRadius: 10,
-            fontWeight: 700,
-            fontSize: 14,
-            cursor: "pointer",
-            transition: "all 0.15s"
-          }}
-        >
-          ⚙️ 1. Quy Tắc Lọc Đầu Vào & FAQ ({rules.length})
-        </button>
+              <div className="ai-studio-kpi" style={{ "--kpi-accent": "#a78bfa" }}>
+                <div className="ai-studio-kpi-head">
+                  <span className="ai-studio-kpi-label">Phân đoạn (Chunks)</span>
+                  <span className="ai-studio-kpi-icon">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /></svg>
+                  </span>
+                </div>
+                <div className="ai-studio-kpi-value">{totalRagChunks}</div>
+                <div className="ai-studio-kpi-hint">Cắt ngữ nghĩa 600 ký tự • overlap 120</div>
+              </div>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab("prompts")}
-          style={{
-            padding: "10px 20px",
-            background: activeTab === "prompts" ? "#2563eb" : "#f1f5f9",
-            color: activeTab === "prompts" ? "#fff" : "#334155",
-            border: "none",
-            borderRadius: 10,
-            fontWeight: 700,
-            fontSize: 14,
-            cursor: "pointer",
-            transition: "all 0.15s"
-          }}
-        >
-          🧠 2. Tùy Biến Prompt & Tham Số AI (3 Chức Năng)
-        </button>
+              <div className="ai-studio-kpi" style={{ "--kpi-accent": "#34d399" }}>
+                <div className="ai-studio-kpi-head">
+                  <span className="ai-studio-kpi-label">Vector Embedding</span>
+                  <span className="ai-studio-kpi-icon">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><circle cx="12" cy="12" r="3" /><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" /></svg>
+                  </span>
+                </div>
+                <div className="ai-studio-kpi-value" style={{ fontSize: 18, color: "#6ee7b7" }}>Gemini 001</div>
+                <div className="ai-studio-kpi-hint">3072 chiều • 0MB RAM máy chủ</div>
+              </div>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab("test")}
-          style={{
-            padding: "10px 20px",
-            background: activeTab === "test" ? "#2563eb" : "#f1f5f9",
-            color: activeTab === "test" ? "#fff" : "#334155",
-            border: "none",
-            borderRadius: 10,
-            fontWeight: 700,
-            fontSize: 14,
-            cursor: "pointer",
-            transition: "all 0.15s"
-          }}
-        >
-          🧪 3. Công Cụ Kiểm Thử Bộ Lọc (Simulator)
-        </button>
+              <div className="ai-studio-kpi" style={{ "--kpi-accent": "#fbbf24" }}>
+                <div className="ai-studio-kpi-head">
+                  <span className="ai-studio-kpi-label">Phạm vi phục vụ</span>
+                  <span className="ai-studio-kpi-icon">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" /></svg>
+                  </span>
+                </div>
+                <div className="ai-studio-kpi-value" style={{ fontSize: 19 }}>2 Phân Hệ</div>
+                <div className="ai-studio-kpi-hint">AI Chatbot & Smart PC Builder</div>
+              </div>
+            </div>
+          ) : (
+            <div className="ai-studio-kpi-grid">
+              <div className="ai-studio-kpi" style={{ "--kpi-accent": "#38bdf8" }}>
+                <div className="ai-studio-kpi-head">
+                  <span className="ai-studio-kpi-label">Tổng quy tắc</span>
+                  <span className="ai-studio-kpi-icon">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 3v18M3 12h18" /></svg>
+                  </span>
+                </div>
+                <div className="ai-studio-kpi-value">{rules.length}</div>
+                <div className="ai-studio-kpi-hint">{rules.filter((r) => r.isActive).length} quy tắc đang kích hoạt</div>
+              </div>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab("system")}
-          style={{
-            padding: "10px 20px",
-            background: activeTab === "system" ? "#2563eb" : "#f1f5f9",
-            color: activeTab === "system" ? "#fff" : "#334155",
-            border: "none",
-            borderRadius: 10,
-            fontWeight: 700,
-            fontSize: 14,
-            cursor: "pointer",
-            transition: "all 0.15s"
-          }}
-        >
-          ⚙️ 4. Cấu Hình Hệ Thống & Token
-        </button>
+              <div className="ai-studio-kpi" style={{ "--kpi-accent": "#34d399" }}>
+                <div className="ai-studio-kpi-head">
+                  <span className="ai-studio-kpi-label">Tự trả lời (0ms)</span>
+                  <span className="ai-studio-kpi-icon">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
+                  </span>
+                </div>
+                <div className="ai-studio-kpi-value" style={{ color: "#6ee7b7" }}>{directReplyCount}</div>
+                <div className="ai-studio-kpi-hint">Bypass LLM cho FAQ & chính sách</div>
+              </div>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab("rag")}
-          style={{
-            padding: "10px 20px",
-            background: activeTab === "rag" ? "#2563eb" : "#f1f5f9",
-            color: activeTab === "rag" ? "#fff" : "#334155",
-            border: "none",
-            borderRadius: 10,
-            fontWeight: 700,
-            fontSize: 14,
-            cursor: "pointer",
-            transition: "all 0.15s",
-            boxShadow: activeTab === "rag" ? "0 4px 12px rgba(37,99,235,0.25)" : "none"
-          }}
-        >
-          📚 5. Quản Lý Tài Liệu RAG & Tri Thức ({documents.length})
-        </button>
-      </div>
+              <div className="ai-studio-kpi" style={{ "--kpi-accent": "#f87171" }}>
+                <div className="ai-studio-kpi-head">
+                  <span className="ai-studio-kpi-label">Lá chắn Guardrail</span>
+                  <span className="ai-studio-kpi-icon">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+                  </span>
+                </div>
+                <div className="ai-studio-kpi-value" style={{ color: "#fca5a5" }}>{blockCount}</div>
+                <div className="ai-studio-kpi-hint">Chặn ngoài lề & ngân sách ảo</div>
+              </div>
+
+              <div className="ai-studio-kpi" style={{ "--kpi-accent": "#a78bfa" }}>
+                <div className="ai-studio-kpi-head">
+                  <span className="ai-studio-kpi-label">Lượt tiết kiệm Token</span>
+                  <span className="ai-studio-kpi-icon">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
+                  </span>
+                </div>
+                <div className="ai-studio-kpi-value">{totalHitCount}</div>
+                <div className="ai-studio-kpi-hint">Câu hỏi xử lý cục bộ 0đ chi phí</div>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <AdminAlerts errorMessage={errorMessage} successMessage={successMessage} />
+
+        {/* ==================== SINGLE-ROW SEGMENTED TAB BAR ==================== */}
+        <nav className="ai-studio-tabs-wrap" aria-label="AI Studio Navigation">
+          <button
+            type="button"
+            className={`ai-studio-tab${activeTab === "rules" ? " is-active" : ""}`}
+            onClick={() => setActiveTab("rules")}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+            <span>Quy Tắc & FAQ</span>
+            <span className="ai-studio-tab-count">{rules.length}</span>
+          </button>
+
+          <button
+            type="button"
+            className={`ai-studio-tab${activeTab === "prompts" ? " is-active" : ""}`}
+            onClick={() => setActiveTab("prompts")}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+            <span>Prompt AI</span>
+            <span className="ai-studio-tab-count">3</span>
+          </button>
+
+          <button
+            type="button"
+            className={`ai-studio-tab${activeTab === "test" ? " is-active" : ""}`}
+            onClick={() => setActiveTab("test")}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M9 3h6M10 3v6.5L4.5 19a2 2 0 0 0 1.7 3h11.6a2 2 0 0 0 1.7-3L14 9.5V3" /></svg>
+            <span>Kiểm Thử Bộ Lọc</span>
+          </button>
+
+          <button
+            type="button"
+            className={`ai-studio-tab${activeTab === "system" ? " is-active" : ""}`}
+            onClick={() => setActiveTab("system")}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+            <span>Hệ Thống & Failover</span>
+          </button>
+
+          <button
+            type="button"
+            className={`ai-studio-tab${activeTab === "rag" ? " is-active" : ""}`}
+            onClick={() => setActiveTab("rag")}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></svg>
+            <span>Tài Liệu RAG & Tri Thức</span>
+            <span className="ai-studio-tab-count">{documents.length}</span>
+          </button>
+        </nav>
 
       {/* ==================== TAB 1: QUY TẮC LỌC ==================== */}
       {activeTab === "rules" && (
@@ -1116,359 +1292,755 @@ export function AdminAiConfigPage({ initialTab }) {
         </div>
       )}
 
-      {/* ==================== TAB 5: QUẢN LÝ TÀI LIỆU RAG & TRI THỨC ==================== */}
+      {/* ==================== TAB 5: QUẢN LÝ TÀI LIỆU RAG & TRI THỨC (EXECUTIVE STUDIO) ==================== */}
       {activeTab === "rag" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 20, width: "100%" }}>
-          {/* Action Header */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, background: "#fff", padding: "14px 20px", borderRadius: 12, border: "1px solid #e2e8f0" }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: 16, color: "#0f172a" }}>Cơ Sở Tri Thức RAG (Retrieval-Augmented Generation)</h3>
-              <p style={{ margin: "4px 0 0", fontSize: 13, color: "#64748b" }}>
-                AI Service chạy độc lập tại cổng 5001, quản lý bộ nhớ vector hóa ChromaDB và từ vựng BM25Okapi tiếng Việt.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleReindexAll}
-              disabled={isReindexing}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "10px 18px",
-                background: isReindexing ? "#94a3b8" : "#2563eb",
-                color: "#fff",
-                border: "none",
-                borderRadius: 8,
-                fontWeight: 700,
-                fontSize: 13,
-                cursor: isReindexing ? "not-allowed" : "pointer",
-                boxShadow: "0 2px 6px rgba(37,99,235,0.3)"
-              }}
-            >
-              {isReindexing ? "🔄 Đang tái lập chỉ mục..." : "🔄 Tái Lập Chỉ Mục Toàn Bộ"}
-            </button>
-          </div>
+          <div className="ai-rag-workspace">
+            {/* CỘT TRÁI: NẠP TRI THỨC MỚI (DRAG & DROP INGESTION STUDIO) */}
+            <section className="ai-studio-panel">
+              <div className="ai-studio-panel-head">
+                <div className="ai-studio-panel-title-wrap">
+                  <span className="ai-studio-panel-icon" style={{ background: "#eff6ff", color: "#2563eb", border: "1px solid #dbeafe" }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
+                  </span>
+                  <div>
+                    <h3 className="ai-studio-panel-title">Nạp & Vector Hóa Tri Thức Mới</h3>
+                    <p className="ai-studio-panel-sub">Tự động trích xuất, cắt đoạn ngữ nghĩa và nạp vào ChromaDB</p>
+                  </div>
+                </div>
+              </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))", gap: 20, marginBottom: 24 }}>
-            {/* Cột 1: Tải lên tài liệu mới */}
-            <div style={{ minWidth: 0 }}>
-            <AdminCard title="📤 Tải Lên & Vector Hóa Tài Liệu Mới">
-              <p style={{ color: "#64748b", fontSize: 13, marginTop: 0 }}>
-                Tải lên tài liệu hướng dẫn kỹ thuật, chính sách bảo hành hoặc tiêu chí build máy để mở rộng kho tri thức cho AI.
-              </p>
-
-              <form onSubmit={handleUploadDocument} style={{ display: "grid", gap: 16 }}>
-                <AdminField label="Chọn tệp tài liệu (.pdf, .md, .txt)">
+              <div className="ai-studio-panel-body">
+                <form onSubmit={handleUploadDocument} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                   <input
+                    ref={fileInputRef}
                     type="file"
                     accept=".pdf,.md,.txt"
+                    style={{ display: "none" }}
                     onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                    style={{
-                      padding: "8px 12px",
-                      borderRadius: 8,
-                      border: "1px dashed #cbd5e1",
-                      background: "#f8fafc",
-                      width: "100%",
-                      fontSize: 13
-                    }}
-                    required
                   />
-                  {uploadFile && (
-                    <div style={{ fontSize: 12, color: "#059669", marginTop: 4, fontWeight: 600 }}>
-                      ✓ Đã chọn: {uploadFile.name} ({(uploadFile.size / 1024).toFixed(1)} KB)
+
+                  {!uploadFile ? (
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      className={`ai-dropzone${isDraggingFile ? " is-dragging" : ""}`}
+                      onClick={() => fileInputRef.current?.click()}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          fileInputRef.current?.click();
+                        }
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setIsDraggingFile(true);
+                      }}
+                      onDragLeave={() => setIsDraggingFile(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDraggingFile(false);
+                        const dropped = e.dataTransfer.files?.[0];
+                        if (dropped) setUploadFile(dropped);
+                      }}
+                    >
+                      <span className="ai-dropzone-icon">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                          <polyline points="14 2 14 8 20 8" />
+                          <line x1="12" y1="18" x2="12" y2="12" />
+                          <polyline points="9 15 12 12 15 15" />
+                        </svg>
+                      </span>
+                      <div className="ai-dropzone-title">Kéo thả tài liệu vào đây hoặc bấm để chọn tệp</div>
+                      <div className="ai-dropzone-sub">Hỗ trợ tài liệu kỹ thuật, chính sách bảo hành, hướng dẫn lắp ráp</div>
+                      <div className="ai-format-pills">
+                        <span className="ai-format-pill">PDF</span>
+                        <span className="ai-format-pill">MARKDOWN</span>
+                        <span className="ai-format-pill">TXT</span>
+                        <span className="ai-format-pill">≤ 15MB</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="ai-selected-file">
+                      <div className="ai-selected-file-meta">
+                        <span className={`ai-doc-ext-badge ${uploadFile.name.toLowerCase().endsWith(".pdf") ? "is-pdf" : uploadFile.name.toLowerCase().endsWith(".md") ? "is-md" : "is-txt"}`}>
+                          {uploadFile.name.split(".").pop()?.toUpperCase() || "DOC"}
+                        </span>
+                        <div style={{ minWidth: 0 }}>
+                          <div className="ai-selected-file-name" title={uploadFile.name}>{uploadFile.name}</div>
+                          <div className="ai-selected-file-size">
+                            {(uploadFile.size / 1024).toFixed(1)} KB • Sẵn sàng trích xuất & vector hóa
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="ai-selected-file-clear"
+                        title="Bỏ chọn tệp này"
+                        onClick={() => {
+                          setUploadFile(null);
+                          if (fileInputRef.current) fileInputRef.current.value = "";
+                        }}
+                      >
+                        ✕
+                      </button>
                     </div>
                   )}
-                </AdminField>
 
-                <AdminField label="Phạm vi nghiệp vụ phục vụ của tài liệu">
-                  <select
-                    value={uploadTargetService}
-                    onChange={(e) => setUploadTargetService(e.target.value)}
-                    style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid #cbd5e1", fontSize: 13, fontWeight: 600 }}
-                  >
-                    <option value="all">🌐 Phục vụ cả 2 (Chatbot & Smart PC Builder)</option>
-                    <option value="chatbot">💬 Chỉ phục vụ Chatbot Tư Vấn Bán Hàng (Chính sách, bảo hành, xử lý sự cố)</option>
-                    <option value="pc_builder">🛠️ Chỉ phục vụ Smart PC Builder (Thông số kỹ thuật, tương thích, mẹo tối ưu)</option>
-                  </select>
-                </AdminField>
-
-                <div style={{ background: "#f8fafc", padding: 12, borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12, color: "#475569", lineHeight: 1.6 }}>
-                  <strong>Quy trình xử lý tự động (AIO2026 Pipeline):</strong>
-                  <div>1. <strong>Xác định & Trích xuất:</strong> Đọc nội dung thô theo định dạng PDF / Markdown / Text.</div>
-                  <div>2. <strong>Làm sạch & Chuẩn hóa:</strong> Unicode NFC, giữ nguyên ký hiệu kỹ thuật (W, GHz, MHz, Socket, PCIe).</div>
-                  <div>3. <strong>Smart Chunking:</strong> Cắt đoạn ngữ nghĩa theo Heading & đoạn văn (600 ký tự, overlap 120 ký tự).</div>
-                  <div>4. <strong>Lập chỉ mục Hybrid:</strong> Dense Vector vào ChromaDB & Sparse Inverted Index vào BM25Okapi.</div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isUploading || !uploadFile}
-                  style={{
-                    padding: "10px 18px",
-                    background: isUploading ? "#94a3b8" : "#059669",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: 8,
-                    fontWeight: 700,
-                    fontSize: 14,
-                    cursor: isUploading || !uploadFile ? "not-allowed" : "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 8,
-                    boxShadow: "0 2px 6px rgba(5,150,105,0.3)"
-                  }}
-                >
-                  {isUploading ? "⏳ Đang trích xuất & Vector hóa..." : "🚀 Tiến Hành Tải Lên & Vector Hóa"}
-                </button>
-              </form>
-            </AdminCard>
-            </div>
-
-            {/* Cột 2: Bảng danh sách tài liệu hiện có */}
-            <div style={{ minWidth: 0 }}>
-            <AdminCard title={`📋 Danh Sách Tài Liệu Tri Thức Trong Hệ Thống (${documents.length})`}>
-              {loadingDocs ? (
-                <div style={{ textAlign: "center", padding: 40, color: "#64748b" }}>
-                  ⏳ Đang tải danh sách tài liệu RAG từ AI Service...
-                </div>
-              ) : documents.length === 0 ? (
-                <div style={{ textAlign: "center", padding: 40, color: "#94a3b8" }}>
-                  Chưa có tài liệu mở rộng nào trong thư mục data/docs/. Bạn hãy tải lên tài liệu đầu tiên!
-                </div>
-              ) : (
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                    <thead>
-                      <tr style={{ background: "#f8fafc", borderBottom: "2px solid #e2e8f0", textAlign: "left" }}>
-                        <th style={{ padding: "10px 12px", color: "#475569" }}>Tên Tài Liệu</th>
-                        <th style={{ padding: "10px 8px", color: "#475569", textAlign: "center" }}>Định Dạng</th>
-                        <th style={{ padding: "10px 8px", color: "#475569", textAlign: "center" }}>Dung Lượng</th>
-                        <th style={{ padding: "10px 8px", color: "#475569", textAlign: "center" }}>Số Chunks</th>
-                        <th style={{ padding: "10px 8px", color: "#475569", textAlign: "center" }}>Phục Vụ</th>
-                        <th style={{ padding: "10px 12px", color: "#475569", textAlign: "right" }}>Thao Tác</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {documents.map((doc, idx) => (
-                        <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                          <td style={{ padding: "12px", fontWeight: 600, color: "#0f172a" }}>
-                            {doc.title || doc.fileName}
-                            <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 400 }}>
-                              {doc.fileName}
-                            </div>
-                          </td>
-                          <td style={{ padding: "12px 8px", textAlign: "center" }}>
-                            <span style={{
-                              padding: "2px 8px",
-                              borderRadius: 6,
-                              fontSize: 11,
-                              fontWeight: 700,
-                              background: doc.format === "PDF" ? "#fee2e2" : doc.format === "MD" ? "#e0e7ff" : "#f1f5f9",
-                              color: doc.format === "PDF" ? "#dc2626" : doc.format === "MD" ? "#4338ca" : "#475569"
-                            }}>
-                              {doc.format}
-                            </span>
-                          </td>
-                          <td style={{ padding: "12px 8px", textAlign: "center", color: "#64748b" }}>
-                            {doc.fileSizeKb} KB
-                          </td>
-                          <td style={{ padding: "12px 8px", textAlign: "center" }}>
-                            <span style={{
-                              background: "#eff6ff",
-                              color: "#1d4ed8",
-                              fontWeight: 800,
-                              padding: "2px 8px",
-                              borderRadius: 10,
-                              fontSize: 11
-                            }}>
-                              {doc.chunkCount} chunks
-                            </span>
-                          </td>
-                          <td style={{ padding: "12px 8px", textAlign: "center" }}>
-                            <span style={{
-                              fontSize: 11,
-                              fontWeight: 700,
-                              padding: "2px 8px",
-                              borderRadius: 6,
-                              background: doc.targetService === "chatbot" ? "#dcfce7" : doc.targetService === "pc_builder" ? "#fef3c7" : "#ede9fe",
-                              color: doc.targetService === "chatbot" ? "#166534" : doc.targetService === "pc_builder" ? "#92400e" : "#5b21b6"
-                            }}>
-                              {doc.targetService === "chatbot" ? "Chatbot" : doc.targetService === "pc_builder" ? "PC Builder" : "Cả 2"}
-                            </span>
-                          </td>
-                          <td style={{ padding: "12px", textAlign: "right" }}>
-                            <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
-                              <button
-                                type="button"
-                                onClick={() => handlePreviewChunks(doc.fileName)}
-                                title="Xem phân đoạn chunks"
-                                style={{
-                                  padding: "5px 10px",
-                                  borderRadius: 6,
-                                  border: "1px solid #cbd5e1",
-                                  background: "#fff",
-                                  color: "#334155",
-                                  fontSize: 12,
-                                  cursor: "pointer",
-                                  fontWeight: 600
-                                }}
-                              >
-                                🔍 Xem Chunks
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteDocument(doc.fileName)}
-                                title="Xóa tài liệu và vector"
-                                style={{
-                                  padding: "5px 10px",
-                                  borderRadius: 6,
-                                  border: "1px solid #fecaca",
-                                  background: "#fef2f2",
-                                  color: "#dc2626",
-                                  fontSize: 12,
-                                  cursor: "pointer",
-                                  fontWeight: 600
-                                }}
-                              >
-                                🗑️ Xóa
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
+                  {/* Visual Scope Selector Cards */}
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 8 }}>
+                      Phạm vi nghiệp vụ áp dụng
+                    </div>
+                    <div className="ai-scope-grid">
+                      {[
+                        { id: "all", title: "Toàn hệ thống", desc: "Chatbot & PC Builder" },
+                        { id: "chatbot", title: "AI Chatbot", desc: "Chính sách & CSKH" },
+                        { id: "pc_builder", title: "PC Builder", desc: "Thông số & luật ráp" }
+                      ].map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          className={`ai-scope-option${uploadTargetService === opt.id ? " is-active" : ""}`}
+                          onClick={() => setUploadTargetService(opt.id)}
+                        >
+                          <strong>{opt.title}</strong>
+                          <span>{opt.desc}</span>
+                        </button>
                       ))}
-                    </tbody>
-                  </table>
+                    </div>
+                  </div>
+
+                  {/* 4-Step Visual AIO2026 Ingestion Pipeline */}
+                  <div className="ai-pipeline-box">
+                    <div className="ai-pipeline-label">Quy trình xử lý tự động (AIO2026 Pipeline)</div>
+                    <div className="ai-pipeline-steps">
+                      <div className="ai-pipeline-step">
+                        <span className="ai-pipeline-num">01</span>
+                        <div>
+                          <strong>Trích xuất văn bản</strong>
+                          <small>Đọc cấu trúc PDF / MD / TXT</small>
+                        </div>
+                      </div>
+                      <div className="ai-pipeline-step">
+                        <span className="ai-pipeline-num">02</span>
+                        <div>
+                          <strong>Chuẩn hóa NFC</strong>
+                          <small>Giữ nguyên W, GHz, Socket</small>
+                        </div>
+                      </div>
+                      <div className="ai-pipeline-step">
+                        <span className="ai-pipeline-num">03</span>
+                        <div>
+                          <strong>Smart Chunking</strong>
+                          <small>600 ký tự • Overlap 120</small>
+                        </div>
+                      </div>
+                      <div className="ai-pipeline-step">
+                        <span className="ai-pipeline-num">04</span>
+                        <div>
+                          <strong>Hybrid Indexing</strong>
+                          <small>ChromaDB + BM25Okapi</small>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="ai-upload-submit"
+                    disabled={isUploading || !uploadFile}
+                  >
+                    <svg className={isUploading ? "ai-studio-spin" : ""} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                      {isUploading ? (
+                        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                      ) : (
+                        <>
+                          <path d="M22 2L11 13" />
+                          <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                        </>
+                      )}
+                    </svg>
+                    <span>{isUploading ? "Đang trích xuất & Vector hóa..." : "Tiến Hành Tải Lên & Vector Hóa"}</span>
+                  </button>
+                </form>
+              </div>
+            </section>
+
+            {/* CỘT PHẢI: KHO TÀI LIỆU ĐÃ VECTOR HÓA */}
+            <section className="ai-studio-panel">
+              <div className="ai-studio-panel-head">
+                <div className="ai-studio-panel-title-wrap">
+                  <span className="ai-studio-panel-icon" style={{ background: "#f5f3ff", color: "#6d28d9", border: "1px solid #ede9fe" }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                    </svg>
+                  </span>
+                  <div>
+                    <h3 className="ai-studio-panel-title">
+                      Kho Tài Liệu Đã Vector Hóa{" "}
+                      <span style={{ fontSize: 12, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "#eff6ff", color: "#1d4ed8", marginLeft: 4 }}>
+                        {documents.length} tệp
+                      </span>
+                    </h3>
+                    <p className="ai-studio-panel-sub">Đồng bộ trực tiếp với ChromaDB & BM25Okapi tại AI Service</p>
+                  </div>
                 </div>
-              )}
-            </AdminCard>
-            </div>
+
+                <div style={{ position: "relative" }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2.3" style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                  <input
+                    type="text"
+                    className="ai-doc-search"
+                    placeholder="Tìm tài liệu theo tên..."
+                    value={docSearchKeyword}
+                    onChange={(e) => setDocSearchKeyword(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div style={{ padding: 0 }}>
+                {loadingDocs ? (
+                  <div style={{ textAlign: "center", padding: "52px 24px", color: "#64748b", fontSize: 13.5 }}>
+                    Đang tải danh sách tài liệu RAG từ AI Service...
+                  </div>
+                ) : filteredDocuments.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "54px 24px", color: "#64748b" }}>
+                    <div style={{
+                      width: 52,
+                      height: 52,
+                      margin: "0 auto 12px",
+                      borderRadius: 14,
+                      background: "#f8fafc",
+                      border: "1px solid #e2e8f0",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#94a3b8"
+                    }}>
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+                    </div>
+                    <strong style={{ display: "block", fontSize: 14, color: "#0f172a", marginBottom: 4 }}>
+                      {documents.length === 0 ? "Kho tài liệu mở rộng đang trống" : "Không tìm thấy tài liệu phù hợp"}
+                    </strong>
+                    <span style={{ fontSize: 12.5, color: "#94a3b8" }}>
+                      {documents.length === 0
+                        ? "Kéo thả tệp .pdf, .md hoặc .txt ở khung bên trái để nạp tri thức đầu tiên."
+                        : "Thử xóa từ khóa tìm kiếm để xem toàn bộ tài liệu."}
+                    </span>
+                  </div>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="ai-doc-table">
+                      <thead>
+                        <tr>
+                          <th style={{ textAlign: "left" }}>Tài Liệu</th>
+                          <th style={{ textAlign: "center" }}>Phân Đoạn</th>
+                          <th style={{ textAlign: "center" }}>Phạm Vi</th>
+                          <th style={{ textAlign: "right" }}>Thao Tác</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredDocuments.map((doc, idx) => {
+                          const extClass = doc.format === "PDF" ? "is-pdf" : doc.format === "MD" ? "is-md" : "is-txt";
+                          return (
+                            <tr key={doc.fileName || idx}>
+                              <td>
+                                <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+                                  <span className={`ai-doc-ext-badge ${extClass}`}>{doc.format}</span>
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 13.5, lineHeight: 1.3 }}>
+                                      {doc.title || doc.fileName}
+                                    </div>
+                                    <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>
+                                      <code>{doc.fileName}</code> • {doc.fileSizeKb} KB
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+
+                              <td style={{ textAlign: "center" }}>
+                                <span style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 4,
+                                  background: "#eff6ff",
+                                  color: "#1d4ed8",
+                                  border: "1px solid #dbeafe",
+                                  fontWeight: 800,
+                                  padding: "3px 10px",
+                                  borderRadius: 999,
+                                  fontSize: 11.5
+                                }}>
+                                  {doc.chunkCount} chunks
+                                </span>
+                              </td>
+
+                              <td style={{ textAlign: "center" }}>
+                                <span style={{
+                                  display: "inline-block",
+                                  fontSize: 11.5,
+                                  fontWeight: 700,
+                                  padding: "3px 10px",
+                                  borderRadius: 999,
+                                  background: doc.targetService === "chatbot" ? "#dcfce7" : doc.targetService === "pc_builder" ? "#fef3c7" : "#f3e8ff",
+                                  color: doc.targetService === "chatbot" ? "#166534" : doc.targetService === "pc_builder" ? "#92400e" : "#6b21a8"
+                                }}>
+                                  {doc.targetService === "chatbot" ? "Chatbot" : doc.targetService === "pc_builder" ? "PC Builder" : "Cả 2 hệ thống"}
+                                </span>
+                              </td>
+
+                              <td style={{ textAlign: "right" }}>
+                                <div style={{ display: "inline-flex", gap: 6 }}>
+                                  <button
+                                    type="button"
+                                    className="ai-action-btn ai-action-btn--ghost"
+                                    onClick={() => handlePreviewChunks(doc.fileName)}
+                                    title="Xem chi tiết phân đoạn chunks"
+                                  >
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+                                    <span>Xem Chunks</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="ai-action-btn ai-action-btn--danger"
+                                    onClick={() => handleDeleteDocument(doc.fileName)}
+                                    title="Xóa tài liệu và vector"
+                                  >
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
+                                    <span>Xóa</span>
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </section>
           </div>
 
-          {/* Khảo sát & Phân tích các mô hình Embedding tối ưu cho máy chủ 4GB RAM + Swap */}
-          <AdminCard title="🧠 Đánh Giá & So Sánh Các Mô Hình Vector Embedding (Tối Ưu Cho Server 4GB RAM + Swap)">
-            <p style={{ color: "#64748b", fontSize: 13, marginTop: 0 }}>
-              Phân tích tài nguyên thực nghiệm để lựa chọn mô hình vector hóa phù hợp nhất cho môi trường triển khai thực tế.
-            </p>
-
-            <div style={{ overflowX: "auto", marginBottom: 16 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                <thead>
-                  <tr style={{ background: "#f8fafc", borderBottom: "2px solid #e2e8f0", textAlign: "left" }}>
-                    <th style={{ padding: "10px 12px", color: "#475569" }}>Mô Hình (Embedding Model)</th>
-                    <th style={{ padding: "10px 8px", color: "#475569", textAlign: "center" }}>Số Chiều</th>
-                    <th style={{ padding: "10px 8px", color: "#475569", textAlign: "center" }}>Mức Tiêu Thụ RAM</th>
-                    <th style={{ padding: "10px 8px", color: "#475569", textAlign: "center" }}>Tốc Độ / Độ Trễ</th>
-                    <th style={{ padding: "10px 8px", color: "#475569", textAlign: "center" }}>Giới Hạn API Quota</th>
-                    <th style={{ padding: "10px 12px", color: "#475569" }}>Đánh Giá Cho Server 4GB RAM</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr style={{ borderBottom: "1px solid #e2e8f0", background: "#f0fdf4" }}>
-                    <td style={{ padding: "12px", fontWeight: 700, color: "#166534" }}>
-                      ⭐ Google Gemini Embedding (models/gemini-embedding-001)
-                      <span style={{ display: "block", fontSize: 11, color: "#15803d", fontWeight: 400 }}>
-                        (Mô hình đang được hệ thống kích hoạt chính thức cho RAG)
-                      </span>
-                    </td>
-                    <td style={{ padding: "12px 8px", textAlign: "center", fontWeight: 700 }}>3072 dims</td>
-                    <td style={{ padding: "12px 8px", textAlign: "center", color: "#15803d", fontWeight: 800 }}>0MB (Cloud TPU)</td>
-                    <td style={{ padding: "12px 8px", textAlign: "center" }}>100 - 250ms</td>
-                    <td style={{ padding: "12px 8px", textAlign: "center", color: "#15803d", fontWeight: 700 }}>Google Gemini API</td>
-                    <td style={{ padding: "12px", color: "#166534", fontSize: 12 }}>
-                      <strong>Khuyên dùng hàng đầu:</strong> 0MB RAM máy chủ, ngữ nghĩa tiếng Việt đa tầng vượt trội, độ dài vector 3072 chiều nắm bắt chi tiết từng thông số kỹ thuật phần cứng.
-                    </td>
-                  </tr>
-
-                  <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
-                    <td style={{ padding: "12px", fontWeight: 600, color: "#0f172a" }}>
-                      all-MiniLM-L6-v2 (ONNX Runtime)
-                      <span style={{ display: "block", fontSize: 11, color: "#64748b", fontWeight: 400 }}>
-                        (Mô hình dự phòng Local Offline khi mất mạng)
-                      </span>
-                    </td>
-                    <td style={{ padding: "12px 8px", textAlign: "center", fontWeight: 700 }}>384 dims</td>
-                    <td style={{ padding: "12px 8px", textAlign: "center", color: "#334155" }}>~120MB - 180MB</td>
-                    <td style={{ padding: "12px 8px", textAlign: "center" }}>5 - 15ms (CPU)</td>
-                    <td style={{ padding: "12px 8px", textAlign: "center" }}>Không giới hạn (0đ)</td>
-                    <td style={{ padding: "12px", color: "#475569", fontSize: 12 }}>
-                      <strong>Dự phòng Offline:</strong> Chạy trực tiếp qua ONNX Runtime trên máy chủ, chiếm chưa tới 4% RAM khi chạy độc lập.
-                    </td>
-                  </tr>
-
-                  <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
-                    <td style={{ padding: "12px", fontWeight: 600, color: "#0f172a" }}>
-                      BAAI/bge-small-en-v1.5 (FastEmbed)
-                    </td>
-                    <td style={{ padding: "12px 8px", textAlign: "center" }}>384 dims</td>
-                    <td style={{ padding: "12px 8px", textAlign: "center", color: "#334155" }}>~150MB - 220MB</td>
-                    <td style={{ padding: "12px 8px", textAlign: "center" }}>8 - 20ms</td>
-                    <td style={{ padding: "12px 8px", textAlign: "center" }}>Không giới hạn</td>
-                    <td style={{ padding: "12px", color: "#475569", fontSize: 12 }}>
-                      <strong>Phương án tham khảo:</strong> Điểm benchmark MTEB retrieval cao, khởi động nhanh với nhân Rust.
-                    </td>
-                  </tr>
-
-                  <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
-                    <td style={{ padding: "12px", fontWeight: 600, color: "#0f172a" }}>
-                      paraphrase-multilingual-MiniLM-L12-v2
-                    </td>
-                    <td style={{ padding: "12px 8px", textAlign: "center" }}>384 dims</td>
-                    <td style={{ padding: "12px 8px", textAlign: "center", color: "#b45309", fontWeight: 700 }}>~350MB - 450MB</td>
-                    <td style={{ padding: "12px 8px", textAlign: "center" }}>25 - 40ms</td>
-                    <td style={{ padding: "12px 8px", textAlign: "center" }}>Không giới hạn</td>
-                    <td style={{ padding: "12px", color: "#475569", fontSize: 12 }}>
-                      <strong>Phương án tham khảo:</strong> Hỗ trợ đa ngôn ngữ, nhưng tiêu thụ nhiều RAM hơn.
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+          {/* PHẦN DƯỚI: KIẾN TRÚC EMBEDDING & TELEMETRY TÀI NGUYÊN SERVER 4GB RAM */}
+          <section className="ai-studio-panel">
+            <div className="ai-studio-panel-head">
+              <div className="ai-studio-panel-title-wrap">
+                <span className="ai-studio-panel-icon" style={{ background: "#ecfdf5", color: "#059669", border: "1px solid #bbf7d0" }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /><line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" /><line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" /><line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" /><line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" /></svg>
+                </span>
+                <div>
+                  <h3 className="ai-studio-panel-title">Kiến Trúc Vector Embedding & Tối Ưu Tài Nguyên Server (4GB RAM + Swap)</h3>
+                  <p className="ai-studio-panel-sub">So sánh thực nghiệm các mô hình nhúng vector và phân bổ bộ nhớ thực tế khi triển khai sản phẩm</p>
+                </div>
+              </div>
+              <span style={{ padding: "5px 12px", borderRadius: 999, background: "#ecfdf5", border: "1px solid #86efac", color: "#15803d", fontSize: 11.5, fontWeight: 700 }}>
+                Active: models/gemini-embedding-001 (3072d)
+              </span>
             </div>
 
-            <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", padding: 14, borderRadius: 10, fontSize: 13, color: "#1e3a8a", lineHeight: 1.6 }}>
-              <strong>💡 Chiến Lược Mô Hình Chuẩn Hóa Của Toàn Hệ Thống:</strong>
-              <div>• <strong>RAG Vector Embedding:</strong> Sử dụng <code>models/gemini-embedding-001</code> đồng bộ Vector DB ChromaDB 3072 chiều kết hợp Sparse Search BM25Okapi tiếng Việt.</div>
-              <div>• <strong>Chatbot & Smart PC Builder:</strong> Sử dụng <code>gemini-3.5-flash-lite</code> (phản hồi tức thì, siêu nhẹ) và cơ chế tự động fallback về <code>gemini-3.1-flash-lite</code> khi gặp sự cố quota.</div>
+            <div className="ai-studio-panel-body">
+              {/* Visual 4GB RAM Telemetry Bar */}
+              <div className="ai-ram-bar-card">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                  <strong style={{ fontSize: 13, color: "#0f172a" }}>Phân bổ bộ nhớ dự toán trên máy chủ chuẩn 4.0 GB RAM</strong>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#059669" }}>Dư tải an toàn: ~1.74 GB RAM trống (43.5%)</span>
+                </div>
+                <div className="ai-ram-track">
+                  <div style={{ width: "30%", background: "#475569" }} title="OS & System Services: 1.2GB" />
+                  <div style={{ width: "15%", background: "#2563eb" }} title="MySQL 8.0: 600MB" />
+                  <div style={{ width: "4.5%", background: "#8b5cf6" }} title="Node.js Express API: 180MB" />
+                  <div style={{ width: "7%", background: "#06b6d4" }} title="Python FastAPI + ChromaDB: 280MB" />
+                  <div style={{ width: "43.5%", background: "#10b981" }} title="RAM trống dự phòng: 1.74GB" />
+                </div>
+                <div className="ai-ram-legend">
+                  <span className="ai-ram-legend-item"><span className="ai-ram-dot" style={{ background: "#475569" }} /> OS & Base (1.2GB)</span>
+                  <span className="ai-ram-legend-item"><span className="ai-ram-dot" style={{ background: "#2563eb" }} /> MySQL 8.0 (600MB)</span>
+                  <span className="ai-ram-legend-item"><span className="ai-ram-dot" style={{ background: "#8b5cf6" }} /> Express API (180MB)</span>
+                  <span className="ai-ram-legend-item"><span className="ai-ram-dot" style={{ background: "#06b6d4" }} /> AI RAG Service (280MB)</span>
+                  <span className="ai-ram-legend-item"><span className="ai-ram-dot" style={{ background: "#10b981" }} /> <strong>Dự phòng an toàn (1.74GB)</strong></span>
+                </div>
+              </div>
+
+              {/* Clean Executive Comparison Table */}
+              <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid #e2e8f0" }}>
+                <table className="ai-doc-table">
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left" }}>Mô Hình Embedding</th>
+                      <th style={{ textAlign: "center" }}>Số Chiều</th>
+                      <th style={{ textAlign: "center" }}>Tiêu Thụ RAM</th>
+                      <th style={{ textAlign: "center" }}>Độ Trễ</th>
+                      <th style={{ textAlign: "center" }}>Quota / Chi Phí</th>
+                      <th style={{ textAlign: "left" }}>Đánh Giá Triển Khai</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr style={{ background: "#f0fdf4" }}>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <strong style={{ color: "#14532d" }}>Google Gemini Embedding</strong>
+                          <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 999, background: "#16a34a", color: "#fff", letterSpacing: "0.04em" }}>
+                            ĐANG CHẠY
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11.5, color: "#15803d", marginTop: 2 }}><code>models/gemini-embedding-001</code></div>
+                      </td>
+                      <td style={{ textAlign: "center", fontWeight: 800, color: "#14532d" }}>3072d</td>
+                      <td style={{ textAlign: "center", fontWeight: 800, color: "#15803d" }}>0 MB (Cloud TPU)</td>
+                      <td style={{ textAlign: "center", color: "#166534" }}>100–250ms</td>
+                      <td style={{ textAlign: "center", fontWeight: 700, color: "#15803d" }}>Gemini API</td>
+                      <td style={{ fontSize: 12, color: "#166534", lineHeight: 1.45 }}>
+                        <strong>Tối ưu số 1:</strong> Không tốn RAM máy chủ, nắm bắt sâu ngữ nghĩa tiếng Việt & mã linh kiện phần cứng.
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <strong style={{ color: "#0f172a" }}>all-MiniLM-L6-v2 (ONNX)</strong>
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe" }}>
+                            DỰ PHÒNG OFFLINE
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>Tự kích hoạt khi mất mạng / lỗi API</div>
+                      </td>
+                      <td style={{ textAlign: "center", fontWeight: 700 }}>384d</td>
+                      <td style={{ textAlign: "center", color: "#334155" }}>~150 MB</td>
+                      <td style={{ textAlign: "center", color: "#059669", fontWeight: 600 }}>5–15ms</td>
+                      <td style={{ textAlign: "center" }}>Không giới hạn (0đ)</td>
+                      <td style={{ fontSize: 12, color: "#475569", lineHeight: 1.45 }}>
+                        Chạy cục bộ qua ONNX Runtime (&lt;4% RAM), bảo đảm truy hồi không bao giờ gián đoạn.
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td><strong style={{ color: "#0f172a" }}>BAAI/bge-small-en-v1.5 (FastEmbed)</strong></td>
+                      <td style={{ textAlign: "center" }}>384d</td>
+                      <td style={{ textAlign: "center" }}>~180 MB</td>
+                      <td style={{ textAlign: "center" }}>8–20ms</td>
+                      <td style={{ textAlign: "center" }}>Không giới hạn</td>
+                      <td style={{ fontSize: 12, color: "#475569", lineHeight: 1.45 }}>
+                        Benchmark MTEB cao, lõi Rust nhẹ nhưng thiên về ngữ liệu tiếng Anh.
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td><strong style={{ color: "#0f172a" }}>paraphrase-multilingual-MiniLM-L12-v2</strong></td>
+                      <td style={{ textAlign: "center" }}>384d</td>
+                      <td style={{ textAlign: "center", color: "#b45309", fontWeight: 700 }}>~380 MB</td>
+                      <td style={{ textAlign: "center" }}>25–40ms</td>
+                      <td style={{ textAlign: "center" }}>Không giới hạn</td>
+                      <td style={{ fontSize: 12, color: "#475569", lineHeight: 1.45 }}>
+                        Đa ngôn ngữ tốt nhưng tiêu thụ RAM gấp 2,5 lần so với MiniLM-L6.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </AdminCard>
+          </section>
         </div>
       )}
-      {activeTab === "system" && (
-        <div style={{ width: "100%" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 20 }}>
-            {/* Cột 1: Cấu hình tập trung */}
-            <AdminCard title="⚙️ Cấu Hình Tập Trung Hệ Thống AI & Nhà Cung Cấp">
+      {activeTab === "system" && (() => {
+        const activePreset = LLM_PROVIDER_PRESETS[systemConfig.provider] || LLM_PROVIDER_PRESETS.gemini;
+        const fallbackPreset = LLM_PROVIDER_PRESETS[systemConfig.fallbackProvider] || null;
+        const activeModels = activePreset.models || [];
+        const fallbackModels = fallbackPreset?.models || [];
+        const activeHasKey = systemConfig.provider === "ollama" || Boolean(systemConfig.apiKey?.trim()) || Boolean(systemConfig.providerKeyStatus?.[systemConfig.provider]?.hasKey) || Boolean(systemConfig.hasApiKey);
+        const fbHasKey = systemConfig.fallbackProvider === "ollama" || Boolean(systemConfig.fallbackApiKey?.trim()) || Boolean(systemConfig.providerKeyStatus?.[systemConfig.fallbackProvider]?.hasKey) || Boolean(systemConfig.hasFallbackApiKey);
+
+        return (
+        <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 20 }}>
+          {/* ⚡ BẢNG CHUYỂN ĐỔI NHANH ENGINE AI (1-CLICK QUICK SWITCH) */}
+          <AdminCard title="⚡ Chuyển Đổi Nhanh Engine AI (1-Click Quick-Switch)">
+            <p style={{ color: "#64748b", fontSize: 13, marginTop: 0, marginBottom: 14 }}>
+              Chọn nhanh nhà cung cấp AI chỉ với 1 cú nhấp. Hệ thống lưu riêng API Key cho từng nhà cung cấp nên bạn có thể chuyển đổi qua lại giữa <strong>Groq</strong> và <strong>Gemini</strong> tức thì mà không lo mất khóa cũ.
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+              {Object.values(LLM_PROVIDER_PRESETS).map((preset) => {
+                const isSelected = systemConfig.provider === preset.id;
+                const st = systemConfig.providerKeyStatus?.[preset.id];
+                const ready = preset.id === "ollama" || Boolean(st?.hasKey);
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handleSelectProvider(preset.id)}
+                    style={{
+                      textAlign: "left",
+                      padding: "14px 16px",
+                      borderRadius: 12,
+                      border: isSelected ? "2px solid #2563eb" : "1px solid #e2e8f0",
+                      background: isSelected ? "#eff6ff" : "#ffffff",
+                      cursor: "pointer",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                      transition: "all 0.15s",
+                      boxShadow: isSelected ? "0 4px 12px rgba(37,99,235,0.12)" : "none"
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+                      <strong style={{ fontSize: 14, color: "#0f172a" }}>{preset.title}</strong>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: ready ? "#059669" : "#94a3b8" }}>
+                        {ready ? "🟢 Sẵn key" : "⚪ Chưa key"}
+                      </span>
+                    </div>
+                    <span style={{
+                      display: "inline-block",
+                      alignSelf: "flex-start",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      background: preset.badgeBg,
+                      color: preset.badgeColor
+                    }}>
+                      {preset.badge}
+                    </span>
+                    <span style={{ fontSize: 12, color: "#475569", lineHeight: 1.45 }}>{preset.desc}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </AdminCard>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 20 }}>
+            {/* Cột 1: Cấu hình tập trung + Failover đa tầng */}
+            <AdminCard title="⚙️ Cấu Hình Chi Tiết & Cơ Chế Tự Động Dự Phòng (Auto-Failover)">
               <p style={{ color: "#64748b", fontSize: 13, marginTop: 0 }}>
-                Quản lý tập trung toàn bộ tham số kỹ thuật, nhà cung cấp LLM, độ sáng tạo và mức giới hạn token của hệ thống PC Mall.
+                Tinh chỉnh model, khóa API riêng từng hãng, và kích hoạt chuyển mạch tự động 3 tầng để chatbot & PC Builder luôn phản hồi tức thì dưới 1 giây.
               </p>
+
+              {/* Sơ đồ luồng Failover 3 tầng trực quan */}
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: 8,
+                padding: "10px 14px",
+                borderRadius: 10,
+                background: "#f8fafc",
+                border: "1px solid #e2e8f0",
+                marginBottom: 16,
+                fontSize: 12
+              }}>
+                <span style={{ fontWeight: 700, color: "#0f172a" }}>Luồng chống nghẽn:</span>
+                <span style={{ background: "#dbeafe", color: "#1d4ed8", padding: "3px 9px", borderRadius: 6, fontWeight: 700 }}>
+                  1. {systemConfig.provider.toUpperCase()} ({systemConfig.model})
+                </span>
+                <span style={{ color: "#64748b", fontWeight: 700 }}>➔</span>
+                <span style={{
+                  background: systemConfig.autoFailover && systemConfig.fallbackProvider && systemConfig.fallbackProvider !== "none" ? "#dcfce7" : "#f1f5f9",
+                  color: systemConfig.autoFailover && systemConfig.fallbackProvider && systemConfig.fallbackProvider !== "none" ? "#15803d" : "#64748b",
+                  padding: "3px 9px",
+                  borderRadius: 6,
+                  fontWeight: 700
+                }}>
+                  2. {systemConfig.autoFailover && systemConfig.fallbackProvider && systemConfig.fallbackProvider !== "none"
+                    ? `${systemConfig.fallbackProvider.toUpperCase()} (${systemConfig.fallbackModel || "auto"})`
+                    : "Không dùng dự phòng Cloud"}
+                </span>
+                <span style={{ color: "#64748b", fontWeight: 700 }}>➔</span>
+                <span style={{ background: "#fef3c7", color: "#92400e", padding: "3px 9px", borderRadius: 6, fontWeight: 700 }}>
+                  3. Expert XAI Engine (&lt;0,1s)
+                </span>
+              </div>
 
               <form onSubmit={handleSaveSystemConfig} style={{ display: "grid", gap: 16 }}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                  <AdminField label="Nhà Cung Cấp LLM (Provider)">
+                  <AdminField label="Nhà Cung Cấp Chính (Primary Provider)">
                     <select
                       value={systemConfig.provider}
-                      onChange={(e) => setSystemConfig((prev) => ({ ...prev, provider: e.target.value }))}
-                      style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid #cbd5e1" }}
+                      onChange={(e) => handleSelectProvider(e.target.value)}
+                      style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid #cbd5e1", fontWeight: 600 }}
                     >
-                      <option value="gemini">Google Gemini (Khuyên dùng: gemini-3.5-flash-lite)</option>
-                      <option value="groq">Groq Llama 3 (Tốc độ cực nhanh)</option>
-                      <option value="openai">OpenAI (GPT-4o, GPT-4o-mini)</option>
-                      <option value="ollama">Ollama Local (Chạy máy chủ nội bộ)</option>
+                      <option value="groq">⚡ Groq Cloud (Siêu nhanh ~0,4s, 14.400 lượt/ngày)</option>
+                      <option value="gemini">🔷 Google Gemini (gemini-3.5-flash-lite)</option>
+                      <option value="openai">🧠 OpenAI (GPT-4o-mini / GPT-4o)</option>
+                      <option value="ollama">💻 Ollama Local (Chạy máy chủ nội bộ)</option>
                     </select>
                   </AdminField>
 
-                  <AdminField label="Mô Hình (Model Name)">
+                  <AdminField label="Mô Hình Chính (Model Name)">
                     <select
-                      value={systemConfig.model || "gemini-3.5-flash-lite"}
+                      value={activeModels.some((m) => m.value === systemConfig.model) ? systemConfig.model : activePreset.defaultModel}
                       onChange={(e) => setSystemConfig((prev) => ({ ...prev, model: e.target.value }))}
                       style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid #cbd5e1", fontWeight: 600 }}
                     >
-                      <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Khuyên dùng - Tốc độ cao)</option>
-                      <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Fallback dự phòng)</option>
+                      {activeModels.map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
                     </select>
                   </AdminField>
                 </div>
+
+                {/* API KEY NHÀ CUNG CẤP CHÍNH + NÚT PING ĐO TỐC ĐỘ */}
+                <div style={{ background: "#f8fafc", padding: 14, borderRadius: 10, border: "1px solid #e2e8f0" }}>
+                  <AdminField label={`Khóa API cho ${activePreset.title} (Lưu riêng, không ghi đè hãng khác)`}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <input
+                        type="password"
+                        disabled={systemConfig.provider === "ollama"}
+                        placeholder={systemConfig.providerKeyStatus?.[systemConfig.provider]?.masked || systemConfig.apiKeyMasked || activePreset.keyPlaceholder}
+                        value={systemConfig.apiKey}
+                        onChange={(e) => setSystemConfig((prev) => ({ ...prev, apiKey: e.target.value }))}
+                        style={{ flex: 1, minWidth: 200, padding: "9px 12px", borderRadius: 8, border: "1px solid #cbd5e1" }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleTestConnection("primary")}
+                        disabled={testingConnTarget !== null}
+                        style={{
+                          padding: "9px 14px",
+                          borderRadius: 8,
+                          border: "1px solid #2563eb",
+                          background: "#eff6ff",
+                          color: "#1d4ed8",
+                          fontSize: 12.5,
+                          fontWeight: 700,
+                          cursor: testingConnTarget ? "not-allowed" : "pointer",
+                          whiteSpace: "nowrap"
+                        }}
+                      >
+                        {testingConnTarget === "primary" ? "⏳ Đang đo..." : "⚡ Test kết nối"}
+                      </button>
+                      <span style={{ fontSize: 12, color: activeHasKey ? "#059669" : "#dc2626", fontWeight: 700 }}>
+                        {activeHasKey ? "🟢 Đã có Key" : "🔴 Chưa có Key"}
+                      </span>
+                    </div>
+                    <small style={{ color: "#64748b", fontSize: 11.5, display: "block", marginTop: 6 }}>
+                      🔒 Khóa API được che mờ an toàn.{" "}
+                      {systemConfig.provider !== "ollama" && (
+                        <a href={activePreset.keyUrl} target="_blank" rel="noreferrer" style={{ color: "#2563eb", fontWeight: 600 }}>
+                          Mở trang lấy khóa {systemConfig.provider.toUpperCase()} ↗
+                        </a>
+                      )}
+                    </small>
+                  </AdminField>
+                </div>
+
+                {/* CẤU HÌNH NHÀ CUNG CẤP DỰ PHÒNG (AUTO-FAILOVER) */}
+                <div style={{ background: "#f0fdf4", padding: 14, borderRadius: 10, border: "1px solid #bbf7d0", display: "grid", gap: 12 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontWeight: 700, fontSize: 13.5, color: "#166534" }}>
+                    <input
+                      type="checkbox"
+                      checked={systemConfig.autoFailover !== false}
+                      onChange={(e) => setSystemConfig((prev) => ({ ...prev, autoFailover: e.target.checked }))}
+                    />
+                    🛡️ Bật Tự Động Chuyển Dự Phòng (Auto-Failover) khi nhà cung cấp chính quá tải (503 / 429 / chậm &gt;3s)
+                  </label>
+
+                  {systemConfig.autoFailover !== false && (
+                    <>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                        <AdminField label="Nhà Cung Cấp Dự Phòng (Backup Provider)">
+                          <select
+                            value={systemConfig.fallbackProvider || "none"}
+                            onChange={(e) => handleSelectFallbackProvider(e.target.value)}
+                            style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #86efac", background: "#fff", fontSize: 13 }}
+                          >
+                            <option value="groq">⚡ Groq Cloud (Khuyên dùng làm dự phòng/chính)</option>
+                            <option value="gemini">🔷 Google Gemini</option>
+                            <option value="openai">🧠 OpenAI</option>
+                            <option value="ollama">💻 Ollama Local</option>
+                            <option value="none">— Tắt (Chỉ chuyển sang Expert XAI Engine)</option>
+                          </select>
+                        </AdminField>
+
+                        <AdminField label="Model Dự Phòng">
+                          <select
+                            disabled={!fallbackPreset}
+                            value={fallbackPreset && fallbackModels.some((m) => m.value === systemConfig.fallbackModel) ? systemConfig.fallbackModel : (fallbackPreset?.defaultModel || "")}
+                            onChange={(e) => setSystemConfig((prev) => ({ ...prev, fallbackModel: e.target.value }))}
+                            style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #86efac", background: "#fff", fontSize: 13 }}
+                          >
+                            {fallbackPreset ? (
+                              fallbackModels.map((m) => (
+                                <option key={m.value} value={m.value}>{m.label}</option>
+                              ))
+                            ) : (
+                              <option value="">Không kích hoạt</option>
+                            )}
+                          </select>
+                        </AdminField>
+                      </div>
+
+                      {fallbackPreset && (
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <input
+                            type="password"
+                            disabled={systemConfig.fallbackProvider === "ollama"}
+                            placeholder={systemConfig.providerKeyStatus?.[systemConfig.fallbackProvider]?.masked || systemConfig.fallbackApiKeyMasked || fallbackPreset.keyPlaceholder}
+                            value={systemConfig.fallbackApiKey || ""}
+                            onChange={(e) => setSystemConfig((prev) => ({ ...prev, fallbackApiKey: e.target.value }))}
+                            style={{ flex: 1, minWidth: 190, padding: "8px 10px", borderRadius: 8, border: "1px solid #86efac", background: "#fff", fontSize: 13 }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleTestConnection("fallback")}
+                            disabled={testingConnTarget !== null}
+                            style={{
+                              padding: "8px 12px",
+                              borderRadius: 8,
+                              border: "1px solid #16a34a",
+                              background: "#ffffff",
+                              color: "#15803d",
+                              fontSize: 12,
+                              fontWeight: 700,
+                              cursor: testingConnTarget ? "not-allowed" : "pointer",
+                              whiteSpace: "nowrap"
+                            }}
+                          >
+                            {testingConnTarget === "fallback" ? "⏳ Đang đo..." : "⚡ Test dự phòng"}
+                          </button>
+                          <span style={{ fontSize: 12, color: fbHasKey ? "#15803d" : "#b45309", fontWeight: 700 }}>
+                            {fbHasKey ? "🟢 Dự phòng sẵn sàng" : "⚠️ Chưa nhập key dự phòng"}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {/* KẾT QUẢ KIỂM TRA KẾT NỐI TRỰC TIẾP (LIVE PING RESULT) */}
+                {connTestResult && (
+                  <div style={{
+                    padding: "12px 14px",
+                    borderRadius: 10,
+                    background: connTestResult.ok ? "#ecfdf5" : "#fef2f2",
+                    border: `1.5px solid ${connTestResult.ok ? "#6ee7b7" : "#fca5a5"}`,
+                    fontSize: 13,
+                    color: connTestResult.ok ? "#065f46" : "#991b1b"
+                  }}>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                      {connTestResult.ok
+                        ? `✅ Kết nối ${String(connTestResult.provider || "").toUpperCase()} (${connTestResult.model}) THÀNH CÔNG • Tốc độ: ${connTestResult.latencyMs}ms`
+                        : `❌ Kết nối ${String(connTestResult.provider || "").toUpperCase()} (${connTestResult.model}) THẤT BẠI (${connTestResult.latencyMs}ms)`}
+                    </div>
+                    {connTestResult.ok && connTestResult.replyPreview && (
+                      <div style={{ fontSize: 12, color: "#047857" }}>
+                        Phản hồi thử: <em>"{connTestResult.replyPreview}"</em>
+                      </div>
+                    )}
+                    {!connTestResult.ok && (
+                      <div style={{ fontSize: 12 }}>
+                        <strong>Chi tiết:</strong> {connTestResult.error}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                   <AdminField label={`Độ Sáng Tạo (Temperature: ${systemConfig.temperature})`}>
@@ -1514,87 +2086,88 @@ export function AdminAiConfigPage({ initialTab }) {
                   </div>
                 </AdminField>
 
-                {/* API KEY BẢO VỆ NHẠY CẢM */}
-                <div style={{ background: "#f8fafc", padding: 14, borderRadius: 10, border: "1px solid #e2e8f0" }}>
-                  <AdminField label="Khóa API Cung Cấp Dịch Vụ (Bảo Mật Cao)">
-                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                      <input
-                        type="password"
-                        placeholder={systemConfig.apiKeyMasked || "Chưa thiết lập API Key"}
-                        value={systemConfig.apiKey}
-                        onChange={(e) => setSystemConfig((prev) => ({ ...prev, apiKey: e.target.value }))}
-                        style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: "1px solid #cbd5e1" }}
-                      />
-                      <span style={{ fontSize: 12, color: systemConfig.hasApiKey ? "#059669" : "#dc2626", fontWeight: 700 }}>
-                        {systemConfig.hasApiKey ? "🟢 Đã kết nối" : "🔴 Chưa có Key"}
-                      </span>
-                    </div>
-                    <small style={{ color: "#64748b", fontSize: 11, display: "block", marginTop: 4 }}>
-                      🔒 Khóa API được mã hóa và che mờ trên màn hình. Chỉ nhập vào ô trên khi bạn muốn thay đổi khóa mới.
-                    </small>
-                  </AdminField>
-                </div>
-
-                <div style={{ textAlign: "right", marginTop: 10 }}>
+                <div style={{ textAlign: "right", marginTop: 6 }}>
                   <AdminBtn variant="primary" type="submit" disabled={savingSystemConfig}>
-                    {savingSystemConfig ? "Đang lưu..." : "💾 Lưu & Đồng Bộ Hệ Thống AI"}
+                    {savingSystemConfig ? "Đang lưu..." : "💾 Lưu & Đồng Bộ Hệ Thống AI Ngay"}
                   </AdminBtn>
                 </div>
               </form>
             </AdminCard>
 
-            {/* Cột 2: Dự toán Token */}
-            <AdminCard title="📊 Bảng Phân Tích & Dự Toán Token (100 Sản Phẩm)">
-              <p style={{ color: "#64748b", fontSize: 13, marginTop: 0 }}>
-                Đánh giá chi phí token và hiệu năng giữa các phương thức đóng gói dữ liệu kho hàng gửi vào LLM API.
-              </p>
+            {/* Cột 2: Hướng dẫn chuyển đổi 30 giây + Dự toán Token */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+              <AdminCard title="🚀 Hướng Dẫn Chuyển Sang Groq Miễn Phí (30 Giây — Hết Lỗi 503/429)">
+                <p style={{ color: "#475569", fontSize: 13, marginTop: 0, lineHeight: 1.55 }}>
+                  Google Gemini Free Tier thường bị giới hạn <strong>20 lượt/ngày</strong> hoặc quá tải <strong>503</strong> vào giờ cao điểm. Bạn có thể kích hoạt <strong>Groq Cloud</strong> miễn phí (không cần thẻ tín dụng) để AI trả lời mượt dưới <strong>0,5 giây</strong>:
+                </p>
+                <ol style={{ margin: "0 0 12px", paddingLeft: 20, fontSize: 13, color: "#1e293b", lineHeight: 1.7 }}>
+                  <li>
+                    Mở{" "}
+                    <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" style={{ color: "#2563eb", fontWeight: 700 }}>
+                      console.groq.com/keys ↗
+                    </a>{" "}
+                    và đăng nhập nhanh bằng tài khoản Google/GitHub.
+                  </li>
+                  <li>
+                    Bấm <strong>Create API Key</strong> → đặt tên <code>pcmall</code> → sao chép chuỗi bắt đầu bằng <code>gsk_...</code>.
+                  </li>
+                  <li>
+                    Bấm thẻ <strong>⚡ Groq Cloud (Llama 3.3)</strong> phía trên (hoặc dán vào ô <strong>Dự Phòng</strong> nếu vẫn muốn giữ Gemini làm chính) → bấm <strong>⚡ Test kết nối</strong> → bấm <strong>💾 Lưu & Đồng Bộ</strong> (áp dụng ngay lập tức, không cần khởi động lại server!).
+                  </li>
+                </ol>
+                <div style={{ background: "#fffbeb", border: "1px solid #fde68a", padding: "10px 12px", borderRadius: 8, fontSize: 12, color: "#92400e", lineHeight: 1.55 }}>
+                  💡 <strong>Khuyến nghị tối ưu khi Demo / Bảo vệ KLTN:</strong> Đặt <strong>Groq (llama-3.3-70b-versatile)</strong> làm <em>Provider Chính</em> + giữ <strong>Gemini</strong> làm <em>Provider Dự Phòng</em> + bật <strong>Auto-Failover</strong>. Hệ thống sẽ có 3 lớp bảo vệ liên hoàn (Groq ➔ Gemini ➔ Expert XAI Engine) đảm bảo <strong>0% chết demo</strong>!
+                </div>
+              </AdminCard>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", padding: 14, borderRadius: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <strong style={{ color: "#166534", fontSize: 14 }}>✅ Định Dạng Dòng Nén (Đang áp dụng)</strong>
-                    <span style={{ background: "#dcfce7", color: "#15803d", padding: "2px 8px", borderRadius: 8, fontSize: 11, fontWeight: 700 }}>
-                      Khuyên dùng
-                    </span>
+              <AdminCard title="📊 Bảng Phân Tích & Dự Toán Token (100 Sản Phẩm)">
+                <p style={{ color: "#64748b", fontSize: 13, marginTop: 0 }}>
+                  Đánh giá chi phí token và hiệu năng giữa các phương thức đóng gói dữ liệu kho hàng gửi vào LLM API.
+                </p>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", padding: 14, borderRadius: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <strong style={{ color: "#166534", fontSize: 14 }}>✅ Định Dạng Dòng Nén (Đang áp dụng)</strong>
+                      <span style={{ background: "#dcfce7", color: "#15803d", padding: "2px 8px", borderRadius: 8, fontSize: 11, fontWeight: 700 }}>
+                        Khuyên dùng
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.5 }}>
+                      <div>• <strong>Token / sản phẩm:</strong> ~28 tokens (Mã, Tên, Giá, Tồn, Specs)</div>
+                      <div>• <strong>Tổng Input Tokens (100 SP + Prompt):</strong> <strong>~3.750 tokens</strong></div>
+                      <div>• <strong>Chi phí (1.000 câu hỏi):</strong> ~$0.0003 / câu (~8 VNĐ)</div>
+                    </div>
                   </div>
-                  <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.5 }}>
-                    <div>• <strong>Token / sản phẩm:</strong> ~28 tokens (Mã, Tên, Giá, Tồn, Specs)</div>
-                    <div>• <strong>Gửi 100 sản phẩm:</strong> ~2.800 tokens sản phẩm</div>
-                    <div>• <strong>Tổng Input Tokens (kèm Prompt):</strong> <strong>~3.750 tokens</strong></div>
-                    <div>• <strong>Chi phí (1.000 câu hỏi):</strong> ~$0.0003 / câu (~8 VNĐ)</div>
+
+                  <div style={{ background: "#fef2f2", border: "1px solid #fecaca", padding: 14, borderRadius: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <strong style={{ color: "#991b1b", fontSize: 14 }}>❌ Định Dạng Raw JSON Phân Cấp</strong>
+                      <span style={{ background: "#fee2e2", color: "#b91c1c", padding: "2px 8px", borderRadius: 8, fontSize: 11, fontWeight: 700 }}>
+                        Không khuyến khích
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.5 }}>
+                      <div>• <strong>Token / sản phẩm:</strong> ~95 tokens (tốn gấp 3,5 lần)</div>
+                      <div>• <strong>Nhược điểm:</strong> Dễ gây hiện tượng Lost-in-the-middle.</div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", padding: 14, borderRadius: 12 }}>
+                    <strong style={{ color: "#1e40af", fontSize: 13.5, display: "block", marginBottom: 4 }}>
+                      💡 Cấu Hình Đầu Ra Hiện Tại
+                    </strong>
+                    <div style={{ fontSize: 13, color: "#1e3a8a", lineHeight: 1.5 }}>
+                      <div>• <strong>Giới hạn sinh ra (Max Output):</strong> <strong>{systemConfig.maxTokens} tokens</strong> (~{Math.round(systemConfig.maxTokens * 0.75)} từ tiếng Việt)</div>
+                    </div>
                   </div>
                 </div>
-
-                <div style={{ background: "#fef2f2", border: "1px solid #fecaca", padding: 14, borderRadius: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <strong style={{ color: "#991b1b", fontSize: 14 }}>❌ Định Dạng Raw JSON Phân Cấp</strong>
-                    <span style={{ background: "#fee2e2", color: "#b91c1c", padding: "2px 8px", borderRadius: 8, fontSize: 11, fontWeight: 700 }}>
-                      Không khuyến khích
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.5 }}>
-                    <div>• <strong>Token / sản phẩm:</strong> ~95 tokens (ngoặc nhọn, key-value rườm rà)</div>
-                    <div>• <strong>Gửi 100 sản phẩm:</strong> ~9.500 tokens sản phẩm</div>
-                    <div>• <strong>Tổng Input Tokens:</strong> <strong>~10.500 - 12.000 tokens</strong></div>
-                    <div>• <strong>Nhược điểm:</strong> Tốn gấp 3.5 lần token và gây hiện tượng Lost-in-the-middle.</div>
-                  </div>
-                </div>
-
-                <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", padding: 14, borderRadius: 12 }}>
-                  <strong style={{ color: "#1e40af", fontSize: 13.5, display: "block", marginBottom: 4 }}>
-                    💡 Cấu Hình Đầu Ra Hiện Tại
-                  </strong>
-                  <div style={{ fontSize: 13, color: "#1e3a8a", lineHeight: 1.5 }}>
-                    <div>• <strong>Giới hạn sinh ra (Max Output):</strong> <strong>{systemConfig.maxTokens} tokens</strong></div>
-                    <div>• <strong>Tương đương:</strong> ~{Math.round(systemConfig.maxTokens * 0.75)} từ tiếng Việt</div>
-                    <div>• Đủ để trình bày phân tích chuyên sâu, so sánh bảng biểu và danh sách đề xuất sản phẩm thật.</div>
-                  </div>
-                </div>
-              </div>
-            </AdminCard>
+              </AdminCard>
+            </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ==================== MODAL THÊM / SỬA QUY TẮC ==================== */}
       {isModalOpen && (
@@ -1761,89 +2334,86 @@ export function AdminAiConfigPage({ initialTab }) {
         </div>
       )}
 
-      {/* ==================== MODAL XEM CHI TIẾT CHUNKS ==================== */}
+      {/* ==================== MODAL XEM CHI TIẾT CHUNKS (LUXURY INSPECTOR) ==================== */}
       {isPreviewModalOpen && previewChunksData && (
-        <div style={{
-          position: "fixed",
-          inset: 0,
-          background: "rgba(15, 23, 42, 0.6)",
-          backdropFilter: "blur(4px)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          zIndex: 9999,
-          padding: 16
-        }}>
-          <div style={{
-            background: "#ffffff",
-            borderRadius: 16,
-            width: "100%",
-            maxWidth: 850,
-            maxHeight: "90vh",
-            display: "flex",
-            flexDirection: "column",
-            boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)"
-          }}>
-            {/* Modal Header */}
-            <div style={{ padding: "20px 24px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div
+          className="ai-modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsPreviewModalOpen(false);
+          }}
+        >
+          <div className="ai-chunk-modal">
+            <div className="ai-chunk-modal-head">
               <div>
-                <h3 style={{ margin: 0, fontSize: 17, color: "#0f172a" }}>
-                  🔍 Chi Tiết Phân Đoạn Chunks (Smart Semantic Chunking)
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2px 9px", borderRadius: 999, background: "rgba(56,189,248,0.18)", color: "#7dd3fc", letterSpacing: "0.05em", textTransform: "uppercase" }}>
+                    Smart Semantic Chunking Inspector
+                  </span>
+                  <span style={{ fontSize: 11, color: "#cbd5e1" }}>600 chars • Overlap 120 • Unicode NFC</span>
+                </div>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#ffffff" }}>
+                  {previewChunksData.fileName}
                 </h3>
-                <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
-                  Tài liệu: <strong>{previewChunksData.fileName}</strong> • Tổng cộng: <strong>{previewChunksData.totalChunks} chunks</strong> đã nạp vào ChromaDB & BM25
+                <div style={{ fontSize: 12.5, color: "#94a3b8", marginTop: 3 }}>
+                  Tổng cộng <strong style={{ color: "#e2e8f0" }}>{previewChunksData.totalChunks} phân đoạn (chunks)</strong> đã đồng bộ vào ChromaDB & BM25Okapi
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsPreviewModalOpen(false)}
                 style={{
-                  background: "#f1f5f9",
-                  border: "none",
-                  borderRadius: "50%",
-                  width: 32,
-                  height: 32,
+                  background: "rgba(255,255,255,0.1)",
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  borderRadius: 10,
+                  width: 34,
+                  height: 34,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: "pointer",
-                  fontSize: 16,
-                  color: "#64748b"
+                  fontSize: 15,
+                  color: "#e2e8f0"
                 }}
               >
                 ✕
               </button>
             </div>
 
-            {/* Modal Body - Scrollable Chunks */}
-            <div style={{ padding: 24, overflowY: "auto", flex: 1, display: "grid", gap: 14 }}>
+            <div style={{ padding: "20px 24px", overflowY: "auto", flex: 1, display: "grid", gap: 14, background: "#f8fafc" }}>
               {previewChunksData.chunks?.map((chunk, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    background: "#f8fafc",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: 10,
-                    padding: 14
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div key={idx} className="ai-chunk-card">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 8, flexWrap: "wrap" }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                       <span style={{
-                        background: "#2563eb",
+                        background: "linear-gradient(135deg, #0f172a, #1e293b)",
                         color: "#fff",
                         fontWeight: 700,
                         fontSize: 11,
-                        padding: "2px 8px",
-                        borderRadius: 6
+                        padding: "3px 9px",
+                        borderRadius: 7
                       }}>
                         Chunk #{chunk.index || idx + 1}
                       </span>
-                      <code style={{ fontSize: 11, color: "#475569" }}>{chunk.id}</code>
+                      <code style={{ fontSize: 11, color: "#64748b", background: "#f1f5f9", padding: "2px 7px", borderRadius: 5 }}>
+                        {chunk.id}
+                      </code>
                     </div>
-                    <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>
-                      Độ dài: {chunk.length} ký tự
-                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 11.5, color: "#475569", fontWeight: 600 }}>
+                        {chunk.length} ký tự
+                      </span>
+                      <button
+                        type="button"
+                        className="ai-action-btn ai-action-btn--ghost"
+                        style={{ padding: "3px 8px", fontSize: 11 }}
+                        onClick={() => {
+                          navigator.clipboard?.writeText(chunk.text || "");
+                          setSuccessMessage(`Đã sao chép nội dung Chunk #${chunk.index || idx + 1}`);
+                        }}
+                      >
+                        Sao chép
+                      </button>
+                    </div>
                   </div>
                   <pre style={{
                     margin: 0,
@@ -1852,11 +2422,11 @@ export function AdminAiConfigPage({ initialTab }) {
                     fontFamily: "inherit",
                     fontSize: 13,
                     color: "#1e293b",
-                    lineHeight: 1.6,
-                    background: "#ffffff",
-                    padding: 12,
-                    borderRadius: 6,
-                    border: "1px solid #f1f5f9"
+                    lineHeight: 1.65,
+                    background: "#fafcff",
+                    padding: "12px 14px",
+                    borderRadius: 8,
+                    border: "1px solid #edf2f7"
                   }}>
                     {chunk.text}
                   </pre>
@@ -1864,28 +2434,28 @@ export function AdminAiConfigPage({ initialTab }) {
               ))}
             </div>
 
-            {/* Modal Footer */}
-            <div style={{ padding: "14px 24px", borderTop: "1px solid #e2e8f0", display: "flex", justifyContent: "flex-end" }}>
+            <div style={{ padding: "14px 24px", borderTop: "1px solid #e2e8f0", background: "#ffffff", display: "flex", justifyContent: "flex-end" }}>
               <button
                 type="button"
                 onClick={() => setIsPreviewModalOpen(false)}
                 style={{
-                  padding: "8px 20px",
-                  background: "#2563eb",
+                  padding: "9px 22px",
+                  background: "#0f172a",
                   color: "#fff",
                   border: "none",
-                  borderRadius: 8,
-                  fontWeight: 600,
+                  borderRadius: 10,
+                  fontWeight: 700,
                   fontSize: 13,
                   cursor: "pointer"
                 }}
               >
-                Đóng
+                Đóng Trình Kiểm Tra
               </button>
             </div>
           </div>
         </div>
       )}
+      </div>
     </AdminPage>
   );
 }
