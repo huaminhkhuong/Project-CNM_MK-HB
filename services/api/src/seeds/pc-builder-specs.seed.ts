@@ -317,7 +317,7 @@ async function seed() {
         }
       }
       console.log(`✅ ${specEntries.length} attrs`);
-    } catch (err) {
+    } catch (err: any) {
       console.log(`❌ ERROR: ${(err as Error).message}`);
       errors++;
     }

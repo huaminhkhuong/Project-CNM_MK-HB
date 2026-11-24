@@ -1,0 +1,1329 @@
+[
+  {
+    "table_index": 13,
+    "title": "Tên use case: Đăng nhập và đồng bộ giỏ hàng tạm",
+    "rows_count": 22,
+    "rows": [
+      [
+        "Tên use case: Đăng nhập và đồng bộ giỏ hàng tạm",
+        "Tên use case: Đăng nhập và đồng bộ giỏ hàng tạm"
+      ],
+      [
+        "Mô tả sơ lược: Chức năng cho phép người dùng truy cập vào hệ thống bằng cách nhập địa chỉ email và mật khẩu hợp lệ. Nếu thông tin chính xác, hệ thống xác thực tài khoản, tự động hợp nhất giỏ hàng tạm cùng cấu hình PC lưu nháp trên trình duyệt vào tài khoản cá nhân và điều hướng người dùng đến trang phù hợp với vai trò. Nếu thông tin sai hoặc thiếu, hệ thống sẽ thông báo lỗi.",
+        "Mô tả sơ lược: Chức năng cho phép người dùng truy cập vào hệ thống bằng cách nhập địa chỉ email và mật khẩu hợp lệ. Nếu thông tin chính xác, hệ thống xác thực tài khoản, tự động hợp nhất giỏ hàng tạm cùng cấu hình PC lưu nháp trên trình duyệt vào tài khoản cá nhân và điều hướng người dùng đến trang phù hợp với vai trò. Nếu thông tin sai hoặc thiếu, hệ thống sẽ thông báo lỗi."
+      ],
+      [
+        "Actor chính: Người dùng (Khách hàng thành viên, Nhân viên bán hàng, Nhân viên kỹ thuật, Quản trị viên)",
+        "Actor chính: Người dùng (Khách hàng thành viên, Nhân viên bán hàng, Nhân viên kỹ thuật, Quản trị viên)"
+      ],
+      [
+        "Actor phụ: Không",
+        "Actor phụ: Không"
+      ],
+      [
+        "Tiền điều kiện (Pre-condition):\n• Người dùng đã có tài khoản trên hệ thống và có kết nối Internet ổn định.\n• Người dùng đang ở trạng thái chưa đăng nhập hoặc phiên làm việc trước đó đã hết hạn.",
+        "Tiền điều kiện (Pre-condition):\n• Người dùng đã có tài khoản trên hệ thống và có kết nối Internet ổn định.\n• Người dùng đang ở trạng thái chưa đăng nhập hoặc phiên làm việc trước đó đã hết hạn."
+      ],
+      [
+        "Hậu điều kiện (Post-condition):\n• Người dùng đăng nhập thành công, thông tin tài khoản và cặp khóa xác thực (accessToken, refreshToken) được lưu vào LocalStorage.\n• Giỏ hàng tạm và cấu hình PC lưu nháp của khách vãng lai được đồng bộ vào cơ sở dữ liệu, người dùng truy cập được các chức năng theo phân quyền.",
+        "Hậu điều kiện (Post-condition):\n• Người dùng đăng nhập thành công, thông tin tài khoản và cặp khóa xác thực (accessToken, refreshToken) được lưu vào LocalStorage.\n• Giỏ hàng tạm và cấu hình PC lưu nháp của khách vãng lai được đồng bộ vào cơ sở dữ liệu, người dùng truy cập được các chức năng theo phân quyền."
+      ],
+      [
+        "Luồng sự kiện chính (main flow):",
+        "Luồng sự kiện chính (main flow):"
+      ],
+      [
+        "Người dùng",
+        "System"
+      ],
+      [
+        "1. Chọn chức năng “Đăng nhập”.",
+        "2. Hệ thống hiển thị trang đăng nhập gồm: ô nhập email, ô nhập mật khẩu và nút “Đăng nhập”."
+      ],
+      [
+        "3. Nhập địa chỉ email và mật khẩu.",
+        ""
+      ],
+      [
+        "4. Nhấn nút “Đăng nhập” hoặc bấm phím Enter.",
+        "5. Gửi yêu cầu đăng nhập và kiểm tra thông tin đăng nhập."
+      ],
+      [
+        "",
+        "6. Thông tin hợp lệ, đăng nhập thành công:\n- Lưu accessToken, refreshToken và thông tin user vào LocalStorage (khóa cnm_auth).\n- Nếu là Khách hàng có giỏ hàng tạm (cnm_guest_cart) hoặc cấu hình PC nháp (cnm_guest_pc_builds), tự động hợp nhất vào bảng cart_items và pc_builds, sau đó xóa bộ nhớ tạm.\n- Điều hướng đến trang tương ứng với vai trò (/admin/dashboard, /staff/orders, /tech/tickets hoặc /profile)."
+      ],
+      [
+        "Luồng sự kiện thay thế (alternate flow):",
+        "Luồng sự kiện thay thế (alternate flow):"
+      ],
+      [
+        "",
+        "5.1. Bỏ trống trường bắt buộc: Email.\nHiển thị thông báo “Vui lòng nhập email”."
+      ],
+      [
+        "",
+        "5.2. Địa chỉ Email nhập sai định dạng cú pháp.\nHiển thị thông báo “Email không hợp lệ”."
+      ],
+      [
+        "",
+        "5.3. Bỏ trống trường bắt buộc: Mật khẩu.\nHiển thị thông báo “Vui lòng nhập mật khẩu”."
+      ],
+      [
+        "",
+        "5.4. Mật khẩu nhập vào ngắn hơn 6 ký tự.\nHiển thị thông báo “Mật khẩu phải có ít nhất 6 ký tự”."
+      ],
+      [
+        "",
+        "5.5. Email hoặc mật khẩu không đúng.\nHiển thị thông báo “Đăng nhập thất bại” kèm theo thông báo lỗi xác thực từ server."
+      ],
+      [
+        "",
+        "5.6. Tài khoản đang bị khóa hoặc ngừng hoạt động.\nHiển thị thông báo từ chối truy cập do tài khoản không hoạt động."
+      ],
+      [
+        "Luồng sự kiện ngoại lệ (exception flow):",
+        "Luồng sự kiện ngoại lệ (exception flow):"
+      ],
+      [
+        "",
+        "2.1. Phiên làm việc trước đó vừa hết hạn.\nHiển thị thông báo “Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục.”"
+      ],
+      [
+        "",
+        "6.1. Sản phẩm trong giỏ hàng tạm vượt quá tồn kho hoặc đã hết hàng khi đồng bộ.\nHệ thống tự động giới hạn số lượng cộng dồn bằng mức tồn kho thực tế (stock) hoặc bỏ qua mặt hàng đã hết kho."
+      ]
+    ]
+  },
+  {
+    "table_index": 14,
+    "title": "Tên use case: Đăng ký tài khoản",
+    "rows_count": 22,
+    "rows": [
+      [
+        "Tên use case: Đăng ký tài khoản",
+        "Tên use case: Đăng ký tài khoản"
+      ],
+      [
+        "Mô tả sơ lược: Use case cho phép khách vãng lai tạo tài khoản thành viên mới bằng cách nhập đầy đủ thông tin cá nhân cần thiết. Tài khoản sau khi đăng ký sẽ được lưu trữ trong cơ sở dữ liệu với vai trò mặc định là Khách hàng (CUSTOMER) và tự động đăng nhập vào hệ thống.",
+        "Mô tả sơ lược: Use case cho phép khách vãng lai tạo tài khoản thành viên mới bằng cách nhập đầy đủ thông tin cá nhân cần thiết. Tài khoản sau khi đăng ký sẽ được lưu trữ trong cơ sở dữ liệu với vai trò mặc định là Khách hàng (CUSTOMER) và tự động đăng nhập vào hệ thống."
+      ],
+      [
+        "Actor chính: Khách hàng vãng lai",
+        "Actor chính: Khách hàng vãng lai"
+      ],
+      [
+        "Actor phụ: Không",
+        "Actor phụ: Không"
+      ],
+      [
+        "Tiền điều kiện (Pre-condition):\n• Người dùng truy cập vào hệ thống tại trang Đăng ký (/register).\n• Người dùng chưa có tài khoản trong hệ thống (email và số điện thoại chưa được đăng ký).",
+        "Tiền điều kiện (Pre-condition):\n• Người dùng truy cập vào hệ thống tại trang Đăng ký (/register).\n• Người dùng chưa có tài khoản trong hệ thống (email và số điện thoại chưa được đăng ký)."
+      ],
+      [
+        "Hậu điều kiện (Post-condition):\n• Tài khoản người dùng mới được lưu thành công vào bảng users trong cơ sở dữ liệu.\n• Hệ thống hiển thị thông báo “Tạo tài khoản thành công. Đang đăng nhập...”, tự động cấp token xác thực và chuyển về trang chủ.",
+        "Hậu điều kiện (Post-condition):\n• Tài khoản người dùng mới được lưu thành công vào bảng users trong cơ sở dữ liệu.\n• Hệ thống hiển thị thông báo “Tạo tài khoản thành công. Đang đăng nhập...”, tự động cấp token xác thực và chuyển về trang chủ."
+      ],
+      [
+        "Luồng sự kiện chính (main flow):",
+        "Luồng sự kiện chính (main flow):"
+      ],
+      [
+        "Khách hàng vãng lai",
+        "System"
+      ],
+      [
+        "1. Chọn chức năng “Đăng ký”.",
+        "2. Hiển thị form đăng ký yêu cầu nhập các thông tin: họ và tên, email, số điện thoại, mật khẩu, xác nhận mật khẩu."
+      ],
+      [
+        "3. Điền đầy đủ các thông tin vào form.",
+        "4. Hệ thống kiểm tra trực tuyến trạng thái email, đánh giá độ mạnh mật khẩu theo 4 tiêu chí và kiểm tra khớp mật khẩu xác nhận."
+      ],
+      [
+        "5. Nhấn nút “Tạo tài khoản PC Mall”.",
+        "6. Hệ thống xử lý và kiểm tra tính hợp lệ của thông tin trên server."
+      ],
+      [
+        "",
+        "7. Thông tin hợp lệ:\n- Hệ thống băm mật khẩu bằng bcrypt và lưu tài khoản mới vào bảng users.\n- Hiển thị thông báo “Tạo tài khoản thành công. Đang đăng nhập...”, đồng bộ giỏ hàng tạm và điều hướng về trang chủ."
+      ],
+      [
+        "Luồng sự kiện thay thế (alternate flow):",
+        "Luồng sự kiện thay thế (alternate flow):"
+      ],
+      [
+        "",
+        "4.1. Bỏ trống trường bắt buộc: Họ và tên, email, số điện thoại, mật khẩu, xác nhận mật khẩu.\nHiển thị thông báo nhắc nhập tại trường tương ứng (“Vui lòng nhập họ tên”, “Vui lòng nhập email”, “Vui lòng nhập số điện thoại”, “Vui lòng nhập mật khẩu”, “Vui lòng xác nhận mật khẩu”)."
+      ],
+      [
+        "",
+        "4.2. Email nhập sai cú pháp.\nHiển thị thông báo “Email không hợp lệ”."
+      ],
+      [
+        "",
+        "4.3. Số điện thoại không đúng chuẩn số điện thoại Việt Nam (10–11 chữ số bắt đầu bằng 0 hoặc +84).\nHiển thị thông báo “Số điện thoại không hợp lệ”."
+      ],
+      [
+        "",
+        "4.4. Mật khẩu ngắn hơn 8 ký tự.\nHiển thị thông báo “Mật khẩu tối thiểu 8 ký tự”."
+      ],
+      [
+        "",
+        "4.5. Mật khẩu xác nhận không trùng khớp với mật khẩu đã nhập.\nHiển thị thông báo “Mật khẩu xác nhận không khớp”."
+      ],
+      [
+        "",
+        "6.1. Địa chỉ Email đã tồn tại trong hệ thống.\nHiển thị thông báo “Email đã tồn tại”."
+      ],
+      [
+        "",
+        "6.2. Số điện thoại đã tồn tại trong hệ thống.\nHiển thị thông báo “Số điện thoại đã tồn tại”."
+      ],
+      [
+        "Luồng sự kiện ngoại lệ (exception flow):",
+        "Luồng sự kiện ngoại lệ (exception flow):"
+      ],
+      [
+        "1.1. Chọn “Tiếp tục với Google (DEMO)” và chọn tài khoản mẫu.",
+        "1.2. Hệ thống tự động khởi tạo hoặc xác thực tài khoản Google Demo, hiển thị thông báo “Đăng nhập Google demo thành công.” và chuyển về trang chủ."
+      ]
+    ]
+  },
+  {
+    "table_index": 15,
+    "title": "Tên use case: Quản lý tài khoản, Đổi mật khẩu và Sổ địa chỉ",
+    "rows_count": 33,
+    "rows": [
+      [
+        "Tên use case: Quản lý tài khoản, Đổi mật khẩu và Sổ địa chỉ",
+        "Tên use case: Quản lý tài khoản, Đổi mật khẩu và Sổ địa chỉ"
+      ],
+      [
+        "Mô tả sơ lược: Use case cho phép khách hàng thành viên sau khi đăng nhập có thể xem thông tin tổng quan tài khoản, cập nhật hồ sơ cá nhân, thay đổi mật khẩu bảo mật và quản lý danh sách địa chỉ nhận hàng (thêm mới, chỉnh sửa, xóa địa chỉ).",
+        "Mô tả sơ lược: Use case cho phép khách hàng thành viên sau khi đăng nhập có thể xem thông tin tổng quan tài khoản, cập nhật hồ sơ cá nhân, thay đổi mật khẩu bảo mật và quản lý danh sách địa chỉ nhận hàng (thêm mới, chỉnh sửa, xóa địa chỉ)."
+      ],
+      [
+        "Actor chính: Khách hàng thành viên",
+        "Actor chính: Khách hàng thành viên"
+      ],
+      [
+        "Actor phụ: Không",
+        "Actor phụ: Không"
+      ],
+      [
+        "Tiền điều kiện (Pre-condition):\n• Khách hàng đã đăng nhập thành công vào hệ thống.",
+        "Tiền điều kiện (Pre-condition):\n• Khách hàng đã đăng nhập thành công vào hệ thống."
+      ],
+      [
+        "Hậu điều kiện (Post-condition):\n• Các thao tác cập nhật trên trang hồ sơ được ghi nhận thành công vào cơ sở dữ liệu:\n• Thông tin họ tên, số điện thoại và địa chỉ mặc định của khách hàng được cập nhật vào bảng users.\n• Mật khẩu mới được mã hóa bcrypt và lưu vào bảng users (nếu thực hiện đổi mật khẩu).\n• Địa chỉ giao hàng được thêm mới, chỉnh sửa hoặc xóa khỏi bảng addresses (nếu thao tác sổ địa chỉ).",
+        "Hậu điều kiện (Post-condition):\n• Các thao tác cập nhật trên trang hồ sơ được ghi nhận thành công vào cơ sở dữ liệu:\n• Thông tin họ tên, số điện thoại và địa chỉ mặc định của khách hàng được cập nhật vào bảng users.\n• Mật khẩu mới được mã hóa bcrypt và lưu vào bảng users (nếu thực hiện đổi mật khẩu).\n• Địa chỉ giao hàng được thêm mới, chỉnh sửa hoặc xóa khỏi bảng addresses (nếu thao tác sổ địa chỉ)."
+      ],
+      [
+        "Luồng sự kiện chính (main flow):",
+        "Luồng sự kiện chính (main flow):"
+      ],
+      [
+        "Khách hàng thành viên",
+        "System"
+      ],
+      [
+        "1. Chọn chức năng “Hồ sơ tài khoản” (/profile) trên thanh điều hướng.",
+        "2. Hệ thống hiển thị trang Hồ sơ cá nhân gồm: thống kê tổng quan (Số đơn hàng, Sản phẩm bảo hành, Cấp độ thành viên) và các khu vực Thông tin hồ sơ, Bảo mật tài khoản, Địa chỉ giao hàng."
+      ],
+      [
+        "3. Nếu khách hàng chỉnh sửa hồ sơ cá nhân, subflow “Cập nhật thông tin hồ sơ” được thực thi.",
+        ""
+      ],
+      [
+        "4. Nếu khách hàng thay đổi mật khẩu, subflow “Đổi mật khẩu” được thực thi.",
+        ""
+      ],
+      [
+        "5. Nếu khách hàng thêm, sửa hoặc xóa địa chỉ, subflow “Quản lý sổ địa chỉ giao hàng” được thực thi.",
+        ""
+      ],
+      [
+        "Subflow Cập nhật thông tin hồ sơ",
+        "Subflow Cập nhật thông tin hồ sơ"
+      ],
+      [
+        "1. Chỉnh sửa Họ tên, Số điện thoại, chọn Địa chỉ mặc định và nhấn nút “Lưu hồ sơ”.",
+        "2. Hệ thống kiểm tra dữ liệu vừa nhập."
+      ],
+      [
+        "",
+        "3. Hệ thống cập nhật thành công vào bảng users và hiển thị thông báo “Thông tin hồ sơ đã được cập nhật.”."
+      ],
+      [
+        "Subflow Đổi mật khẩu",
+        "Subflow Đổi mật khẩu"
+      ],
+      [
+        "1. Nhập Mật khẩu hiện tại, Mật khẩu mới, Nhập lại mật khẩu mới và nhấn nút “Cập nhật mật khẩu”.",
+        "2. Hệ thống kiểm tra tính hợp lệ của mật khẩu hiện tại và mật khẩu mới."
+      ],
+      [
+        "",
+        "3. Hệ thống lưu mật khẩu mới đã băm vào bảng users và hiển thị thông báo “Mật khẩu đã được đổi thành công.”."
+      ],
+      [
+        "Subflow Quản lý sổ địa chỉ giao hàng",
+        "Subflow Quản lý sổ địa chỉ giao hàng"
+      ],
+      [
+        "1. Nhập Họ tên người nhận, Số điện thoại, Địa chỉ chi tiết, Phường/Xã, Quận/Huyện, Tỉnh/Thành phố và nhấn nút “Thêm địa chỉ” (hoặc chọn “Chỉnh sửa” / “Xóa” trên địa chỉ đã có).",
+        "2. Hệ thống kiểm tra thông tin địa chỉ."
+      ],
+      [
+        "",
+        "3. Hệ thống thêm mới, cập nhật hoặc xóa bản ghi trong bảng addresses và hiển thị thông báo xác nhận tương ứng (“Đã thêm địa chỉ mới.” / “Địa chỉ đã được cập nhật.” / “Địa chỉ đã được xóa.”)."
+      ],
+      [
+        "Luồng sự kiện thay thế (alternate flow):",
+        "Luồng sự kiện thay thế (alternate flow):"
+      ],
+      [
+        "Subflow Cập nhật thông tin hồ sơ",
+        "Subflow Cập nhật thông tin hồ sơ"
+      ],
+      [
+        "",
+        "2.1. Bỏ trống trường bắt buộc: Họ tên.\nHiển thị thông báo “Họ và tên là bắt buộc”."
+      ],
+      [
+        "",
+        "2.2. Số điện thoại nhập sai định dạng Việt Nam.\nHiển thị thông báo “Số điện thoại Việt Nam không hợp lệ”."
+      ],
+      [
+        "Subflow Đổi mật khẩu",
+        "Subflow Đổi mật khẩu"
+      ],
+      [
+        "",
+        "2.1. Mật khẩu mới ngắn hơn 8 ký tự.\nHiển thị thông báo “Mật khẩu mới tối thiểu 8 ký tự.”."
+      ],
+      [
+        "",
+        "2.2. Mật khẩu mới và mật khẩu xác nhận không trùng khớp.\nHiển thị thông báo “Mật khẩu xác nhận không khớp.”."
+      ],
+      [
+        "",
+        "2.3. Mật khẩu hiện tại không chính xác.\nHiển thị thông báo “Mật khẩu hiện tại không đúng”."
+      ],
+      [
+        "Subflow Quản lý sổ địa chỉ giao hàng",
+        "Subflow Quản lý sổ địa chỉ giao hàng"
+      ],
+      [
+        "",
+        "2.1. Bỏ trống một trong 6 trường thông tin địa chỉ bắt buộc.\nHiển thị thông báo “Vui lòng cung cấp đầy đủ thông tin địa chỉ”."
+      ],
+      [
+        "Luồng sự kiện ngoại lệ (exception flow):",
+        "Luồng sự kiện ngoại lệ (exception flow):"
+      ],
+      [
+        "",
+        "1.1. Người dùng chưa đăng nhập nhưng truy cập trực tiếp đường dẫn /profile.\nHệ thống chặn truy cập và hiển thị thông báo “Bạn cần đăng nhập để xem khu vực này.” kèm nút “Đi đến trang đăng nhập”."
+      ]
+    ]
+  },
+  {
+    "table_index": 16,
+    "title": "Tên use case: Xem danh mục sản phẩm",
+    "rows_count": 17,
+    "rows": [
+      [
+        "Tên use case: Xem danh mục sản phẩm",
+        "Tên use case: Xem danh mục sản phẩm"
+      ],
+      [
+        "Mô tả sơ lược: Use case này cho phép người dùng duyệt xem danh sách các danh mục linh kiện máy tính, thương hiệu sản xuất và danh sách sản phẩm phân trang trên Trang chủ cũng như Trang danh sách sản phẩm, hỗ trợ sắp xếp theo giá/mức độ nổi bật và chuyển đổi chế độ xem Lưới hoặc Danh sách.",
+        "Mô tả sơ lược: Use case này cho phép người dùng duyệt xem danh sách các danh mục linh kiện máy tính, thương hiệu sản xuất và danh sách sản phẩm phân trang trên Trang chủ cũng như Trang danh sách sản phẩm, hỗ trợ sắp xếp theo giá/mức độ nổi bật và chuyển đổi chế độ xem Lưới hoặc Danh sách."
+      ],
+      [
+        "Actor chính: Khách hàng vãng lai, Khách hàng thành viên",
+        "Actor chính: Khách hàng vãng lai, Khách hàng thành viên"
+      ],
+      [
+        "Actor phụ: Không",
+        "Actor phụ: Không"
+      ],
+      [
+        "Tiền điều kiện (Pre-condition):\n• Người dùng truy cập vào hệ thống tại Trang chủ (/) hoặc Trang danh sách linh kiện (/products).\n• Hệ thống đã có dữ liệu danh mục, thương hiệu và sản phẩm đang hoạt động trong cơ sở dữ liệu.",
+        "Tiền điều kiện (Pre-condition):\n• Người dùng truy cập vào hệ thống tại Trang chủ (/) hoặc Trang danh sách linh kiện (/products).\n• Hệ thống đã có dữ liệu danh mục, thương hiệu và sản phẩm đang hoạt động trong cơ sở dữ liệu."
+      ],
+      [
+        "Hậu điều kiện (Post-condition):\n• Hiển thị danh sách danh mục, thương hiệu và các sản phẩm thuộc trang hiện tại với đầy đủ thông tin giá bán, tình trạng tồn kho và thông số tóm tắt.",
+        "Hậu điều kiện (Post-condition):\n• Hiển thị danh sách danh mục, thương hiệu và các sản phẩm thuộc trang hiện tại với đầy đủ thông tin giá bán, tình trạng tồn kho và thông số tóm tắt."
+      ],
+      [
+        "Luồng sự kiện chính (main flow):",
+        "Luồng sự kiện chính (main flow):"
+      ],
+      [
+        "Khách hàng",
+        "System"
+      ],
+      [
+        "1. Chọn mục “Linh kiện” trên thanh điều hướng (hoặc chọn một ô trong khu vực “Danh mục nổi bật” tại Trang chủ).",
+        "2. Hệ thống hiển thị trang danh sách sản phẩm gồm: cột bộ lọc Danh mục, Thương hiệu ở bên trái và lưới thẻ sản phẩm (12 sản phẩm/trang) ở khu vực chính kèm thông tin tên linh kiện, thương hiệu, giá bán, phần trăm giảm giá, trạng thái kho (Còn hàng, Sắp hết, Hết hàng)."
+      ],
+      [
+        "3. Chọn một danh mục linh kiện hoặc một thương hiệu cụ thể.",
+        "4. Hệ thống lọc và hiển thị danh sách sản phẩm thuộc danh mục/thương hiệu đã chọn, đồng thời nạp các thuộc tính kỹ thuật đặc thù của danh mục đó."
+      ],
+      [
+        "5. Chọn tiêu chí sắp xếp (Nổi bật nhất, Mới nhất, Giá tăng dần, Giá giảm dần, Tên A-Z) hoặc nhấn chuyển trang (“← Trước” / “Sau →”).",
+        "6. Hệ thống đồng bộ tham số lên thanh địa chỉ URL và cập nhật lại danh sách sản phẩm theo thứ tự sắp xếp và số trang tương ứng."
+      ],
+      [
+        "Luồng sự kiện thay thế (alternate flow):",
+        "Luồng sự kiện thay thế (alternate flow):"
+      ],
+      [
+        "2.1. Chọn nút chế độ xem “Danh sách” hoặc “Lưới” trên thanh công cụ.",
+        "2.2. Hệ thống chuyển đổi bố cục hiển thị danh sách sản phẩm giữa dạng lưới thẻ dọc và dạng hàng ngang chi tiết."
+      ],
+      [
+        "4.1. Nhấn nút “Xóa tất cả bộ lọc”.",
+        "4.2. Hệ thống đặt lại toàn bộ điều kiện danh mục, thương hiệu, sắp xếp về mặc định và hiển thị lại toàn bộ sản phẩm ở trang 1."
+      ],
+      [
+        "Luồng sự kiện ngoại lệ (exception flow):",
+        "Luồng sự kiện ngoại lệ (exception flow):"
+      ],
+      [
+        "",
+        "4.1. Danh mục hoặc thương hiệu được chọn hiện chưa có sản phẩm nào thỏa mãn.\nHệ thống hiển thị thông báo “Không tìm thấy sản phẩm nào - Hãy thử thay đổi điều kiện lọc hoặc xóa bớt thông số kỹ thuật.”."
+      ],
+      [
+        "",
+        "4.2. Mất kết nối tới máy chủ khi đang tải dữ liệu.\nHệ thống hiển thị thông báo “Không thể tải danh sách sản phẩm.”."
+      ]
+    ]
+  },
+  {
+    "table_index": 17,
+    "title": "Tên use case: Tìm kiếm sản phẩm theo từ khóa",
+    "rows_count": 18,
+    "rows": [
+      [
+        "Tên use case: Tìm kiếm sản phẩm theo từ khóa",
+        "Tên use case: Tìm kiếm sản phẩm theo từ khóa"
+      ],
+      [
+        "Mô tả sơ lược: Use case này cho phép người dùng nhập từ khóa vào thanh tìm kiếm trên Header hoặc ô từ khóa ở trang danh sách sản phẩm. Hệ thống hỗ trợ gợi ý các từ khóa phần cứng phổ biến và truy vấn đối sánh chuỗi con trên tên sản phẩm, đường dẫn tĩnh, mô tả, danh mục, thương hiệu và mã SKU.",
+        "Mô tả sơ lược: Use case này cho phép người dùng nhập từ khóa vào thanh tìm kiếm trên Header hoặc ô từ khóa ở trang danh sách sản phẩm. Hệ thống hỗ trợ gợi ý các từ khóa phần cứng phổ biến và truy vấn đối sánh chuỗi con trên tên sản phẩm, đường dẫn tĩnh, mô tả, danh mục, thương hiệu và mã SKU."
+      ],
+      [
+        "Actor chính: Khách hàng vãng lai, Khách hàng thành viên",
+        "Actor chính: Khách hàng vãng lai, Khách hàng thành viên"
+      ],
+      [
+        "Actor phụ: Không",
+        "Actor phụ: Không"
+      ],
+      [
+        "Tiền điều kiện (Pre-condition):\n• Người dùng truy cập vào hệ thống.",
+        "Tiền điều kiện (Pre-condition):\n• Người dùng truy cập vào hệ thống."
+      ],
+      [
+        "Hậu điều kiện (Post-condition):\n• Hệ thống hiển thị danh sách các sản phẩm linh kiện phù hợp với từ khóa tìm kiếm kèm tổng số lượng kết quả tìm thấy.",
+        "Hậu điều kiện (Post-condition):\n• Hệ thống hiển thị danh sách các sản phẩm linh kiện phù hợp với từ khóa tìm kiếm kèm tổng số lượng kết quả tìm thấy."
+      ],
+      [
+        "Luồng sự kiện chính (main flow):",
+        "Luồng sự kiện chính (main flow):"
+      ],
+      [
+        "Khách hàng",
+        "System"
+      ],
+      [
+        "1. Nhấp chuột vào thanh tìm kiếm “Tìm linh kiện PC...” trên Header.",
+        "2. Hệ thống hiển thị khung gợi ý “Tìm kiếm phổ biến” gồm 6 từ khóa linh kiện thông dụng."
+      ],
+      [
+        "3. Nhập từ khóa cần tìm vào thanh tìm kiếm và nhấn phím Enter (hoặc nhấn biểu tượng kính lúp Tìm kiếm).",
+        "4. Hệ thống điều hướng sang trang sản phẩm tương thích, cập nhật tiêu đề “Kết quả và hiển thị thẻ chip từ khóa đang lọc."
+      ],
+      [
+        "",
+        "5. Hệ thống đối sánh từ khóa trên 6 trường dữ liệu (tên sản phẩm, slug, mô tả, tên danh mục, tên thương hiệu, mã SKU) và hiển thị danh sách các linh kiện khớp từ khóa."
+      ],
+      [
+        "Luồng sự kiện thay thế (alternate flow):",
+        "Luồng sự kiện thay thế (alternate flow):"
+      ],
+      [
+        "2.1. Nhấp chọn trực tiếp một mục trong danh sách “Tìm kiếm phổ biến”.",
+        "2.2. Hệ thống tự động điền từ khóa gợi ý vào ô tìm kiếm và hiển thị ngay danh sách sản phẩm tương ứng."
+      ],
+      [
+        "3.1. Nhập từ khóa vào ô “Từ khóa” tại cột bộ lọc bên trái của trang danh sách sản phẩm và nhấn “ÁP DỤNG BỘ LỌC”.",
+        "3.2. Hệ thống kết hợp điều kiện tìm kiếm từ khóa với các bộ lọc danh mục, thương hiệu, khoảng giá hiện hành để lọc danh sách sản phẩm."
+      ],
+      [
+        "5.1. Nhấn nút xóa nhanh trên thanh tìm kiếm hoặc trên thẻ chip từ khóa.",
+        "5.2. Hệ thống xóa từ khóa tìm kiếm và hiển thị lại toàn bộ danh sách sản phẩm mặc định."
+      ],
+      [
+        "Luồng sự kiện ngoại lệ (exception flow):",
+        "Luồng sự kiện ngoại lệ (exception flow):"
+      ],
+      [
+        "",
+        "4.1. Người dùng chỉ nhập khoảng trắng rồi nhấn Tìm kiếm.\nHệ thống tự động bỏ qua chuỗi khoảng trắng và hiển thị danh sách toàn bộ sản phẩm tại trang /products."
+      ],
+      [
+        "",
+        "5.1. Không có sản phẩm nào khớp với từ khóa tìm kiếm.\nHệ thống hiển thị thông báo “Không tìm thấy sản phẩm nào - Hãy thử thay đổi điều kiện lọc hoặc xóa bớt thông số kỹ thuật.”."
+      ]
+    ]
+  },
+  {
+    "table_index": 18,
+    "title": "Tên use case: Lọc sản phẩm đa tiêu chí theo thông số EAV",
+    "rows_count": 19,
+    "rows": [
+      [
+        "Tên use case: Lọc sản phẩm đa tiêu chí theo thông số EAV",
+        "Tên use case: Lọc sản phẩm đa tiêu chí theo thông số EAV"
+      ],
+      [
+        "Mô tả sơ lược: Use case cho phép khách hàng tại trang danh sách sản phẩm lọc và thu hẹp phạm vi linh kiện theo nhiều tiêu chí kết hợp: danh mục, thương hiệu, khoảng giá, trạng thái còn hàng và các nhóm thông số kỹ thuật động EAV (như Socket hỗ trợ, Chuẩn RAM, Dung lượng VRAM, Công suất nguồn). Hệ thống kết hợp các giá trị cùng thuộc tính theo phép hợp (OR) và khác thuộc tính theo phép giao (AND).",
+        "Mô tả sơ lược: Use case cho phép khách hàng tại trang danh sách sản phẩm lọc và thu hẹp phạm vi linh kiện theo nhiều tiêu chí kết hợp: danh mục, thương hiệu, khoảng giá, trạng thái còn hàng và các nhóm thông số kỹ thuật động EAV (như Socket hỗ trợ, Chuẩn RAM, Dung lượng VRAM, Công suất nguồn). Hệ thống kết hợp các giá trị cùng thuộc tính theo phép hợp (OR) và khác thuộc tính theo phép giao (AND)."
+      ],
+      [
+        "Actor chính: Khách hàng vãng lai, Khách hàng thành viên",
+        "Actor chính: Khách hàng vãng lai, Khách hàng thành viên"
+      ],
+      [
+        "Actor phụ: Không",
+        "Actor phụ: Không"
+      ],
+      [
+        "Tiền điều kiện (Pre-condition):\n• Người dùng đang truy cập trang Danh sách sản phẩm.\n• Cơ sở dữ liệu đã có dữ liệu danh mục, thương hiệu, sản phẩm và bộ bảng thông số kỹ thuật EAV.",
+        "Tiền điều kiện (Pre-condition):\n• Người dùng đang truy cập trang Danh sách sản phẩm.\n• Cơ sở dữ liệu đã có dữ liệu danh mục, thương hiệu, sản phẩm và bộ bảng thông số kỹ thuật EAV."
+      ],
+      [
+        "Hậu điều kiện (Post-condition):\n• Thanh địa chỉ URL được đồng bộ đầy đủ các tham số lọc hiện hành.\n• Thanh tiêu chí đang áp dụng (“Đang lọc:”) và lưới sản phẩm hiển thị danh sách linh kiện thỏa mãn tổ hợp điều kiện lọc.",
+        "Hậu điều kiện (Post-condition):\n• Thanh địa chỉ URL được đồng bộ đầy đủ các tham số lọc hiện hành.\n• Thanh tiêu chí đang áp dụng (“Đang lọc:”) và lưới sản phẩm hiển thị danh sách linh kiện thỏa mãn tổ hợp điều kiện lọc."
+      ],
+      [
+        "Luồng sự kiện chính (main flow):",
+        "Luồng sự kiện chính (main flow):"
+      ],
+      [
+        "Khách hàng",
+        "System"
+      ],
+      [
+        "1. Chọn một danh mục linh kiện tại cột bộ lọc bên trái (ví dụ: CPU, Mainboard, RAM, GPU).",
+        "2. Hệ thống cập nhật tham số category_id, truy vấn hệ bảng EAV và hiển thị các nhóm thông số kỹ thuật đặc thù của danh mục đó kèm số lượng sản phẩm khớp."
+      ],
+      [
+        "3. Tích chọn một hoặc nhiều giá trị trong các nhóm “Thông số kỹ thuật” , chọn Thương hiệu, nhập Khoảng giá và tích chọn “Chỉ hiện sản phẩm còn hàng”.",
+        "4. Hệ thống ghi nhận mảng mã thuộc tính chuẩn hóa khoảng giá và đồng bộ toàn bộ tham số lên thanh địa chỉ URL."
+      ],
+      [
+        "5. Nhấn nút “ÁP DỤNG BỘ LỌC” (hoặc chọn tiêu chí tại mục “Sắp xếp:”).",
+        "6. Hệ thống thực thi truy vấn lọc sản phẩm theo nguyên tắc: kết hợp OR giữa các giá trị thuộc cùng một thuộc tính và kết hợp AND giữa các nhóm thuộc tính khác nhau."
+      ],
+      [
+        "",
+        "7. Hiển thị kết quả lọc:\n- Hiển thị các thẻ chip tiêu chí tại thanh “Đang lọc:”.\n- Cập nhật tổng số sản phẩm tìm thấy và kết xuất lưới thẻ sản phẩm phân trang."
+      ],
+      [
+        "Luồng sự kiện thay thế (alternate flow):",
+        "Luồng sự kiện thay thế (alternate flow):"
+      ],
+      [
+        "3.1. Nhập Giá tối thiểu (min_price) lớn hơn Giá tối đa (max_price) rồi rời ô nhập hoặc nhấn Enter.",
+        "3.2. Hệ thống tự động hoán đổi hai giá trị tối thiểu và tối đa để tạo thành khoảng giá hợp lệ trước khi gửi yêu cầu lọc."
+      ],
+      [
+        "7.1. Nhấn dấu “×” trên từng thẻ chip ở thanh “ Đang lọc:”.",
+        "7.2. Hệ thống gỡ bỏ tiêu chí tương ứng và tải lại danh sách sản phẩm theo các điều kiện còn lại."
+      ],
+      [
+        "7.3. Nhấn nút “Xóa tất cả bộ lọc”.",
+        "7.4. Hệ thống đặt lại toàn bộ bộ lọc về trạng thái mặc định, xóa sạch chuỗi tham số trên URL và hiển thị lại toàn bộ sản phẩm."
+      ],
+      [
+        "Luồng sự kiện ngoại lệ (exception flow):",
+        "Luồng sự kiện ngoại lệ (exception flow):"
+      ],
+      [
+        "",
+        "6.1. Không có sản phẩm nào thỏa mãn tổ hợp điều kiện lọc hiện tại.\nHệ thống hiển thị thông báo “Không tìm thấy sản phẩm phù hợp - Không có sản phẩm nào khớp với bộ lọc hiện tại. Hãy thử mở rộng khoảng giá hoặc bỏ bớt tiêu chí lọc.” kèm nút “Xóa tất cả bộ lọc”."
+      ],
+      [
+        "",
+        "6.2. Tham số lọc trên URL không hợp lệ hoặc mất kết nối tới máy chủ.\nHệ thống hiển thị thông báo “Không thể tải danh sách sản phẩm. Vui lòng thử lại.” kèm nút “Thử lại”."
+      ]
+    ]
+  },
+  {
+    "table_index": 19,
+    "title": "Tên use case: Xem chi tiết và So sánh sản phẩm",
+    "rows_count": 30,
+    "rows": [
+      [
+        "Tên use case: Xem chi tiết và So sánh sản phẩm",
+        "Tên use case: Xem chi tiết và So sánh sản phẩm"
+      ],
+      [
+        "Mô tả sơ lược: Use case cho phép khách hàng xem thông tin chi tiết của một sản phẩm linh kiện (hình ảnh, bảng thông số kỹ thuật EAV, chọn biến thể SKU, kiểm tra tồn kho thực tế để thêm vào giỏ hoặc mua ngay) và đưa tối đa 4 sản phẩm vào bảng so sánh song song kèm chấm điểm hiệu năng tự động.",
+        "Mô tả sơ lược: Use case cho phép khách hàng xem thông tin chi tiết của một sản phẩm linh kiện (hình ảnh, bảng thông số kỹ thuật EAV, chọn biến thể SKU, kiểm tra tồn kho thực tế để thêm vào giỏ hoặc mua ngay) và đưa tối đa 4 sản phẩm vào bảng so sánh song song kèm chấm điểm hiệu năng tự động."
+      ],
+      [
+        "Actor chính: Khách hàng vãng lai, Khách hàng thành viên",
+        "Actor chính: Khách hàng vãng lai, Khách hàng thành viên"
+      ],
+      [
+        "Actor phụ: Không",
+        "Actor phụ: Không"
+      ],
+      [
+        "Tiền điều kiện (Pre-condition):\n• Người dùng truy cập trang Chi tiết sản phẩm hoặc trang So sánh sản phẩm.\n• Sản phẩm đang ở trạng thái hoạt động trong cơ sở dữ liệu.",
+        "Tiền điều kiện (Pre-condition):\n• Người dùng truy cập trang Chi tiết sản phẩm hoặc trang So sánh sản phẩm.\n• Sản phẩm đang ở trạng thái hoạt động trong cơ sở dữ liệu."
+      ],
+      [
+        "Hậu điều kiện (Post-condition):\n• Hiển thị đầy đủ thông tin biến thể SKU, giá bán, tồn kho và bảng thông số kỹ thuật chi tiết của sản phẩm.\n• Danh sách mã sản phẩm so sánh được lưu đồng bộ và hiển thị bảng đối chiếu song song.",
+        "Hậu điều kiện (Post-condition):\n• Hiển thị đầy đủ thông tin biến thể SKU, giá bán, tồn kho và bảng thông số kỹ thuật chi tiết của sản phẩm.\n• Danh sách mã sản phẩm so sánh được lưu đồng bộ và hiển thị bảng đối chiếu song song."
+      ],
+      [
+        "Luồng sự kiện chính (main flow):",
+        "Luồng sự kiện chính (main flow):"
+      ],
+      [
+        "Khách hàng",
+        "System"
+      ],
+      [
+        "1. Nhấn chọn một sản phẩm từ danh sách linh kiện để mở trang Chi tiết sản phẩm.",
+        "2. Hệ thống truy vấn thông tin sản phẩm gốc, danh sách các biến thể (product_skus), bảng thông số kỹ thuật EAV và danh sách sản phẩm tương tự cùng danh mục để hiển thị lên màn hình."
+      ],
+      [
+        "3. Nếu khách hàng chọn biến thể SKU và thao tác mua sắm trên trang chi tiết, subflow “Xem chi tiết và chọn biến thể SKU” được thực thi.",
+        ""
+      ],
+      [
+        "4. Nếu khách hàng chọn đưa sản phẩm vào danh sách đối chiếu, subflow “So sánh song song tối đa 4 sản phẩm” được thực thi.",
+        ""
+      ],
+      [
+        "Subflow Xem chi tiết và chọn biến thể SKU",
+        "Subflow Xem chi tiết và chọn biến thể SKU"
+      ],
+      [
+        "1. Xem bộ ảnh sản phẩm, bảng “Thông số kỹ thuật đầy đủ” và chọn một biến thể tại mục “Phiên bản / SKU”.",
+        "2. Hệ thống cập nhật lại giá bán, mã SKU, trạng thái tồn kho (“Còn hàng (X sản phẩm)”) và giới hạn số lượng mua tối đa theo tồn kho của biến thể vừa chọn."
+      ],
+      [
+        "3. Điều chỉnh số lượng cần mua và nhấn nút “Thêm vào giỏ hàng” (hoặc “Mua ngay” / “PC Builder”).",
+        "4. Hệ thống kiểm tra tồn kho khả dụng:"
+      ],
+      [
+        "",
+        "5. Nếu còn hàng:\n- Khi nhấn “Thêm vào giỏ hàng”: Thêm biến thể và số lượng vào giỏ hàng, hiển thị thông báo “Đã thêm X sản phẩm vào giỏ hàng.”.\n- Khi nhấn “Mua ngay”: Lưu thông tin mua trực tiếp (checkout_direct_draft_v1) và chuyển đến trang Thanh toán (/checkout).\n- Khi nhấn “PC Builder”: Chuyển sang trang /pc-builder và nạp thẳng linh kiện vào khe tương ứng."
+      ],
+      [
+        "Subflow So sánh song song tối đa 4 sản phẩm",
+        "Subflow So sánh song song tối đa 4 sản phẩm"
+      ],
+      [
+        "1. Nhấn nút “So sánh” trên trang chi tiết để chuyển đến trang So sánh.",
+        "2. Hệ thống lưu mã sản phẩm và hiển thị giao diện 4 khe cắm so sánh."
+      ],
+      [
+        "3. Nhập từ khóa vào ô “Tìm sản phẩm để so sánh...” và nhấn nút “+ Thêm” để chọn đủ từ 2 đến 4 sản phẩm.",
+        "4. Hệ thống tải dữ liệu của các sản phẩm (GET /api/products/compare?ids=...) và hiển thị 2 khu vực đối chiếu:"
+      ],
+      [
+        "",
+        "- Khu vực Phòng thí nghiệm hiệu năng (AI Performance Lab): Chấm điểm tự động trên thang 100 theo đặc thù danh mục và gắn nhãn “Tốt hơn” cho sản phẩm dẫn đầu.\n- Khu vực Ma trận thông số kỹ thuật EAV: Đối chiếu song song từng dòng thông số, tự động tô nền xanh và gắn nhãn “Vượt trội” cho ô có chỉ số kỹ thuật tốt nhất."
+      ],
+      [
+        "5. Tích chọn “Chỉ hiện điểm khác biệt” hoặc nhấn nút “Chọn vào Build” tại cột sản phẩm ưng ý.",
+        "6. Hệ thống ẩn các dòng thông số trùng nhau hoặc nạp sản phẩm được chọn sang trang lắp ráp cấu hình."
+      ],
+      [
+        "Luồng sự kiện thay thế (alternate flow):",
+        "Luồng sự kiện thay thế (alternate flow):"
+      ],
+      [
+        "Subflow Xem chi tiết và chọn biến thể SKU",
+        "Subflow Xem chi tiết và chọn biến thể SKU"
+      ],
+      [
+        "",
+        "4.1. Biến thể sản phẩm đã hết hàng.\nHệ thống hiển thị nhãn “Tạm hết hàng” / “Sản phẩm hiện đã hết hàng.” và vô hiệu hóa hai nút Thêm vào giỏ hàng, Mua ngay."
+      ],
+      [
+        "5.1. Khách hàng nhấn “Mua ngay” khi chưa đăng nhập.",
+        "5.2. Hệ thống lưu tạm sản phẩm cần mua và chuyển hướng sang trang đăng nhập kèm thông báo “Vui lòng đăng nhập để tiến hành thanh toán ngay sản phẩm đã chọn.”."
+      ],
+      [
+        "Subflow So sánh song song tối đa 4 sản phẩm",
+        "Subflow So sánh song song tối đa 4 sản phẩm"
+      ],
+      [
+        "",
+        "2.1. Danh sách so sánh mới chỉ có 1 sản phẩm.\nHệ thống hiển thị thông báo hướng dẫn “Thêm ít nhất 1 sản phẩm nữa để bắt đầu so sánh.”."
+      ],
+      [
+        "",
+        "4.1. Các sản phẩm được chọn thuộc nhiều danh mục linh kiện khác nhau .\nHệ thống ẩn biểu đồ chấm điểm tự động và hiển thị thông báo “Cảnh báo: các sản phẩm đang thuộc nhiều danh mục khác nhau. Kết quả chỉ mang tính tham khảo”."
+      ],
+      [
+        "",
+        "5.2. Hệ thống xóa sản phẩm đó khỏi khóa và cập nhật lại bảng so sánh."
+      ],
+      [
+        "Luồng sự kiện ngoại lệ (exception flow):",
+        "Luồng sự kiện ngoại lệ (exception flow):"
+      ],
+      [
+        "",
+        "2.1. Mã sản phẩm hoặc đường dẫn tĩnh không tồn tại trong cơ sở dữ liệu."
+      ]
+    ]
+  },
+  {
+    "table_index": 20,
+    "title": "Tên use case: Đánh giá và Bình luận sản phẩm",
+    "rows_count": 21,
+    "rows": [
+      [
+        "Tên use case: Đánh giá và Bình luận sản phẩm",
+        "Tên use case: Đánh giá và Bình luận sản phẩm"
+      ],
+      [
+        "Mô tả sơ lược: Use case cho phép khách hàng xem thống kê điểm sao và danh sách bình luận của sản phẩm, đồng thời kiểm tra điều kiện người mua xác thực để cho phép khách hàng đã có đơn hàng giao thành công gửi hoặc cập nhật đánh giá từ 1 đến 5 sao.",
+        "Mô tả sơ lược: Use case cho phép khách hàng xem thống kê điểm sao và danh sách bình luận của sản phẩm, đồng thời kiểm tra điều kiện người mua xác thực để cho phép khách hàng đã có đơn hàng giao thành công gửi hoặc cập nhật đánh giá từ 1 đến 5 sao."
+      ],
+      [
+        "Actor chính: Khách hàng thành viên (đã mua và nhận sản phẩm)",
+        "Actor chính: Khách hàng thành viên (đã mua và nhận sản phẩm)"
+      ],
+      [
+        "Actor phụ: Khách hàng vãng lai, Khách hàng chưa mua sản phẩm (chỉ xem đánh giá)",
+        "Actor phụ: Khách hàng vãng lai, Khách hàng chưa mua sản phẩm (chỉ xem đánh giá)"
+      ],
+      [
+        "Tiền điều kiện (Pre-condition):\n• Người dùng đang mở trang Chi tiết sản phẩm.\n• Để gửi đánh giá: Người dùng đã đăng nhập và có ít nhất một đơn hàng chứa sản phẩm này ở trạng thái Đã giao hàng.",
+        "Tiền điều kiện (Pre-condition):\n• Người dùng đang mở trang Chi tiết sản phẩm.\n• Để gửi đánh giá: Người dùng đã đăng nhập và có ít nhất một đơn hàng chứa sản phẩm này ở trạng thái Đã giao hàng."
+      ],
+      [
+        "Hậu điều kiện (Post-condition):\n• Đánh giá mới được lưu với cờ xác thực và mã đơn hàng order_id.\n• Điểm đánh giá trung bình, biểu đồ phân bố 5 mức sao và danh sách nhận xét trên trang sản phẩm được cập nhật.",
+        "Hậu điều kiện (Post-condition):\n• Đánh giá mới được lưu với cờ xác thực và mã đơn hàng order_id.\n• Điểm đánh giá trung bình, biểu đồ phân bố 5 mức sao và danh sách nhận xét trên trang sản phẩm được cập nhật."
+      ],
+      [
+        "Luồng sự kiện chính (main flow):",
+        "Luồng sự kiện chính (main flow):"
+      ],
+      [
+        "Khách hàng thành viên",
+        "System"
+      ],
+      [
+        "1. Cuộn xuống khu vực “Đánh giá & Nhận xét từ khách hàng” tại trang Chi tiết sản phẩm.",
+        "2. Hệ thống tải danh sách đánh giá hiện có và kiểm tra quyền đánh giá của tài khoản hiện tại."
+      ],
+      [
+        "",
+        "3. Khi xác nhận tài khoản có đơn hàng đã giao thành công, hệ thống hiển thị biểu mẫu “Viết đánh giá của bạn” kèm nhãn “✓ Khách hàng đã mua hàng."
+      ],
+      [
+        "4. Chọn mức điểm từ 1 đến 5 sao (“Rất tệ”, “Chưa hài lòng”, “Bình thường”, “Hài lòng”, “Rất hài lòng”) và nhập nội dung vào ô “Nhận xét chi tiết”.",
+        ""
+      ],
+      [
+        "5. Nhấn nút “Gửi đánh giá xác thực”.",
+        "6. Hệ thống kiểm tra độ dài nội dung nhận xét và gửi yêu cầu."
+      ],
+      [
+        "",
+        "7. Thông tin hợp lệ:\n- Hệ thống lưu bản ghi vào bảng product_reviews.\n- Hiển thị thông báo “Cảm ơn bạn đã gửi đánh giá sản phẩm!” và làm mới danh sách bình luận cùng điểm sao trung bình."
+      ],
+      [
+        "Luồng sự kiện thay thế (alternate flow):",
+        "Luồng sự kiện thay thế (alternate flow):"
+      ],
+      [
+        "",
+        "2.1. Người dùng chưa đăng nhập tài khoản.\nHệ thống ẩn biểu mẫu nhập nhận xét và hiển thị thông báo “Bạn đã mua sản phẩm này? Vui lòng đăng nhập để chia sẻ đánh giá thực tế của bạn.” kèm nút “Đăng nhập ngay”."
+      ],
+      [
+        "",
+        "2.2. Người dùng đã đăng nhập nhưng chưa mua sản phẩm này hoặc đơn hàng chưa được giao thành công.\nHệ thống khóa biểu mẫu đánh giá và hiển thị thông báo “Chính sách đánh giá xác thực - Chỉ khách hàng đã mua và nhận sản phẩm thành công mới có thể gửi đánh giá.”."
+      ],
+      [
+        "3.1. Khách hàng đã từng gửi đánh giá cho sản phẩm này trước đó.",
+        "3.2. Hệ thống tự động điền lại số sao và nội dung nhận xét cũ vào biểu mẫu, đổi nhãn nút thành “Cập nhật đánh giá”. Khi khách hàng sửa và nhấn gửi, hệ thống cập nhật lại bản ghi cũ và thông báo “Đã cập nhật đánh giá của bạn thành công!”."
+      ],
+      [
+        "",
+        "6.1. Nội dung nhận xét ngắn hơn 3 ký tự.\nHiển thị thông báo “Vui lòng nhập nhận xét ít nhất 3 ký tự.” / “Nội dung đánh giá phải có ít nhất 3 ký tự”."
+      ],
+      [
+        "",
+        "6.2. Nội dung nhận xét vượt quá 2000 ký tự hoặc số sao nằm ngoài khoảng 1–5.\nHiển thị thông báo “Nội dung đánh giá không được vượt quá 2000 ký tự” hoặc “Điểm đánh giá phải là số nguyên từ 1 đến 5 sao”."
+      ],
+      [
+        "Luồng sự kiện ngoại lệ (exception flow):",
+        "Luồng sự kiện ngoại lệ (exception flow):"
+      ],
+      [
+        "",
+        "6.3. Phiên đăng nhập hết hạn khi nhấn gửi hoặc lỗi kết nối máy chủ.\nHệ thống hiển thị thông báo “Yêu cầu đăng nhập để gửi đánh giá” hoặc “Không thể gửi đánh giá. Vui lòng thử lại.”."
+      ]
+    ]
+  },
+  {
+    "table_index": 21,
+    "title": "Tên use case: Xây dựng cấu hình PC – Smart PC Builder, Xuất PDF và Chia sẻ link",
+    "rows_count": 36,
+    "rows": [
+      [
+        "Tên use case: Xây dựng cấu hình PC – Smart PC Builder, Xuất PDF và Chia sẻ link",
+        "Tên use case: Xây dựng cấu hình PC – Smart PC Builder, Xuất PDF và Chia sẻ link"
+      ],
+      [
+        "Mô tả sơ lược: Use case cho phép khách hàng lắp ráp cấu hình máy tính theo 8 khe linh kiện tiêu chuẩn, lưu trữ cấu hình lên tài khoản hoặc tệp JSON, phát hành đường dẫn chia sẻ công khai kèm mã QR Code, nhân bản cấu hình chia sẻ và xuất bảng báo giá PDF chuẩn khổ A4.",
+        "Mô tả sơ lược: Use case cho phép khách hàng lắp ráp cấu hình máy tính theo 8 khe linh kiện tiêu chuẩn, lưu trữ cấu hình lên tài khoản hoặc tệp JSON, phát hành đường dẫn chia sẻ công khai kèm mã QR Code, nhân bản cấu hình chia sẻ và xuất bảng báo giá PDF chuẩn khổ A4."
+      ],
+      [
+        "Actor chính: Khách hàng vãng lai, Khách hàng thành viên",
+        "Actor chính: Khách hàng vãng lai, Khách hàng thành viên"
+      ],
+      [
+        "Actor phụ: Dịch vụ AI Tư vấn (Google Gemini LLM), Dịch vụ tạo mã QR",
+        "Actor phụ: Dịch vụ AI Tư vấn (Google Gemini LLM), Dịch vụ tạo mã QR"
+      ],
+      [
+        "Tiền điều kiện (Pre-condition):\n• Người dùng truy cập không gian lắp ráp cấu hình hoặc đường dẫn chia sẻ.\n• Kho dữ liệu linh kiện của 8 danh mục đang hoạt động.",
+        "Tiền điều kiện (Pre-condition):\n• Người dùng truy cập không gian lắp ráp cấu hình hoặc đường dẫn chia sẻ.\n• Kho dữ liệu linh kiện của 8 danh mục đang hoạt động."
+      ],
+      [
+        "Hậu điều kiện (Post-condition):\n• Cấu hình máy tính được lưu vào bảng pc_builds, pc_build_items (đối với thành viên) hoặc lưu vào LocalStorage khóa cnm_guest_pc_builds (đối với khách vãng lai).\n• Mã chia sẻ công khai (share_token), bảng báo giá định dạng PDF chuẩn A4 hoặc giỏ hàng chứa trọn bộ linh kiện được khởi tạo theo thao tác của người dùng.",
+        "Hậu điều kiện (Post-condition):\n• Cấu hình máy tính được lưu vào bảng pc_builds, pc_build_items (đối với thành viên) hoặc lưu vào LocalStorage khóa cnm_guest_pc_builds (đối với khách vãng lai).\n• Mã chia sẻ công khai (share_token), bảng báo giá định dạng PDF chuẩn A4 hoặc giỏ hàng chứa trọn bộ linh kiện được khởi tạo theo thao tác của người dùng."
+      ],
+      [
+        "Luồng sự kiện chính (main flow):",
+        "Luồng sự kiện chính (main flow):"
+      ],
+      [
+        "Khách hàng",
+        "System"
+      ],
+      [
+        "1. Truy cập trang xây dựng cấu hình.",
+        "2. Hệ thống tải danh mục linh kiện của 8 khe cắm (CPU, Mainboard, RAM, GPU, Storage, PSU, Case, Cooling) và khôi phục cấu hình đang lắp dở từ tài khoản hoặc trình duyệt."
+      ],
+      [
+        "3. Nếu khách hàng chọn lắp từng linh kiện hoặc dùng trình gợi ý tự động, subflow “Lắp ráp cấu hình 8 khe cắm và Gợi ý tự động” được thực thi.",
+        ""
+      ],
+      [
+        "4. Nếu khách hàng lưu cấu hình hoặc xuất/nhập tệp JSON, subflow “Lưu trữ cấu hình” được thực thi.",
+        ""
+      ],
+      [
+        "5. Nếu khách hàng tạo liên kết chia sẻ hoặc mở liên kết từ người khác, subflow “Chia sẻ liên kết QR Code và Nhân bản cấu hình” được thực thi.",
+        ""
+      ],
+      [
+        "6. Nếu khách hàng in bảng báo giá hoặc đặt mua cả bộ, subflow “Xuất báo giá PDF A4 và Đặt mua nguyên bộ” được thực thi.",
+        ""
+      ],
+      [
+        "Subflow Lắp ráp cấu hình 8 khe cắm và Gợi ý tự động",
+        "Subflow Lắp ráp cấu hình 8 khe cắm và Gợi ý tự động"
+      ],
+      [
+        "1. Chọn lần lượt từng khe linh kiện từ bước 1/8 đến 8/8 ở cột trái, tìm kiếm sản phẩm ở cột giữa và nhấn chọn linh kiện.",
+        "2. Hệ thống nạp biến thể SKU còn hàng vào khe tương ứng, tính lại tổng chi phí, tự động kiểm tra tương thích và hiển thị thông báo “Đã thêm <Tên_khe> thành công.”."
+      ],
+      [
+        "3. Hoặc nhấn nút “Build PC Của Bạn Ngay”, chọn nhu cầu sử dụng, nhập ngân sách, độ phân giải và nhấn “ Hệ Thống Đề Xuất” (hoặc “AI Tư Vấn”).",
+        "4. Hệ thống lọc 32 linh kiện ứng viên từ kho thực tế, sinh 3 phương án cấu hình tối ưu (hoặc luồng phân tích AI Streaming) và hiển thị hộp thoại đề xuất."
+      ],
+      [
+        "5. Nhấn nút xác nhận áp dụng phương án cấu hình đề xuất.",
+        "6. Hệ thống nạp đồng loạt 8 linh kiện vào bàn lắp ráp và thông báo “Đã áp dụng thành công cấu hình vào không gian lắp ráp!”."
+      ],
+      [
+        "Subflow Lưu trữ cấu hình",
+        "Subflow Lưu trữ cấu hình"
+      ],
+      [
+        "1. Nhập tên cấu hình và nhấn nút “Lưu TK” (đối với thành viên) hoặc “Lưu” (đối với khách vãng lai).",
+        "2. Hệ thống lưu thông tin vào bảng pc_builds, pc_build_items (báo “Đã lưu lên tài khoản.”) hoặc ghi vào khóa cnm_guest_pc_builds trên trình duyệt (báo “Đã lưu cấu hình trên trình duyệt. Đăng ký để đồng bộ lên tài khoản.”)."
+      ],
+      [
+        "3. Chọn chức năng Xuất hoặc Nhập file cấu hình (.json).",
+        "4. Hệ thống tải xuống tệp pc-build-<timestamp>.json (“Đã tải file cấu hình.”) hoặc đọc tệp JSON tải lên để khôi phục cấu hình (“Đã nhập cấu hình từ file.”)."
+      ],
+      [
+        "Subflow Chia sẻ liên kết QR Code và Nhân bản cấu hình",
+        "Subflow Chia sẻ liên kết QR Code và Nhân bản cấu hình"
+      ],
+      [
+        "1. Nhấn nút “Chia sẻ” trên cột tổng hợp cấu hình.",
+        "2. Hệ thống gọi POST /api/pc-builder/:buildId/publish, sinh mã định danh share_token (UUID v4), bật cờ is_public = 1 trong bảng pc_builds và mở hộp thoại “Chia Sẻ Cấu Hình PC” kèm đường dẫn, mã QR Code và nút sao chép văn bản."
+      ],
+      [
+        "3. Người nhận mở đường dẫn /pc-builder/shared/:shareToken và nhấn nút “Mở & Tùy chỉnh trong PC Builder”.",
+        "4. Hệ thống truy vấn cấu hình công khai, tạo bản sao mới (“Bản sao - <tên gốc>”) qua POST /api/pc-builder/:buildId/clone (hoặc lưu vào LocalStorage) và mở trên trang /pc-builder."
+      ],
+      [
+        "Subflow Xuất báo giá PDF A4 và Đặt mua nguyên bộ",
+        "Subflow Xuất báo giá PDF A4 và Đặt mua nguyên bộ"
+      ],
+      [
+        "1. Nhấn nút “Xuất PDF Báo Giá”.",
+        "2. Hệ thống khởi tạo mẫu báo giá chuẩn trang in A4 (gồm mã báo giá #PCM-XXXXXX, bảng kê 8 linh kiện, thông số kỹ thuật, tổng tiền đã gồm VAT, 4 huy hiệu kiểm định) và mở hộp thoại in/lưu PDF của trình duyệt."
+      ],
+      [
+        "3. Nhấn nút “Đặt Mua Nguyên Bộ” và xác nhận tại hộp thoại rà soát cuối cùng.",
+        "4. Hệ thống thêm toàn bộ các biến thể SKU của cấu hình vào giỏ hàng, hiển thị thông báo xác nhận và chuyển hướng sang trang Thanh toán (/checkout)."
+      ],
+      [
+        "Luồng sự kiện thay thế (alternate flow):",
+        "Luồng sự kiện thay thế (alternate flow):"
+      ],
+      [
+        "Subflow Lắp ráp cấu hình 8 khe cắm và Gợi ý tự động",
+        "Subflow Lắp ráp cấu hình 8 khe cắm và Gợi ý tự động"
+      ],
+      [
+        "2.1. Linh kiện trong cấu hình vừa hết hàng và khách hàng nhấn nút thay thế tương đương.",
+        "2.2. Hệ thống tự động tìm sản phẩm cùng danh mục đang còn hàng, tương thích 100% và thông báo “Đã tự động thay thế [<SP_cũ>] bằng [<SP_mới>] (Còn hàng & Tương thích 100%)!”."
+      ],
+      [
+        "3.1. Khách vãng lai nhấn chọn “AI Tư Vấn” khi chưa đăng nhập.",
+        "3.2. Hệ thống mở hộp thoại yêu cầu đăng nhập, lưu lại tiêu chí đang chọn và tự động chạy tiếp luồng AI Tư Vấn ngay sau khi khách hàng đăng nhập thành công."
+      ],
+      [
+        "",
+        "6.1. Tổng giá trị linh kiện vượt quá ngân sách mục tiêu trên 10%.\nHệ thống hiển thị cảnh báo “Vượt Ngân Sách Nghiêm Trọng” kèm nhãn “BỊ CHẶN MUA”, khóa nút đặt mua và gợi ý nút “Áp Dụng Budget Safe” hoặc “Mô phỏng -5Tr”."
+      ],
+      [
+        "Subflow Lưu trữ cấu hình",
+        "Subflow Lưu trữ cấu hình"
+      ],
+      [
+        "1.1. Nhấn nút “Reset” và xác nhận tại hộp thoại “Xóa toàn bộ cấu hình?”.",
+        "1.2. Hệ thống làm trống cả 8 khe linh kiện và hiển thị thông báo “Đã xóa toàn bộ linh kiện khỏi cấu hình.”."
+      ],
+      [
+        "Luồng sự kiện ngoại lệ (exception flow):",
+        "Luồng sự kiện ngoại lệ (exception flow):"
+      ],
+      [
+        "",
+        "Subflow Chia sẻ - 3.1. Đường dẫn chia sẻ không tồn tại hoặc đã bị ẩn (HTTP 404).\nHệ thống hiển thị thông báo “Không tìm thấy cấu hình chia sẻ - Không tìm thấy bộ cấu hình chia sẻ hoặc đường dẫn đã hết hạn.” kèm nút “Quay lại PC Builder”."
+      ],
+      [
+        "",
+        "Subflow Xuất PDF - 2.1. Trình duyệt chặn cửa sổ bật lên (Popup Blocker).\nHệ thống hiển thị cảnh báo “Trình duyệt đã chặn cửa sổ bật lên (Popup). Vui lòng cho phép Popup để xuất báo giá PDF.”."
+      ]
+    ]
+  },
+  {
+    "table_index": 22,
+    "title": "Tên use case: Kiểm tra tương thích 57 quy tắc, Chấm điểm Build Health 5 chiều, Giải thích XAI và Mô phỏng What-If",
+    "rows_count": 21,
+    "rows": [
+      [
+        "Tên use case: Kiểm tra tương thích 57 quy tắc, Chấm điểm Build Health 5 chiều, Giải thích XAI và Mô phỏng What-If",
+        "Tên use case: Kiểm tra tương thích 57 quy tắc, Chấm điểm Build Health 5 chiều, Giải thích XAI và Mô phỏng What-If"
+      ],
+      [
+        "Mô tả sơ lược: Use case cho phép hệ thống tự động kiểm tra tính tương thích phần cứng khi người dùng chọn từ 2 linh kiện trở lên, chấm điểm sức khỏe cấu hình theo 5 tiêu chí, hiển thị giải thích nguyên nhân xung đột (XAI) kèm gợi ý đổi linh kiện phù hợp và mô phỏng phương án tăng/giảm ngân sách (What-If).",
+        "Mô tả sơ lược: Use case cho phép hệ thống tự động kiểm tra tính tương thích phần cứng khi người dùng chọn từ 2 linh kiện trở lên, chấm điểm sức khỏe cấu hình theo 5 tiêu chí, hiển thị giải thích nguyên nhân xung đột (XAI) kèm gợi ý đổi linh kiện phù hợp và mô phỏng phương án tăng/giảm ngân sách (What-If)."
+      ],
+      [
+        "Actor chính: Khách hàng vãng lai, Khách hàng thành viên",
+        "Actor chính: Khách hàng vãng lai, Khách hàng thành viên"
+      ],
+      [
+        "Actor phụ: Không",
+        "Actor phụ: Không"
+      ],
+      [
+        "Tiền điều kiện (Pre-condition):\n• Người dùng đang ở trang Xây dựng cấu hình và đã chọn tối thiểu 2 linh kiện vào bàn lắp ráp.",
+        "Tiền điều kiện (Pre-condition):\n• Người dùng đang ở trang Xây dựng cấu hình và đã chọn tối thiểu 2 linh kiện vào bàn lắp ráp."
+      ],
+      [
+        "Hậu điều kiện (Post-condition):\n• Hệ thống hiển thị điểm số sức khỏe cấu hình, trạng thái tương thích và chi tiết các mục kiểm tra.\n• Nếu phát hiện lỗi xung đột nghiêm trọng, hệ thống khóa chức năng đặt mua cho đến khi lỗi được khắc phục.",
+        "Hậu điều kiện (Post-condition):\n• Hệ thống hiển thị điểm số sức khỏe cấu hình, trạng thái tương thích và chi tiết các mục kiểm tra.\n• Nếu phát hiện lỗi xung đột nghiêm trọng, hệ thống khóa chức năng đặt mua cho đến khi lỗi được khắc phục."
+      ],
+      [
+        "Luồng sự kiện chính (main flow):",
+        "Luồng sự kiện chính (main flow):"
+      ],
+      [
+        "Khách hàng",
+        "System"
+      ],
+      [
+        "1. Chọn hoặc thay đổi từ 2 linh kiện trở lên trên bàn lắp ráp.",
+        "2. Hệ thống tự động đối chiếu thông số kỹ thuật của các linh kiện qua 57 quy tắc tương thích, tính 5 chỉ số sức khỏe cấu hình (Tương thích, Hiệu năng, Giá trị, Điện năng/Tản nhiệt, Nâng cấp) và hiển thị kết quả tổng quan."
+      ],
+      [
+        "3. Nhấn chọn “Xem giải thích chi tiết XAI” và chọn tab lọc mức độ lỗi (Lỗi chặn, Cảnh báo, Đạt).",
+        "4. Hệ thống mở khung giải thích XAI, hiển thị cặp thông số không khớp, giải thích nguyên nhân kỹ thuật và gợi ý hướng khắc phục."
+      ],
+      [
+        "5. Nhấn nút “Đổi linh kiện phù hợp” tại mục đang báo lỗi.",
+        "6. Hệ thống đóng khung giải thích và chuyển về đúng khe linh kiện đang xung đột để khách hàng chọn lại sản phẩm khác."
+      ],
+      [
+        "7. Nhấn chọn “Mô phỏng +5 triệu” hoặc “Mô phỏng -5 triệu” tại mục mô phỏng ngân sách What-If.",
+        "8. Hệ thống tính toán cấu hình theo mức ngân sách mới và hiển thị bảng so sánh song song với cấu hình hiện tại (biến động linh kiện, chênh lệch chi phí và hiệu năng dự kiến)."
+      ],
+      [
+        "9. Nhấn nút “Áp dụng cấu hình mô phỏng này”.",
+        "10. Hệ thống nạp các linh kiện của phương án mô phỏng vào bàn lắp ráp và kiểm tra lại tính tương thích."
+      ],
+      [
+        "Luồng sự kiện thay thế (alternate flow):",
+        "Luồng sự kiện thay thế (alternate flow):"
+      ],
+      [
+        "",
+        "2.1. Phát hiện lỗi xung đột nghiêm trọng (lệch Socket CPU và Mainboard, lệch chuẩn RAM, thiếu công suất nguồn hoặc kích thước linh kiện không vừa vỏ Case).\nHệ thống hiển thị cảnh báo xung đột, chuyển trạng thái cấu hình sang “Bị chặn” và khóa nút “Đặt mua nguyên bộ”."
+      ],
+      [
+        "",
+        "2.2. Cấu hình mới chọn từ 2 đến 5 linh kiện (chưa đủ bộ).\nHệ thống chỉ kiểm tra các cặp linh kiện đã có và hiển thị thông báo “Các linh kiện hiện tại hoàn toàn tương thích. Hãy tiếp tục chọn các món còn lại”."
+      ],
+      [
+        "6.1. Khách hàng chọn lại linh kiện tương thích giúp khắc phục hết các lỗi chặn.",
+        "6.2. Hệ thống mở khóa nút “Đặt mua nguyên bộ” và hiển thị thông báo “Đã khắc phục xung đột tương thích”."
+      ],
+      [
+        "9.1. Khách hàng chọn “Giữ nguyên cấu hình cũ” trên bảng so sánh What-If.",
+        "9.2. Hệ thống đóng bảng so sánh và giữ nguyên các linh kiện hiện tại trên bàn lắp ráp."
+      ],
+      [
+        "Luồng sự kiện ngoại lệ (exception flow):",
+        "Luồng sự kiện ngoại lệ (exception flow):"
+      ],
+      [
+        "",
+        "1.1. Khách hàng nhấn kiểm tra tương thích khi mới chọn dưới 2 linh kiện.\nHệ thống hiển thị thông báo “Cần ít nhất 2 linh kiện để kiểm tra”."
+      ],
+      [
+        "",
+        "2.3. Mất kết nối tới máy chủ khi đang kiểm tra tương thích hoặc chạy mô phỏng.\nHệ thống tự động sử dụng bộ quy tắc lưu đệm trên trình duyệt để tính điểm và hiển thị kết quả mà không làm gián đoạn thao tác."
+      ]
+    ]
+  },
+  {
+    "table_index": 23,
+    "title": "Tên use case: Chat tư vấn kỹ thuật và Gợi ý cấu hình với AI",
+    "rows_count": 23,
+    "rows": [
+      [
+        "Tên use case: Chat tư vấn kỹ thuật và Gợi ý cấu hình với AI",
+        "Tên use case: Chat tư vấn kỹ thuật và Gợi ý cấu hình với AI"
+      ],
+      [
+        "Mô tả sơ lược: Use case cho phép khách hàng trò chuyện với Trợ lý AI để hỏi đáp kỹ thuật phần cứng, so sánh linh kiện hoặc nhận đề xuất cấu hình máy tính theo nhu cầu, ngân sách (từ 6 triệu đến 250 triệu đồng) và loại trừ các linh kiện đã có sẵn. Khách hàng có thể nạp cấu hình AI gợi ý sang bàn lắp ráp hoặc chuyển tiếp cuộc trò chuyện sang Nhân viên bán hàng.",
+        "Mô tả sơ lược: Use case cho phép khách hàng trò chuyện với Trợ lý AI để hỏi đáp kỹ thuật phần cứng, so sánh linh kiện hoặc nhận đề xuất cấu hình máy tính theo nhu cầu, ngân sách (từ 6 triệu đến 250 triệu đồng) và loại trừ các linh kiện đã có sẵn. Khách hàng có thể nạp cấu hình AI gợi ý sang bàn lắp ráp hoặc chuyển tiếp cuộc trò chuyện sang Nhân viên bán hàng."
+      ],
+      [
+        "Actor chính: Khách hàng vãng lai, Khách hàng thành viên",
+        "Actor chính: Khách hàng vãng lai, Khách hàng thành viên"
+      ],
+      [
+        "Actor phụ: AI Advisor Service, Nhân viên bán hàng",
+        "Actor phụ: AI Advisor Service, Nhân viên bán hàng"
+      ],
+      [
+        "Tiền điều kiện (Pre-condition):\n• Người dùng đang mở trang Trợ lý AI tư vấn hoặc khung chat trực tuyến trên hệ thống.\n• Cơ sở dữ liệu sản phẩm và dịch vụ tư vấn AI đang hoạt động.",
+        "Tiền điều kiện (Pre-condition):\n• Người dùng đang mở trang Trợ lý AI tư vấn hoặc khung chat trực tuyến trên hệ thống.\n• Cơ sở dữ liệu sản phẩm và dịch vụ tư vấn AI đang hoạt động."
+      ],
+      [
+        "Hậu điều kiện (Post-condition):\n• Nội dung câu hỏi và phản hồi tư vấn kèm cấu hình đề xuất được hiển thị và lưu vào lịch sử trò chuyện.\n• Nếu yêu cầu gặp nhân viên, phiên hỗ trợ trực tuyến kèm tóm tắt ngữ cảnh được đẩy vào hàng đợi của Nhân viên bán hàng.",
+        "Hậu điều kiện (Post-condition):\n• Nội dung câu hỏi và phản hồi tư vấn kèm cấu hình đề xuất được hiển thị và lưu vào lịch sử trò chuyện.\n• Nếu yêu cầu gặp nhân viên, phiên hỗ trợ trực tuyến kèm tóm tắt ngữ cảnh được đẩy vào hàng đợi của Nhân viên bán hàng."
+      ],
+      [
+        "Luồng sự kiện chính (main flow):",
+        "Luồng sự kiện chính (main flow):"
+      ],
+      [
+        "Khách hàng",
+        "System"
+      ],
+      [
+        "1. Mở giao diện Trợ lý AI tư vấn cấu hình.",
+        "2. Hệ thống tải lịch sử trò chuyện trước đó (nếu có), hiển thị các gợi ý câu hỏi nhanh và ô nhập tin nhắn."
+      ],
+      [
+        "3. Chọn nhu cầu sử dụng, nhập mức ngân sách (6 triệu – 250 triệu đồng), đánh dấu các linh kiện đã có sẵn hoặc nhập câu hỏi kỹ thuật và nhấn nút “Gửi”.",
+        "4. Hệ thống kiểm tra độ dài tin nhắn (tối đa 2000 ký tự) và đối chiếu qua bộ lọc chủ đề để xác nhận nội dung thuộc phạm vi máy tính, linh kiện."
+      ],
+      [
+        "",
+        "5. Hệ thống truy xuất các linh kiện thực tế đang còn tồn kho, loại trừ các nhóm linh kiện khách đã có sẵn để phân bổ ngân sách cho các linh kiện còn thiếu và kiểm tra tính tương thích vật lý, điện năng."
+      ],
+      [
+        "",
+        "6. Hệ thống sinh lời giải thích kỹ thuật và hiển thị bảng cấu hình đề xuất kèm tổng giá tiền, điểm tương thích trên khung chat."
+      ],
+      [
+        "7. Nhấn nút “Áp dụng cấu hình này vào PC Builder”.",
+        "8. Hệ thống chuyển sang trang Xây dựng cấu hình và nạp toàn bộ linh kiện vừa đề xuất vào các khe cắm tương ứng."
+      ],
+      [
+        "9. Nhấn nút chuyển sang tư vấn trực tiếp với Nhân viên bán hàng (khi cần hỗ trợ chuyên sâu).",
+        "10. Hệ thống đóng gói lịch sử hội thoại và cấu hình đang quan tâm thành bản tóm tắt, đưa vào hàng đợi hỗ trợ và hiển thị thông báo “Yêu cầu tư vấn đã được gửi vào hàng đợi. Nhân viên bán hàng sẽ phản hồi sớm nhất”."
+      ],
+      [
+        "Luồng sự kiện thay thế (alternate flow):",
+        "Luồng sự kiện thay thế (alternate flow):"
+      ],
+      [
+        "",
+        "3.1. Bỏ trống ô nhập tin nhắn.\nHệ thống khóa nút gửi hoặc hiển thị thông báo “Bạn vui lòng nhập câu hỏi hoặc yêu cầu tư vấn về máy tính, linh kiện PC”."
+      ],
+      [
+        "",
+        "4.1. Nội dung tin nhắn vượt quá 2000 ký tự.\nHệ thống hiển thị thông báo “Tin nhắn của bạn quá dài. Vui lòng tóm tắt ngắn gọn câu hỏi về PC/linh kiện”."
+      ],
+      [
+        "",
+        "4.2. Câu hỏi nằm ngoài lĩnh vực máy tính và linh kiện công nghệ.\nHệ thống từ chối xử lý và hiển thị thông báo “Mình là Trợ lý AI chuyên biệt về Máy tính và Linh kiện của PC Mall nên không thể giải đáp các chủ đề ngoài lĩnh vực công nghệ. Bạn vui lòng hỏi về PC, laptop hoặc linh kiện”."
+      ],
+      [
+        "",
+        "4.3. Yêu cầu lắp bộ máy tính mới hoàn toàn nhưng ngân sách dưới 6.000.000 đồng hoặc trên 250.000.000 đồng.\nHệ thống thông báo mức ngân sách tối thiểu để lắp đủ 8 linh kiện mới là từ 6.500.000 đồng (hoặc hướng dẫn liên hệ bộ phận giải pháp doanh nghiệp nếu ngân sách trên 250.000.000 đồng)."
+      ],
+      [
+        "7.1. Khách hàng nhấn nút “Xóa lịch sử trò chuyện”.",
+        "7.2. Hệ thống xóa toàn bộ tin nhắn đã lưu và làm mới khung hội thoại về trạng thái ban đầu."
+      ],
+      [
+        "Luồng sự kiện ngoại lệ (exception flow):",
+        "Luồng sự kiện ngoại lệ (exception flow):"
+      ],
+      [
+        "",
+        "6.1. Dịch vụ mô hình ngôn ngữ lớn bên ngoài phản hồi chậm hoặc gián đoạn kết nối.\nHệ thống tự động chuyển sang bộ tư vấn dự phòng nội bộ dựa trên tập luật phân bổ ngân sách để trả về cấu hình đề xuất mà không làm gián đoạn cuộc trò chuyện."
+      ],
+      [
+        "",
+        "10.1. Mất kết nối máy chủ khi chuyển tiếp phiên hỗ trợ.\nHệ thống hiển thị thông báo “Không thể kết nối hàng đợi nhân viên lúc này. Vui lòng thử lại sau ít giây”."
+      ]
+    ]
+  },
+  {
+    "table_index": 24,
+    "title": "Tên use case: Quản lý giỏ hàng và Áp dụng mã giảm giá Coupon",
+    "rows_count": 25,
+    "rows": [
+      [
+        "Tên use case: Quản lý giỏ hàng và Áp dụng mã giảm giá Coupon",
+        "Tên use case: Quản lý giỏ hàng và Áp dụng mã giảm giá Coupon"
+      ],
+      [
+        "Mô tả sơ lược: Use case cho phép khách hàng xem danh sách sản phẩm trong giỏ hàng, tăng hoặc giảm số lượng theo tồn kho thực tế, xóa sản phẩm và áp dụng mã giảm giá (Coupon). Hệ thống kiểm tra điều kiện hiệu lực của mã để tính số tiền chiết khấu và tổng thanh toán tạm tính.",
+        "Mô tả sơ lược: Use case cho phép khách hàng xem danh sách sản phẩm trong giỏ hàng, tăng hoặc giảm số lượng theo tồn kho thực tế, xóa sản phẩm và áp dụng mã giảm giá (Coupon). Hệ thống kiểm tra điều kiện hiệu lực của mã để tính số tiền chiết khấu và tổng thanh toán tạm tính."
+      ],
+      [
+        "Actor chính: Khách hàng vãng lai, Khách hàng thành viên",
+        "Actor chính: Khách hàng vãng lai, Khách hàng thành viên"
+      ],
+      [
+        "Actor phụ: Không",
+        "Actor phụ: Không"
+      ],
+      [
+        "Tiền điều kiện (Pre-condition):\n• Người dùng truy cập vào trang Giỏ hàng trên hệ thống.\n• Trong giỏ hàng có ít nhất một sản phẩm khi thực hiện điều chỉnh số lượng hoặc áp dụng mã giảm giá.",
+        "Tiền điều kiện (Pre-condition):\n• Người dùng truy cập vào trang Giỏ hàng trên hệ thống.\n• Trong giỏ hàng có ít nhất một sản phẩm khi thực hiện điều chỉnh số lượng hoặc áp dụng mã giảm giá."
+      ],
+      [
+        "Hậu điều kiện (Post-condition):\n• Số lượng sản phẩm và tổng tiền tạm tính trong giỏ hàng được cập nhật vào cơ sở dữ liệu (đối với thành viên) hoặc bộ nhớ trình duyệt (đối với khách vãng lai).\n• Mã giảm giá hợp lệ và số tiền chiết khấu được lưu giữ để chuyển sang bước Thanh toán.",
+        "Hậu điều kiện (Post-condition):\n• Số lượng sản phẩm và tổng tiền tạm tính trong giỏ hàng được cập nhật vào cơ sở dữ liệu (đối với thành viên) hoặc bộ nhớ trình duyệt (đối với khách vãng lai).\n• Mã giảm giá hợp lệ và số tiền chiết khấu được lưu giữ để chuyển sang bước Thanh toán."
+      ],
+      [
+        "Luồng sự kiện chính (main flow):",
+        "Luồng sự kiện chính (main flow):"
+      ],
+      [
+        "Khách hàng",
+        "System"
+      ],
+      [
+        "1. Chọn mục “Giỏ hàng” trên thanh điều hướng.",
+        "2. Hệ thống hiển thị danh sách sản phẩm trong giỏ (ảnh, tên, mã SKU, đơn giá, số lượng, thành tiền), danh sách mã giảm giá khả dụng và khung Tạm tính."
+      ],
+      [
+        "3. Nhấn nút tăng (“+”) hoặc giảm (“−”) số lượng tại dòng sản phẩm cần điều chỉnh.",
+        "4. Hệ thống kiểm tra tồn kho thực tế của biến thể SKU, cập nhật lại số lượng, thành tiền của sản phẩm và tổng tiền giỏ hàng."
+      ],
+      [
+        "5. Nhập mã khuyến mãi vào ô “Mã giảm giá / Voucher” (hoặc chọn một mã trong danh sách khả dụng) và nhấn nút “Áp dụng”.",
+        "6. Hệ thống kiểm tra tính hợp lệ của mã giảm giá (trạng thái hoạt động, thời hạn, giới hạn lượt dùng, phạm vi sản phẩm và giá trị đơn hàng tối thiểu)."
+      ],
+      [
+        "",
+        "7. Nếu mã hợp lệ, hệ thống tính số tiền chiết khấu, hiển thị thông báo “Đã áp dụng mã <Mã>: Giảm <Số tiền> đ” và cập nhật lại số tiền Tổng cộng."
+      ],
+      [
+        "8. Nhấn nút “Xác nhận thanh toán”.",
+        "9. Hệ thống chuyển hướng người dùng sang trang Thanh toán đơn hàng kèm theo thông tin mã giảm giá đã áp dụng."
+      ],
+      [
+        "Luồng sự kiện thay thế (alternate flow):",
+        "Luồng sự kiện thay thế (alternate flow):"
+      ],
+      [
+        "",
+        "2.1. Giỏ hàng hiện tại không có sản phẩm nào.\nHệ thống hiển thị thông báo “Bạn chưa chọn linh kiện nào cả” kèm nút “Khám phá linh kiện” để quay về trang sản phẩm."
+      ],
+      [
+        "3.1. Giảm số lượng về 0 hoặc nhấn nút “Xóa khỏi giỏ hàng” tại một dòng sản phẩm.",
+        "3.2. Hệ thống xóa sản phẩm đó khỏi giỏ hàng, tính lại tổng tiền và kiểm tra lại điều kiện của mã giảm giá đang áp dụng."
+      ],
+      [
+        "",
+        "4.1. Số lượng yêu cầu vượt quá số lượng tồn kho thực tế của biến thể.\nHệ thống từ chối tăng thêm và hiển thị thông báo không đủ số lượng tồn kho."
+      ],
+      [
+        "",
+        "6.1. Mã giảm giá không tồn tại hoặc đã ngừng hoạt động.\nHiển thị thông báo “Mã giảm giá không tồn tại hoặc đã ngừng hoạt động”."
+      ],
+      [
+        "",
+        "6.2. Mã giảm giá chưa đến ngày áp dụng hoặc đã hết hạn.\nHiển thị thông báo “Chương trình khuyến mãi của mã giảm giá này chưa bắt đầu” hoặc “Mã giảm giá đã hết hạn sử dụng”."
+      ],
+      [
+        "",
+        "6.3. Mã giảm giá đã hết lượt sử dụng hoặc tài khoản đã dùng tối đa số lần cho phép.\nHiển thị thông báo “Mã giảm giá đã hết lượt sử dụng” hoặc “Bạn đã sử dụng tối đa số lần cho mã giảm giá này”."
+      ],
+      [
+        "",
+        "6.4. Giỏ hàng chưa đạt giá trị đơn hàng tối thiểu hoặc không có sản phẩm thuộc phạm vi áp dụng của mã.\nHiển thị thông báo “Đơn hàng chưa đạt giá trị tối thiểu để áp dụng mã này” hoặc “Mã giảm giá chỉ áp dụng cho một số sản phẩm linh kiện được chỉ định”."
+      ],
+      [
+        "7.1. Khách hàng nhấn nút “Hủy” bên cạnh mã giảm giá đang áp dụng.",
+        "7.2. Hệ thống gỡ bỏ mã giảm giá và khôi phục lại tổng tiền ban đầu."
+      ],
+      [
+        "8.1. Khách vãng lai nhấn nút “Đăng nhập để thanh toán”.",
+        "8.2. Hệ thống chuyển đến trang Đăng nhập và tự động đồng bộ giỏ hàng tạm vào tài khoản sau khi đăng nhập."
+      ],
+      [
+        "Luồng sự kiện ngoại lệ (exception flow):",
+        "Luồng sự kiện ngoại lệ (exception flow):"
+      ],
+      [
+        "",
+        "2.2. Mất kết nối tới máy chủ khi tải giỏ hàng hoặc biến thể sản phẩm vừa bị ngừng kinh doanh.\nHệ thống hiển thị thông báo “Không thể tải giỏ hàng” hoặc “Không thể cập nhật số lượng”."
+      ]
+    ]
+  },
+  {
+    "table_index": 25,
+    "title": "Tên use case: Đặt hàng khóa tồn kho và Thanh toán trực tuyến COD / VNPay / VietQR",
+    "rows_count": 22,
+    "rows": [
+      [
+        "Tên use case: Đặt hàng khóa tồn kho và Thanh toán trực tuyến COD / VNPay / VietQR",
+        "Tên use case: Đặt hàng khóa tồn kho và Thanh toán trực tuyến COD / VNPay / VietQR"
+      ],
+      [
+        "Mô tả sơ lược: Use case cho phép khách hàng thành viên chọn địa chỉ giao nhận, xác nhận mã giảm giá, chọn phương thức thanh toán (COD, VNPay hoặc chuyển khoản QR Banking VietQR) và đặt hàng. Hệ thống khóa và trừ tồn kho trong giao dịch nguyên tử, khởi tạo đơn hàng và xử lý thanh toán trực tuyến hoặc tiếp nhận ảnh biên lai chuyển khoản.",
+        "Mô tả sơ lược: Use case cho phép khách hàng thành viên chọn địa chỉ giao nhận, xác nhận mã giảm giá, chọn phương thức thanh toán (COD, VNPay hoặc chuyển khoản QR Banking VietQR) và đặt hàng. Hệ thống khóa và trừ tồn kho trong giao dịch nguyên tử, khởi tạo đơn hàng và xử lý thanh toán trực tuyến hoặc tiếp nhận ảnh biên lai chuyển khoản."
+      ],
+      [
+        "Actor chính: Khách hàng thành viên",
+        "Actor chính: Khách hàng thành viên"
+      ],
+      [
+        "Actor phụ: Cổng thanh toán (VNPay)",
+        "Actor phụ: Cổng thanh toán (VNPay)"
+      ],
+      [
+        "Tiền điều kiện (Pre-condition):\n• Khách hàng đã đăng nhập tài khoản thành viên hợp lệ.\n• Giỏ hàng (hoặc phiên Mua ngay) có ít nhất một biến thể sản phẩm còn tồn kho.",
+        "Tiền điều kiện (Pre-condition):\n• Khách hàng đã đăng nhập tài khoản thành viên hợp lệ.\n• Giỏ hàng (hoặc phiên Mua ngay) có ít nhất một biến thể sản phẩm còn tồn kho."
+      ],
+      [
+        "Hậu điều kiện (Post-condition):\n• Đơn hàng mới ở trạng thái chờ xác nhận (PENDING) và chi tiết đơn hàng được lưu vào bảng orders, order_items.\n• Số lượng tồn kho của các biến thể SKU được khấu trừ, lượt dùng mã giảm giá được ghi nhận và giỏ hàng được làm trống.\n• Trạng thái thanh toán được cập nhật thành Đã thanh toán (PAID) khi giao dịch VNPay thành công hoặc Chờ xác nhận (AWAITING_ADMIN_CONFIRMATION) khi tải lên biên lai VietQR.",
+        "Hậu điều kiện (Post-condition):\n• Đơn hàng mới ở trạng thái chờ xác nhận (PENDING) và chi tiết đơn hàng được lưu vào bảng orders, order_items.\n• Số lượng tồn kho của các biến thể SKU được khấu trừ, lượt dùng mã giảm giá được ghi nhận và giỏ hàng được làm trống.\n• Trạng thái thanh toán được cập nhật thành Đã thanh toán (PAID) khi giao dịch VNPay thành công hoặc Chờ xác nhận (AWAITING_ADMIN_CONFIRMATION) khi tải lên biên lai VietQR."
+      ],
+      [
+        "Luồng sự kiện chính (main flow):",
+        "Luồng sự kiện chính (main flow):"
+      ],
+      [
+        "Khách hàng thành viên",
+        "System"
+      ],
+      [
+        "1. Chuyển từ trang Giỏ hàng (hoặc nút Mua ngay) sang trang Thanh toán đơn hàng (/checkout).",
+        "2. Hệ thống tải thông tin liên hệ, sổ địa chỉ giao hàng, danh sách sản phẩm và hiển thị biểu mẫu thanh toán gồm 4 bước: Thông tin liên hệ, Địa chỉ nhận hàng, Phương thức thanh toán và Xác nhận đơn hàng."
+      ],
+      [
+        "3. Kiểm tra số điện thoại liên hệ, chọn một địa chỉ có sẵn trong sổ địa chỉ (hoặc nhập địa chỉ giao nhận mới) và nhấn tiếp tục.",
+        "4. Hệ thống kiểm tra tính hợp lệ của số điện thoại và địa chỉ giao hàng, lưu thông tin người nhận và chuyển sang bước chọn phương thức thanh toán."
+      ],
+      [
+        "5. Chọn phương thức thanh toán (“Thanh toán khi nhận hàng”, “Thanh toán qua VNPay” hoặc “QR Banking”), nhập ghi chú đơn hàng và nhấn nút xác nhận đặt hàng.",
+        "6. Hệ thống mở giao dịch nguyên tử, khóa dòng tồn kho để kiểm tra số lượng khả dụng, khấu trừ tồn kho từng biến thể SKU, tạo đơn hàng mới ở trạng thái PENDING, lưu chi tiết đơn hàng, ghi nhận lượt dùng mã giảm giá và làm trống giỏ hàng."
+      ],
+      [
+        "7. Nếu chọn “Thanh toán khi nhận hàng” (COD), hoàn tất đặt hàng.",
+        "8. Hệ thống gửi email xác nhận và chuyển hướng đến trang Chi tiết đơn hàng kèm thông báo đặt hàng thành công."
+      ],
+      [
+        "9. Nếu chọn “Thanh toán qua VNPay”, thực hiện thanh toán trên giao diện cổng VNPay.",
+        "10. Hệ thống tạo URL thanh toán có chữ ký HMAC-SHA512 chuyển sang cổng VNPay. Khi nhận phản hồi giao dịch thành công, hệ thống kiểm tra chữ ký, cập nhật trạng thái thanh toán thành PAID và hiển thị trang Kết quả thanh toán thành công."
+      ],
+      [
+        "11. Nếu chọn “QR Banking”, quét mã VietQR để chuyển khoản và tải tệp ảnh biên lai lên trang Chi tiết đơn hàng.",
+        "12. Hệ thống hiển thị mã VietQR tự động theo số tiền và nội dung đơn hàng. Khi khách tải ảnh biên lai lên, hệ thống lưu tệp minh chứng, chuyển trạng thái thanh toán sang chờ xác nhận và thông báo “Đã tải lên minh chứng chuyển khoản. Đơn hàng đang chờ admin xác nhận”."
+      ],
+      [
+        "Luồng sự kiện thay thế (alternate flow):",
+        "Luồng sự kiện thay thế (alternate flow):"
+      ],
+      [
+        "",
+        "3.1. Bỏ trống số điện thoại hoặc nhập sai định dạng số điện thoại Việt Nam.\nHiển thị thông báo “Vui lòng nhập số điện thoại” hoặc “Số điện thoại Việt Nam không hợp lệ (9-10 chữ số)”."
+      ],
+      [
+        "",
+        "3.2. Thêm địa chỉ nhận hàng mới nhưng bỏ trống một trong các trường bắt buộc (Họ tên, Số điện thoại, Tỉnh/Thành phố, Quận/Huyện, Phường/Xã, Địa chỉ cụ thể).\nHiển thị thông báo yêu cầu điền đầy đủ thông tin địa chỉ nhận hàng."
+      ],
+      [
+        "",
+        "6.1. Một sản phẩm trong giỏ vừa hết hàng hoặc không đủ số lượng tồn kho tại thời điểm nhấn đặt hàng.\nHệ thống hủy giao dịch đặt hàng và hiển thị thông báo “Sản phẩm <Tên_sản_phẩm> không đủ số lượng tồn kho”."
+      ],
+      [
+        "9.1. Khách hàng nhấn hủy giao dịch trên cổng thanh toán VNPay.",
+        "9.2. Hệ thống cập nhật trạng thái thanh toán thành Đã hủy thanh toán (đơn hàng vẫn giữ ở trạng thái PENDING để khách có thể thanh toán lại) và hiển thị thông báo thanh toán chưa hoàn tất."
+      ],
+      [
+        "",
+        "11.1. Tệp minh chứng tải lên không phải định dạng ảnh (JPG, PNG, GIF) hoặc vượt quá 5MB.\nHiển thị thông báo “Chỉ chấp nhận file ảnh (JPG, PNG, GIF)” hoặc “Kích thước file không được quá 5MB”."
+      ],
+      [
+        "Luồng sự kiện ngoại lệ (exception flow):",
+        "Luồng sự kiện ngoại lệ (exception flow):"
+      ],
+      [
+        "",
+        "10.1. Đơn hàng chọn thanh toán trực tuyến nhưng quá 30 phút khách hàng chưa hoàn tất thanh toán.\nTiến trình nền của hệ thống tự động chuyển đơn hàng sang trạng thái Đã hủy (CANCELED), hoàn trả lại toàn bộ số lượng tồn kho cho các biến thể SKU và khôi phục lượt dùng mã giảm giá."
+      ]
+    ]
+  }
+]

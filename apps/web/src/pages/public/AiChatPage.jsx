@@ -232,8 +232,10 @@ export function AiChatPage() {
         })
       ]);
       textareaRef.current?.focus();
-    } catch {
-      setStatusMessage("Kênh AI đang phản hồi chậm. Bạn vui lòng thử lại sau ít giây.");
+    } catch (err) {
+      console.error("AI Chat error:", err);
+      const serverMsg = err?.response?.data?.message;
+      setStatusMessage(serverMsg || "Kênh AI đang phản hồi chậm. Bạn vui lòng thử lại sau ít giây.");
       setQuestion(trimmedQuestion);
     } finally {
       setLoading(false);
@@ -294,7 +296,7 @@ export function AiChatPage() {
             <div className="ai-title-row">
               <h1 className="ai-title">Khung Tư Vấn Trợ Lý AI</h1>
               <span className="ai-pill-status">● Trực Tuyến 24/7</span>
-              <span className="ai-pill-model">Gemini 1.5 Flash Grounded</span>
+              <span className="ai-pill-model">Trợ Lý Kỹ Thuật</span>
             </div>
             <p className="ai-subtitle">Tư vấn cấu hình phần cứng • Dữ liệu kho & giá thật PC Mall</p>
           </div>

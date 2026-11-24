@@ -64,14 +64,14 @@ describe("AI PC Builder Core & Guardrail Integration Test Suite", () => {
       // Verify Socket match
       const cpu = result.candidates.bestValue.components.cpu;
       const mb = result.candidates.bestValue.components.mainboard;
-      const cpuSock = pcBuilderService.getCpuSocket(cpu);
-      const mbSock = pcBuilderService.getMainboardSocket(mb);
+      const cpuSock = (pcBuilderService as any).getCpuSocket(cpu);
+      const mbSock = (pcBuilderService as any).getMainboardSocket(mb);
       assert.equal(cpuSock, mbSock, `CPU socket (${cpuSock}) must match Mainboard socket (${mbSock})`);
 
       // Verify RAM DDR match
       const ram = result.candidates.bestValue.components.ram;
-      const ramType = pcBuilderService.getRamType(ram);
-      const mbRamType = pcBuilderService.getMainboardRamType(mb);
+      const ramType = (pcBuilderService as any).getRamType(ram);
+      const mbRamType = (pcBuilderService as any).getMainboardRamType(mb);
       assert.equal(ramType, mbRamType, `RAM type (${ramType}) must match Mainboard DDR standard (${mbRamType})`);
     });
 
@@ -82,9 +82,9 @@ describe("AI PC Builder Core & Guardrail Integration Test Suite", () => {
       });
 
       const comps = result.candidates.bestValue.components;
-      const cpuTdp = pcBuilderService.getCpuTdp(comps.cpu);
-      const gpuTdp = pcBuilderService.getGpuTdp(comps.gpu);
-      const psuWattage = pcBuilderService.getPsuWattage(comps.psu);
+      const cpuTdp = (pcBuilderService as any).getCpuTdp(comps.cpu);
+      const gpuTdp = (pcBuilderService as any).getGpuTdp(comps.gpu);
+      const psuWattage = (pcBuilderService as any).getPsuWattage(comps.psu);
 
       const minSafeWattage = Math.round((cpuTdp + gpuTdp + 120) * 1.25);
       assert.ok(
@@ -153,7 +153,7 @@ describe("AI PC Builder Core & Guardrail Integration Test Suite", () => {
   // ── 3. CHATBOT UNIFICATION WITH CORE ENGINE ────────────────────────────────
   describe("3. Unified Chatbot Delegation to Core Engine", () => {
     it("Chatbot query for PC build generates 100% database-grounded build matching Rule Engine", async () => {
-      const res = await askTechnicalAdvisor({
+      const res: any = await askTechnicalAdvisor({
         message: "Build giúp mình cấu hình PC 25 triệu chơi game eSports",
         context: null
       });
@@ -215,7 +215,7 @@ describe("AI PC Builder Core & Guardrail Integration Test Suite", () => {
     });
 
     it("End-to-End: askTechnicalAdvisor returns guardrail reply directly when off-topic", async () => {
-      const res = await askTechnicalAdvisor({
+      const res: any = await askTechnicalAdvisor({
         message: "Cách nấu món phở bò Hà Nội chuẩn vị?",
         context: null
       });

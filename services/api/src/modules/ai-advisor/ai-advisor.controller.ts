@@ -89,7 +89,7 @@ ${summaryText}`;
       tradeoffs: buildResult.tradeoffs || [],
       whatIfSimulation: buildResult.whatIfSimulation,
       compatibilityReport: bestVal.compatibilityReport,
-      mode: openAiApiKey && customAiAdvice ? "hybrid-llm-engine" : "hybrid-rule-engine"
+      mode: customAiAdvice ? "hybrid-llm-engine" : "hybrid-rule-engine"
     }
   });
 });

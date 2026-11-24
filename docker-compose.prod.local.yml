@@ -1,9 +1,0 @@
-services:
-  mysql:
-    ports: !override
-      - "127.0.0.1:3308:3306"
-
-  nginx:
-    ports: !override
-      - "8081:80"
-      - "8443:443"

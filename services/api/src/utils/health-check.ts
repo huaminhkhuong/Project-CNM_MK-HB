@@ -16,7 +16,7 @@ export async function checkDatabaseConnection() {
       database: row?.databaseName ?? null,
       serverTime: row?.currentTime ? new Date(row.currentTime).toISOString() : null
     };
-  } catch (error) {
+  } catch (error: any) {
     return {
       connected: false,
       latencyMs: Date.now() - startedAt,

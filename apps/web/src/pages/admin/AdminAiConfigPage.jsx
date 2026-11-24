@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import {
   AdminAlerts,
@@ -24,7 +24,14 @@ import {
   toggleAdminAiRule,
   updateAdminAiPrompt,
   updateAdminAiRule,
-  updateAdminAiSystemConfig
+  updateAdminAiSystemConfig,
+  getAdminAiDocuments,
+  uploadAdminAiDocument,
+  deleteAdminAiDocument,
+  getAdminAiDocumentChunks,
+  reindexAdminAiDocuments,
+  getAdminAiReindexStatus,
+  getAdminAiEmbeddingModels
 } from "../../services/ai.service";
 
 const SCOPES = [
@@ -48,9 +55,12 @@ const MATCH_TYPES = [
   { id: "budget_threshold", label: "Ngưỡng ngân sách (ví dụ: < 5000000 hoặc > 200000000)" }
 ];
 
-export function AdminAiConfigPage() {
+export function AdminAiConfigPage({ initialTab }) {
   const { authState, isAuthenticated } = useAuth();
   const role = String(authState?.user?.role || "").toUpperCase();
+
+  const [searchParams] = useSearchParams();
+  const queryTab = searchParams.get("tab") || initialTab || "rules";
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
@@ -60,7 +70,14 @@ export function AdminAiConfigPage() {
     return <Navigate to="/" replace />;
   }
 
-  const [activeTab, setActiveTab] = useState("rules"); // "rules" | "prompts" | "test"
+  const [activeTab, setActiveTab] = useState(queryTab);
+
+  useEffect(() => {
+    const targetTab = searchParams.get("tab") || initialTab;
+    if (targetTab && targetTab !== activeTab) {
+      setActiveTab(targetTab);
+    }
+  }, [initialTab, searchParams]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -103,7 +120,7 @@ export function AdminAiConfigPage() {
   // System AI Config & Token Estimation States
   const [systemConfig, setSystemConfig] = useState({
     provider: "gemini",
-    model: "gemini-1.5-flash",
+    model: "gemini-3.5-flash-lite",
     temperature: 0.4,
     maxTokens: 2048,
     maxCatalogProducts: 35,
@@ -113,6 +130,17 @@ export function AdminAiConfigPage() {
   });
   const [tokenEstimation, setTokenEstimation] = useState(null);
   const [savingSystemConfig, setSavingSystemConfig] = useState(false);
+
+  // RAG Knowledge Document Management States
+  const [documents, setDocuments] = useState([]);
+  const [loadingDocs, setLoadingDocs] = useState(false);
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadTargetService, setUploadTargetService] = useState("all");
+  const [isUploading, setIsUploading] = useState(false);
+  const [isReindexing, setIsReindexing] = useState(false);
+  const [embeddingModelInfo, setEmbeddingModelInfo] = useState(null);
+  const [previewChunksData, setPreviewChunksData] = useState(null);
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
 
   useAdminToast(successMessage, () => setSuccessMessage(""));
 
@@ -139,6 +167,8 @@ export function AdminAiConfigPage() {
       if (sysData.estimation) {
         setTokenEstimation(sysData.estimation);
       }
+      // Also preload documents for Tab 5 badge
+      loadDocuments();
     } catch (err) {
       setErrorMessage("Không thể tải cấu hình AI: " + (err.response?.data?.message || err.message));
     } finally {
@@ -164,6 +194,131 @@ export function AdminAiConfigPage() {
       setErrorMessage("Lỗi khi lưu cấu hình AI: " + (err.response?.data?.message || err.message));
     } finally {
       setSavingSystemConfig(false);
+    }
+  }
+
+  // Effect to clear errors on tab change
+  useEffect(() => {
+    setErrorMessage("");
+  }, [activeTab]);
+
+  // Effect to load RAG documents and models when RAG tab is selected
+  useEffect(() => {
+    if (activeTab === "rag") {
+      loadDocuments();
+      loadEmbeddingModels();
+    }
+  }, [activeTab]);
+
+  async function loadDocuments() {
+    try {
+      setLoadingDocs(true);
+      const res = await getAdminAiDocuments();
+      if (res?.success) {
+        setDocuments(res.documents || []);
+      }
+    } catch (err) {
+      setErrorMessage("Không thể nạp danh sách tài liệu RAG: " + (err.response?.data?.message || err.message));
+    } finally {
+      setLoadingDocs(false);
+    }
+  }
+
+  async function loadEmbeddingModels() {
+    try {
+      const res = await getAdminAiEmbeddingModels();
+      if (res?.success) {
+        setEmbeddingModelInfo(res);
+      }
+    } catch (err) {
+      console.error("Lỗi lấy thông số mô hình:", err);
+    }
+  }
+
+  async function handleUploadDocument(e) {
+    if (e) e.preventDefault();
+    if (!uploadFile) {
+      setErrorMessage("Vui lòng chọn file (.pdf, .md, .txt) để tải lên.");
+      return;
+    }
+    try {
+      setIsUploading(true);
+      setErrorMessage("");
+      const formData = new FormData();
+      formData.append("file", uploadFile);
+      formData.append("target_service", uploadTargetService);
+      const res = await uploadAdminAiDocument(formData);
+      if (res?.success) {
+        setSuccessMessage(res.message || "Tải lên và vector hóa tài liệu thành công!");
+        setUploadFile(null);
+        await loadDocuments();
+      }
+    } catch (err) {
+      setErrorMessage("Lỗi khi tải tài liệu: " + (err.response?.data?.message || err.message));
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  async function handleDeleteDocument(fileName) {
+    if (!window.confirm(`Bạn có chắc muốn xóa vĩnh viễn tài liệu "${fileName}" và cập nhật lại Vector DB?`)) {
+      return;
+    }
+    try {
+      setErrorMessage("");
+      const res = await deleteAdminAiDocument(fileName);
+      if (res?.success) {
+        setSuccessMessage(res.message || "Đã xóa tài liệu thành công!");
+        await loadDocuments();
+      }
+    } catch (err) {
+      setErrorMessage("Lỗi xóa tài liệu: " + (err.response?.data?.message || err.message));
+    }
+  }
+
+  async function handlePreviewChunks(fileName) {
+    try {
+      setErrorMessage("");
+      const res = await getAdminAiDocumentChunks(fileName);
+      const data = res?.data || res;
+      if (data?.success || data?.chunks) {
+        setPreviewChunksData(data);
+        setIsPreviewModalOpen(true);
+      }
+    } catch (err) {
+      setErrorMessage("Lỗi đọc chunks tài liệu: " + (err.response?.data?.message || err.message));
+    }
+  }
+
+  async function handleReindexAll() {
+    if (!window.confirm("Kích hoạt tái lập chỉ mục toàn bộ tài liệu và sản phẩm vào Vector DB?")) {
+      return;
+    }
+    try {
+      setIsReindexing(true);
+      setErrorMessage("");
+      const res = await reindexAdminAiDocuments();
+      if (res?.success) {
+        setSuccessMessage(res.message || "Đã kích hoạt tái lập chỉ mục trong nền...");
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusRes = await getAdminAiReindexStatus();
+            const status = statusRes?.status;
+            if (status && !status.is_running) {
+              clearInterval(pollInterval);
+              setIsReindexing(false);
+              setSuccessMessage(status.message || "Đã hoàn tất tái lập chỉ mục Vector DB!");
+              await loadDocuments();
+            }
+          } catch {
+            clearInterval(pollInterval);
+            setIsReindexing(false);
+          }
+        }, 3000);
+      }
+    } catch (err) {
+      setIsReindexing(false);
+      setErrorMessage("Lỗi khi tái lập chỉ mục: " + (err.response?.data?.message || err.message));
     }
   }
 
@@ -318,47 +473,102 @@ export function AdminAiConfigPage() {
   return (
     <AdminPage>
       <AdminPageHead
-        eyebrow="AI Management Center"
-        title="Quản Trị Lọc Dữ Liệu Đầu Vào & AI Customization"
-        description="Kiểm soát đầu vào cho 3 chức năng: Chat Tư Vấn, Đề Xuất Cấu Hình 32 Linh Kiện, và Giám Định Build PC. Tối ưu chi phí Token bằng bộ lọc 2 tầng (Tự trả lời / Chặn / Tiêm Prompt)."
+        eyebrow={activeTab === "rag" ? "RAG Knowledge & Vector Database" : "AI Management Center"}
+        title={activeTab === "rag" ? "Quản Lý Tài Liệu RAG & Kho Tri Thức AI" : "Quản Trị Lọc Dữ Liệu Đầu Vào & AI Customization"}
+        description={
+          activeTab === "rag"
+            ? "Mở rộng tri thức cho Chatbot & Smart PC Builder bằng mô hình Google Gemini Embedding (models/gemini-embedding-001) kết hợp ChromaDB và tìm kiếm từ khóa BM25Okapi tiếng Việt."
+            : "Kiểm soát đầu vào cho 3 chức năng: Chat Tư Vấn, Đề Xuất Cấu Hình 32 Linh Kiện, và Giám Định Build PC. Tối ưu chi phí Token bằng bộ lọc 2 tầng (Tự trả lời / Chặn / Tiêm Prompt)."
+        }
         actions={
           activeTab === "rules" ? (
             <AdminBtn variant="primary" onClick={handleOpenCreateModal}>
               ➕ Thêm Quy Tắc Lọc Mới
             </AdminBtn>
+          ) : activeTab === "rag" ? (
+            <button
+              type="button"
+              onClick={handleReindexAll}
+              disabled={isReindexing}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "10px 18px",
+                background: isReindexing ? "#94a3b8" : "#2563eb",
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: isReindexing ? "not-allowed" : "pointer",
+                boxShadow: "0 2px 6px rgba(37,99,235,0.3)"
+              }}
+            >
+              {isReindexing ? "🔄 Đang tái lập chỉ mục..." : "🔄 Tái Lập Chỉ Mục Toàn Bộ"}
+            </button>
           ) : null
         }
       />
 
       <AdminAlerts errorMessage={errorMessage} successMessage={successMessage} />
 
-      {/* Metrics Tổng Quan */}
-      <AdminMetrics>
-        <AdminMetric
-          label="Tổng quy tắc đang chạy"
-          value={rules.length}
-          hint={`${rules.filter((r) => r.isActive).length} quy tắc đang bật`}
-          tone="default"
-        />
-        <AdminMetric
-          label="Quy tắc tự trả lời (0ms, 0$)"
-          value={directReplyCount}
-          hint="Bypass LLM API cho FAQ & chính sách"
-          tone="success"
-        />
-        <AdminMetric
-          label="Quy tắc Chặn / Bảo vệ"
-          value={blockCount}
-          hint="Chặn off-topic, ngân sách ảo"
-          tone="danger"
-        />
-        <AdminMetric
-          label="Lượt bắt trúng (Tiết kiệm Token)"
-          value={totalHitCount}
-          hint="Lượt câu hỏi không cần gọi LLM"
-          tone="primary"
-        />
-      </AdminMetrics>
+      {/* Metrics Tổng Quan: Tự động thích ứng theo Tab hiện tại */}
+      {activeTab === "rag" ? (
+        <AdminMetrics>
+          <AdminMetric
+            label="Tài liệu tri thức mở rộng"
+            value={documents.length}
+            hint="Định dạng PDF, Markdown, TXT"
+            tone="primary"
+          />
+          <AdminMetric
+            label="Tổng phân đoạn (Chunks)"
+            value={documents.reduce((acc, d) => acc + (d.chunkCount || 0), 0)}
+            hint="Cắt đoạn ngữ nghĩa 600 ký tự"
+            tone="default"
+          />
+          <AdminMetric
+            label="Mô hình Vector Embedding"
+            value="Gemini Embedding"
+            hint="models/gemini-embedding-001 (0MB RAM)"
+            tone="success"
+          />
+          <AdminMetric
+            label="Phạm vi nghiệp vụ phục vụ"
+            value="2 Chức Năng"
+            hint="Chatbot & Smart PC Builder"
+            tone="default"
+          />
+        </AdminMetrics>
+      ) : (
+        <AdminMetrics>
+          <AdminMetric
+            label="Tổng quy tắc đang chạy"
+            value={rules.length}
+            hint={`${rules.filter((r) => r.isActive).length} quy tắc đang bật`}
+            tone="default"
+          />
+          <AdminMetric
+            label="Quy tắc tự trả lời (0ms, 0$)"
+            value={directReplyCount}
+            hint="Bypass LLM API cho FAQ & chính sách"
+            tone="success"
+          />
+          <AdminMetric
+            label="Quy tắc Chặn / Bảo vệ"
+            value={blockCount}
+            hint="Chặn off-topic, ngân sách ảo"
+            tone="danger"
+          />
+          <AdminMetric
+            label="Lượt bắt trúng (Tiết kiệm Token)"
+            value={totalHitCount}
+            hint="Lượt câu hỏi không cần gọi LLM"
+            tone="primary"
+          />
+        </AdminMetrics>
+      )}
 
       {/* Tab Navigation */}
       <div style={{ display: "flex", gap: 10, margin: "20px 0 24px", borderBottom: "2px solid #e2e8f0", paddingBottom: 12 }}>
@@ -433,11 +643,30 @@ export function AdminAiConfigPage() {
         >
           ⚙️ 4. Cấu Hình Hệ Thống & Token
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("rag")}
+          style={{
+            padding: "10px 20px",
+            background: activeTab === "rag" ? "#2563eb" : "#f1f5f9",
+            color: activeTab === "rag" ? "#fff" : "#334155",
+            border: "none",
+            borderRadius: 10,
+            fontWeight: 700,
+            fontSize: 14,
+            cursor: "pointer",
+            transition: "all 0.15s",
+            boxShadow: activeTab === "rag" ? "0 4px 12px rgba(37,99,235,0.25)" : "none"
+          }}
+        >
+          📚 5. Quản Lý Tài Liệu RAG & Tri Thức ({documents.length})
+        </button>
       </div>
 
       {/* ==================== TAB 1: QUY TẮC LỌC ==================== */}
       {activeTab === "rules" && (
-        <AdminWorkspace>
+        <div style={{ width: "100%" }}>
           <AdminCard title="Danh Sách Quy Tắc Lọc Đầu Vào & Tự Động Phản Hồi">
             {/* Bộ Lọc Thanh Công Cụ */}
             <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr", gap: 12, marginBottom: 18 }}>
@@ -516,11 +745,34 @@ export function AdminAiConfigPage() {
 
                     return (
                       <tr key={rule.id} style={{ borderBottom: "1px solid #f1f5f9", background: rule.isActive ? "transparent" : "#fbfbfb" }}>
-                        <td style={{ padding: "12px 14px" }}>
-                          <strong style={{ display: "block", color: rule.isActive ? "#0f172a" : "#94a3b8" }}>{rule.name}</strong>
-                          <code style={{ fontSize: 11, background: "#f1f5f9", padding: "2px 6px", borderRadius: 4, color: "#475569" }}>
-                            [{rule.matchType}] {rule.pattern}
-                          </code>
+                        <td style={{ padding: "12px 14px", maxWidth: 360 }}>
+                          <strong style={{ display: "block", color: rule.isActive ? "#0f172a" : "#94a3b8", marginBottom: 4 }}>
+                            {rule.name}
+                          </strong>
+                          <div
+                            title={`${rule.pattern} (Nhấn để sao chép)`}
+                            onClick={() => {
+                              navigator.clipboard?.writeText(rule.pattern);
+                              setSuccessMessage(`Đã sao chép pattern của "${rule.name}"!`);
+                            }}
+                            style={{
+                              fontSize: 11,
+                              background: "#f1f5f9",
+                              padding: "4px 8px",
+                              borderRadius: 6,
+                              color: "#475569",
+                              fontFamily: "monospace",
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              maxWidth: 340,
+                              display: "block",
+                              border: "1px solid #e2e8f0",
+                              cursor: "pointer"
+                            }}
+                          >
+                            <span style={{ fontWeight: 700, color: "#2563eb" }}>[{rule.matchType}]</span> {rule.pattern}
+                          </div>
                         </td>
 
                         <td style={{ padding: "12px 14px" }}>
@@ -629,12 +881,12 @@ export function AdminAiConfigPage() {
               </table>
             </div>
           </AdminCard>
-        </AdminWorkspace>
+        </div>
       )}
 
       {/* ==================== TAB 2: TÙY BIẾN PROMPT CHO 3 CHỨC NĂNG ==================== */}
       {activeTab === "prompts" && (
-        <AdminWorkspace>
+        <div style={{ display: "flex", flexDirection: "column", gap: 24, width: "100%" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 24 }}>
             {["GENERAL_CHAT", "BUILDER_SUGGEST", "BUILDER_AUDIT_CHAT"].map((scopeKey) => {
               const promptData = prompts[scopeKey] || {};
@@ -685,7 +937,7 @@ export function AdminAiConfigPage() {
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
                       <AdminField label="AI Model Engine">
                         <select
-                          value={promptData.model || "gemini-1.5-flash"}
+                          value={promptData.model || "gemini-3.5-flash-lite"}
                           onChange={(e) => {
                             setPrompts((prev) => ({
                               ...prev,
@@ -694,9 +946,8 @@ export function AdminAiConfigPage() {
                           }}
                           style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #cbd5e1" }}
                         >
-                          <option value="gemini-1.5-flash">Gemini 1.5 Flash (Tốc độ cao, tối ưu chi phí)</option>
-                          <option value="gemini-1.5-pro">Gemini 1.5 Pro (Suy luận sâu, logic phức tạp)</option>
-                          <option value="mock">Mock Engine (Dành cho thử nghiệm offline)</option>
+                          <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite (Khuyên dùng - Siêu tốc, phản hồi tức thì)</option>
+                          <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite (Dự phòng ổn định / Fallback)</option>
                         </select>
                       </AdminField>
 
@@ -745,12 +996,12 @@ export function AdminAiConfigPage() {
               );
             })}
           </div>
-        </AdminWorkspace>
+        </div>
       )}
 
       {/* ==================== TAB 3: TEST SIMULATOR ==================== */}
       {activeTab === "test" && (
-        <AdminWorkspace>
+        <div style={{ width: "100%" }}>
           <AdminCard title="🧪 Công Cụ Kiểm Thử Bộ Lọc Đầu Vào Trực Quan">
             <p style={{ color: "#64748b", fontSize: 13, marginTop: 0 }}>
               Mô phỏng chính xác cách hệ thống tiếp nhận và phân luồng câu hỏi trước khi quyết định Tự Trả Lời (Local 0ms) hay Chuyển Tiếp Cho AI Engine.
@@ -858,12 +1109,329 @@ export function AdminAiConfigPage() {
               </div>
             )}
           </AdminCard>
-        </AdminWorkspace>
+        </div>
       )}
 
-      {/* ==================== TAB 4: SYSTEM CONFIG & TOKEN ANALYSIS ==================== */}
+      {/* ==================== TAB 5: QUẢN LÝ TÀI LIỆU RAG & TRI THỨC ==================== */}
+      {activeTab === "rag" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 20, width: "100%" }}>
+          {/* Action Header */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, background: "#fff", padding: "14px 20px", borderRadius: 12, border: "1px solid #e2e8f0" }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: 16, color: "#0f172a" }}>Cơ Sở Tri Thức RAG (Retrieval-Augmented Generation)</h3>
+              <p style={{ margin: "4px 0 0", fontSize: 13, color: "#64748b" }}>
+                AI Service chạy độc lập tại cổng 5001, quản lý bộ nhớ vector hóa ChromaDB và từ vựng BM25Okapi tiếng Việt.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleReindexAll}
+              disabled={isReindexing}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "10px 18px",
+                background: isReindexing ? "#94a3b8" : "#2563eb",
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: isReindexing ? "not-allowed" : "pointer",
+                boxShadow: "0 2px 6px rgba(37,99,235,0.3)"
+              }}
+            >
+              {isReindexing ? "🔄 Đang tái lập chỉ mục..." : "🔄 Tái Lập Chỉ Mục Toàn Bộ"}
+            </button>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))", gap: 20, marginBottom: 24 }}>
+            {/* Cột 1: Tải lên tài liệu mới */}
+            <div style={{ minWidth: 0 }}>
+            <AdminCard title="📤 Tải Lên & Vector Hóa Tài Liệu Mới">
+              <p style={{ color: "#64748b", fontSize: 13, marginTop: 0 }}>
+                Tải lên tài liệu hướng dẫn kỹ thuật, chính sách bảo hành hoặc tiêu chí build máy để mở rộng kho tri thức cho AI.
+              </p>
+
+              <form onSubmit={handleUploadDocument} style={{ display: "grid", gap: 16 }}>
+                <AdminField label="Chọn tệp tài liệu (.pdf, .md, .txt)">
+                  <input
+                    type="file"
+                    accept=".pdf,.md,.txt"
+                    onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px dashed #cbd5e1",
+                      background: "#f8fafc",
+                      width: "100%",
+                      fontSize: 13
+                    }}
+                    required
+                  />
+                  {uploadFile && (
+                    <div style={{ fontSize: 12, color: "#059669", marginTop: 4, fontWeight: 600 }}>
+                      ✓ Đã chọn: {uploadFile.name} ({(uploadFile.size / 1024).toFixed(1)} KB)
+                    </div>
+                  )}
+                </AdminField>
+
+                <AdminField label="Phạm vi nghiệp vụ phục vụ của tài liệu">
+                  <select
+                    value={uploadTargetService}
+                    onChange={(e) => setUploadTargetService(e.target.value)}
+                    style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid #cbd5e1", fontSize: 13, fontWeight: 600 }}
+                  >
+                    <option value="all">🌐 Phục vụ cả 2 (Chatbot & Smart PC Builder)</option>
+                    <option value="chatbot">💬 Chỉ phục vụ Chatbot Tư Vấn Bán Hàng (Chính sách, bảo hành, xử lý sự cố)</option>
+                    <option value="pc_builder">🛠️ Chỉ phục vụ Smart PC Builder (Thông số kỹ thuật, tương thích, mẹo tối ưu)</option>
+                  </select>
+                </AdminField>
+
+                <div style={{ background: "#f8fafc", padding: 12, borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12, color: "#475569", lineHeight: 1.6 }}>
+                  <strong>Quy trình xử lý tự động (AIO2026 Pipeline):</strong>
+                  <div>1. <strong>Xác định & Trích xuất:</strong> Đọc nội dung thô theo định dạng PDF / Markdown / Text.</div>
+                  <div>2. <strong>Làm sạch & Chuẩn hóa:</strong> Unicode NFC, giữ nguyên ký hiệu kỹ thuật (W, GHz, MHz, Socket, PCIe).</div>
+                  <div>3. <strong>Smart Chunking:</strong> Cắt đoạn ngữ nghĩa theo Heading & đoạn văn (600 ký tự, overlap 120 ký tự).</div>
+                  <div>4. <strong>Lập chỉ mục Hybrid:</strong> Dense Vector vào ChromaDB & Sparse Inverted Index vào BM25Okapi.</div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isUploading || !uploadFile}
+                  style={{
+                    padding: "10px 18px",
+                    background: isUploading ? "#94a3b8" : "#059669",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 8,
+                    fontWeight: 700,
+                    fontSize: 14,
+                    cursor: isUploading || !uploadFile ? "not-allowed" : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    boxShadow: "0 2px 6px rgba(5,150,105,0.3)"
+                  }}
+                >
+                  {isUploading ? "⏳ Đang trích xuất & Vector hóa..." : "🚀 Tiến Hành Tải Lên & Vector Hóa"}
+                </button>
+              </form>
+            </AdminCard>
+            </div>
+
+            {/* Cột 2: Bảng danh sách tài liệu hiện có */}
+            <div style={{ minWidth: 0 }}>
+            <AdminCard title={`📋 Danh Sách Tài Liệu Tri Thức Trong Hệ Thống (${documents.length})`}>
+              {loadingDocs ? (
+                <div style={{ textAlign: "center", padding: 40, color: "#64748b" }}>
+                  ⏳ Đang tải danh sách tài liệu RAG từ AI Service...
+                </div>
+              ) : documents.length === 0 ? (
+                <div style={{ textAlign: "center", padding: 40, color: "#94a3b8" }}>
+                  Chưa có tài liệu mở rộng nào trong thư mục data/docs/. Bạn hãy tải lên tài liệu đầu tiên!
+                </div>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: "#f8fafc", borderBottom: "2px solid #e2e8f0", textAlign: "left" }}>
+                        <th style={{ padding: "10px 12px", color: "#475569" }}>Tên Tài Liệu</th>
+                        <th style={{ padding: "10px 8px", color: "#475569", textAlign: "center" }}>Định Dạng</th>
+                        <th style={{ padding: "10px 8px", color: "#475569", textAlign: "center" }}>Dung Lượng</th>
+                        <th style={{ padding: "10px 8px", color: "#475569", textAlign: "center" }}>Số Chunks</th>
+                        <th style={{ padding: "10px 8px", color: "#475569", textAlign: "center" }}>Phục Vụ</th>
+                        <th style={{ padding: "10px 12px", color: "#475569", textAlign: "right" }}>Thao Tác</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {documents.map((doc, idx) => (
+                        <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "12px", fontWeight: 600, color: "#0f172a" }}>
+                            {doc.title || doc.fileName}
+                            <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 400 }}>
+                              {doc.fileName}
+                            </div>
+                          </td>
+                          <td style={{ padding: "12px 8px", textAlign: "center" }}>
+                            <span style={{
+                              padding: "2px 8px",
+                              borderRadius: 6,
+                              fontSize: 11,
+                              fontWeight: 700,
+                              background: doc.format === "PDF" ? "#fee2e2" : doc.format === "MD" ? "#e0e7ff" : "#f1f5f9",
+                              color: doc.format === "PDF" ? "#dc2626" : doc.format === "MD" ? "#4338ca" : "#475569"
+                            }}>
+                              {doc.format}
+                            </span>
+                          </td>
+                          <td style={{ padding: "12px 8px", textAlign: "center", color: "#64748b" }}>
+                            {doc.fileSizeKb} KB
+                          </td>
+                          <td style={{ padding: "12px 8px", textAlign: "center" }}>
+                            <span style={{
+                              background: "#eff6ff",
+                              color: "#1d4ed8",
+                              fontWeight: 800,
+                              padding: "2px 8px",
+                              borderRadius: 10,
+                              fontSize: 11
+                            }}>
+                              {doc.chunkCount} chunks
+                            </span>
+                          </td>
+                          <td style={{ padding: "12px 8px", textAlign: "center" }}>
+                            <span style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              padding: "2px 8px",
+                              borderRadius: 6,
+                              background: doc.targetService === "chatbot" ? "#dcfce7" : doc.targetService === "pc_builder" ? "#fef3c7" : "#ede9fe",
+                              color: doc.targetService === "chatbot" ? "#166534" : doc.targetService === "pc_builder" ? "#92400e" : "#5b21b6"
+                            }}>
+                              {doc.targetService === "chatbot" ? "Chatbot" : doc.targetService === "pc_builder" ? "PC Builder" : "Cả 2"}
+                            </span>
+                          </td>
+                          <td style={{ padding: "12px", textAlign: "right" }}>
+                            <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+                              <button
+                                type="button"
+                                onClick={() => handlePreviewChunks(doc.fileName)}
+                                title="Xem phân đoạn chunks"
+                                style={{
+                                  padding: "5px 10px",
+                                  borderRadius: 6,
+                                  border: "1px solid #cbd5e1",
+                                  background: "#fff",
+                                  color: "#334155",
+                                  fontSize: 12,
+                                  cursor: "pointer",
+                                  fontWeight: 600
+                                }}
+                              >
+                                🔍 Xem Chunks
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteDocument(doc.fileName)}
+                                title="Xóa tài liệu và vector"
+                                style={{
+                                  padding: "5px 10px",
+                                  borderRadius: 6,
+                                  border: "1px solid #fecaca",
+                                  background: "#fef2f2",
+                                  color: "#dc2626",
+                                  fontSize: 12,
+                                  cursor: "pointer",
+                                  fontWeight: 600
+                                }}
+                              >
+                                🗑️ Xóa
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </AdminCard>
+            </div>
+          </div>
+
+          {/* Khảo sát & Phân tích các mô hình Embedding tối ưu cho máy chủ 4GB RAM + Swap */}
+          <AdminCard title="🧠 Đánh Giá & So Sánh Các Mô Hình Vector Embedding (Tối Ưu Cho Server 4GB RAM + Swap)">
+            <p style={{ color: "#64748b", fontSize: 13, marginTop: 0 }}>
+              Phân tích tài nguyên thực nghiệm để lựa chọn mô hình vector hóa phù hợp nhất cho môi trường triển khai thực tế.
+            </p>
+
+            <div style={{ overflowX: "auto", marginBottom: 16 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: "#f8fafc", borderBottom: "2px solid #e2e8f0", textAlign: "left" }}>
+                    <th style={{ padding: "10px 12px", color: "#475569" }}>Mô Hình (Embedding Model)</th>
+                    <th style={{ padding: "10px 8px", color: "#475569", textAlign: "center" }}>Số Chiều</th>
+                    <th style={{ padding: "10px 8px", color: "#475569", textAlign: "center" }}>Mức Tiêu Thụ RAM</th>
+                    <th style={{ padding: "10px 8px", color: "#475569", textAlign: "center" }}>Tốc Độ / Độ Trễ</th>
+                    <th style={{ padding: "10px 8px", color: "#475569", textAlign: "center" }}>Giới Hạn API Quota</th>
+                    <th style={{ padding: "10px 12px", color: "#475569" }}>Đánh Giá Cho Server 4GB RAM</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style={{ borderBottom: "1px solid #e2e8f0", background: "#f0fdf4" }}>
+                    <td style={{ padding: "12px", fontWeight: 700, color: "#166534" }}>
+                      ⭐ Google Gemini Embedding (models/gemini-embedding-001)
+                      <span style={{ display: "block", fontSize: 11, color: "#15803d", fontWeight: 400 }}>
+                        (Mô hình đang được hệ thống kích hoạt chính thức cho RAG)
+                      </span>
+                    </td>
+                    <td style={{ padding: "12px 8px", textAlign: "center", fontWeight: 700 }}>3072 dims</td>
+                    <td style={{ padding: "12px 8px", textAlign: "center", color: "#15803d", fontWeight: 800 }}>0MB (Cloud TPU)</td>
+                    <td style={{ padding: "12px 8px", textAlign: "center" }}>100 - 250ms</td>
+                    <td style={{ padding: "12px 8px", textAlign: "center", color: "#15803d", fontWeight: 700 }}>Google Gemini API</td>
+                    <td style={{ padding: "12px", color: "#166534", fontSize: 12 }}>
+                      <strong>Khuyên dùng hàng đầu:</strong> 0MB RAM máy chủ, ngữ nghĩa tiếng Việt đa tầng vượt trội, độ dài vector 3072 chiều nắm bắt chi tiết từng thông số kỹ thuật phần cứng.
+                    </td>
+                  </tr>
+
+                  <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
+                    <td style={{ padding: "12px", fontWeight: 600, color: "#0f172a" }}>
+                      all-MiniLM-L6-v2 (ONNX Runtime)
+                      <span style={{ display: "block", fontSize: 11, color: "#64748b", fontWeight: 400 }}>
+                        (Mô hình dự phòng Local Offline khi mất mạng)
+                      </span>
+                    </td>
+                    <td style={{ padding: "12px 8px", textAlign: "center", fontWeight: 700 }}>384 dims</td>
+                    <td style={{ padding: "12px 8px", textAlign: "center", color: "#334155" }}>~120MB - 180MB</td>
+                    <td style={{ padding: "12px 8px", textAlign: "center" }}>5 - 15ms (CPU)</td>
+                    <td style={{ padding: "12px 8px", textAlign: "center" }}>Không giới hạn (0đ)</td>
+                    <td style={{ padding: "12px", color: "#475569", fontSize: 12 }}>
+                      <strong>Dự phòng Offline:</strong> Chạy trực tiếp qua ONNX Runtime trên máy chủ, chiếm chưa tới 4% RAM khi chạy độc lập.
+                    </td>
+                  </tr>
+
+                  <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
+                    <td style={{ padding: "12px", fontWeight: 600, color: "#0f172a" }}>
+                      BAAI/bge-small-en-v1.5 (FastEmbed)
+                    </td>
+                    <td style={{ padding: "12px 8px", textAlign: "center" }}>384 dims</td>
+                    <td style={{ padding: "12px 8px", textAlign: "center", color: "#334155" }}>~150MB - 220MB</td>
+                    <td style={{ padding: "12px 8px", textAlign: "center" }}>8 - 20ms</td>
+                    <td style={{ padding: "12px 8px", textAlign: "center" }}>Không giới hạn</td>
+                    <td style={{ padding: "12px", color: "#475569", fontSize: 12 }}>
+                      <strong>Phương án tham khảo:</strong> Điểm benchmark MTEB retrieval cao, khởi động nhanh với nhân Rust.
+                    </td>
+                  </tr>
+
+                  <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
+                    <td style={{ padding: "12px", fontWeight: 600, color: "#0f172a" }}>
+                      paraphrase-multilingual-MiniLM-L12-v2
+                    </td>
+                    <td style={{ padding: "12px 8px", textAlign: "center" }}>384 dims</td>
+                    <td style={{ padding: "12px 8px", textAlign: "center", color: "#b45309", fontWeight: 700 }}>~350MB - 450MB</td>
+                    <td style={{ padding: "12px 8px", textAlign: "center" }}>25 - 40ms</td>
+                    <td style={{ padding: "12px 8px", textAlign: "center" }}>Không giới hạn</td>
+                    <td style={{ padding: "12px", color: "#475569", fontSize: 12 }}>
+                      <strong>Phương án tham khảo:</strong> Hỗ trợ đa ngôn ngữ, nhưng tiêu thụ nhiều RAM hơn.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", padding: 14, borderRadius: 10, fontSize: 13, color: "#1e3a8a", lineHeight: 1.6 }}>
+              <strong>💡 Chiến Lược Mô Hình Chuẩn Hóa Của Toàn Hệ Thống:</strong>
+              <div>• <strong>RAG Vector Embedding:</strong> Sử dụng <code>models/gemini-embedding-001</code> đồng bộ Vector DB ChromaDB 3072 chiều kết hợp Sparse Search BM25Okapi tiếng Việt.</div>
+              <div>• <strong>Chatbot & Smart PC Builder:</strong> Sử dụng <code>gemini-3.5-flash-lite</code> (phản hồi tức thì, siêu nhẹ) và cơ chế tự động fallback về <code>gemini-3.1-flash-lite</code> khi gặp sự cố quota.</div>
+            </div>
+          </AdminCard>
+        </div>
+      )}
       {activeTab === "system" && (
-        <AdminWorkspace>
+        <div style={{ width: "100%" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 20 }}>
             {/* Cột 1: Cấu hình tập trung */}
             <AdminCard title="⚙️ Cấu Hình Tập Trung Hệ Thống AI & Nhà Cung Cấp">
@@ -879,7 +1447,7 @@ export function AdminAiConfigPage() {
                       onChange={(e) => setSystemConfig((prev) => ({ ...prev, provider: e.target.value }))}
                       style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid #cbd5e1" }}
                     >
-                      <option value="gemini">Google Gemini (Khuyên dùng - Flash 1.5/2.0)</option>
+                      <option value="gemini">Google Gemini (Khuyên dùng: gemini-3.5-flash-lite)</option>
                       <option value="groq">Groq Llama 3 (Tốc độ cực nhanh)</option>
                       <option value="openai">OpenAI (GPT-4o, GPT-4o-mini)</option>
                       <option value="ollama">Ollama Local (Chạy máy chủ nội bộ)</option>
@@ -887,13 +1455,14 @@ export function AdminAiConfigPage() {
                   </AdminField>
 
                   <AdminField label="Mô Hình (Model Name)">
-                    <input
-                      type="text"
-                      value={systemConfig.model}
+                    <select
+                      value={systemConfig.model || "gemini-3.5-flash-lite"}
                       onChange={(e) => setSystemConfig((prev) => ({ ...prev, model: e.target.value }))}
-                      placeholder="gemini-1.5-flash, llama-3.3-70b-versatile..."
-                      style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid #cbd5e1" }}
-                    />
+                      style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid #cbd5e1", fontWeight: 600 }}
+                    >
+                      <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Khuyên dùng - Tốc độ cao)</option>
+                      <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Fallback dự phòng)</option>
+                    </select>
                   </AdminField>
                 </div>
 
@@ -1020,7 +1589,7 @@ export function AdminAiConfigPage() {
               </div>
             </AdminCard>
           </div>
-        </AdminWorkspace>
+        </div>
       )}
 
       {/* ==================== MODAL THÊM / SỬA QUY TẮC ==================== */}
@@ -1184,6 +1753,132 @@ export function AdminAiConfigPage() {
                 </AdminBtn>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL XEM CHI TIẾT CHUNKS ==================== */}
+      {isPreviewModalOpen && previewChunksData && (
+        <div style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(15, 23, 42, 0.6)",
+          backdropFilter: "blur(4px)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 9999,
+          padding: 16
+        }}>
+          <div style={{
+            background: "#ffffff",
+            borderRadius: 16,
+            width: "100%",
+            maxWidth: 850,
+            maxHeight: "90vh",
+            display: "flex",
+            flexDirection: "column",
+            boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)"
+          }}>
+            {/* Modal Header */}
+            <div style={{ padding: "20px 24px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 17, color: "#0f172a" }}>
+                  🔍 Chi Tiết Phân Đoạn Chunks (Smart Semantic Chunking)
+                </h3>
+                <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
+                  Tài liệu: <strong>{previewChunksData.fileName}</strong> • Tổng cộng: <strong>{previewChunksData.totalChunks} chunks</strong> đã nạp vào ChromaDB & BM25
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPreviewModalOpen(false)}
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  borderRadius: "50%",
+                  width: 32,
+                  height: 32,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  fontSize: 16,
+                  color: "#64748b"
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body - Scrollable Chunks */}
+            <div style={{ padding: 24, overflowY: "auto", flex: 1, display: "grid", gap: 14 }}>
+              {previewChunksData.chunks?.map((chunk, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    background: "#f8fafc",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: 10,
+                    padding: 14
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <span style={{
+                        background: "#2563eb",
+                        color: "#fff",
+                        fontWeight: 700,
+                        fontSize: 11,
+                        padding: "2px 8px",
+                        borderRadius: 6
+                      }}>
+                        Chunk #{chunk.index || idx + 1}
+                      </span>
+                      <code style={{ fontSize: 11, color: "#475569" }}>{chunk.id}</code>
+                    </div>
+                    <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>
+                      Độ dài: {chunk.length} ký tự
+                    </span>
+                  </div>
+                  <pre style={{
+                    margin: 0,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    fontFamily: "inherit",
+                    fontSize: 13,
+                    color: "#1e293b",
+                    lineHeight: 1.6,
+                    background: "#ffffff",
+                    padding: 12,
+                    borderRadius: 6,
+                    border: "1px solid #f1f5f9"
+                  }}>
+                    {chunk.text}
+                  </pre>
+                </div>
+              ))}
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{ padding: "14px 24px", borderTop: "1px solid #e2e8f0", display: "flex", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                onClick={() => setIsPreviewModalOpen(false)}
+                style={{
+                  padding: "8px 20px",
+                  background: "#2563eb",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  fontWeight: 600,
+                  fontSize: 13,
+                  cursor: "pointer"
+                }}
+              >
+                Đóng
+              </button>
+            </div>
           </div>
         </div>
       )}

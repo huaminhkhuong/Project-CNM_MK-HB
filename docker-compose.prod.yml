@@ -1,128 +1,112 @@
+version: '3.8'
+
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: cnm_postgres_prod
-    restart: unless-stopped
+  mysql:
+    image: mysql:8.0
+    container_name: cnm_mysql_prod
+    restart: always
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-cnm_mk_hb}
-    ports:
-      - "127.0.0.1:5432:5432"
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_strong_password_here}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-cnm_mk_hb}
+      MYSQL_USER: ${MYSQL_USER:-cnm_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-user_strong_password_here}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
+      # Auto-import 140 products, categories, specs, compatibility rules on first run
+      - ./database/cnm_mk_hb_dump.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - cnm_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-cnm_mk_hb}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root_strong_password_here}"]
       interval: 10s
       timeout: 5s
-      retries: 12
-      start_period: 10s
-
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: cnm_pgadmin_prod
-    restart: unless-stopped
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@admin.com}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
-      PGADMIN_CONFIG_SERVER_MODE: 'False'
-      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
-    ports:
-      - "5050:80"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - cnm_network
+      retries: 10
 
   api:
     build:
       context: .
       dockerfile: services/api/Dockerfile
     container_name: cnm_api_prod
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
+    restart: always
     environment:
-      NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-cnm_mk_hb}?schema=public
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: ${POSTGRES_DB:-cnm_mk_hb}
-      DB_USER: ${POSTGRES_USER:-postgres}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      PORT: 4000
-      FRONTEND_URL: ${FRONTEND_URL:-https://yourdomain.com}
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
-      VNPAY_TMN_CODE: ${VNPAY_TMN_CODE}
-      VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET}
-      VNPAY_URL: ${VNPAY_URL}
-      PAYMENT_MOCK_MODE: ${PAYMENT_MOCK_MODE:-false}
-      SHIPPING_MOCK_MODE: ${SHIPPING_MOCK_MODE:-false}
-      SHIPPING_PROVIDER: ${SHIPPING_PROVIDER:-ghtk}
-      CHAT_STORAGE_PATH: /app/data/chat-sessions.json
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      - NODE_ENV=production
+      - PORT=4000
+      - DATABASE_URL=mysql://${MYSQL_USER:-cnm_user}:${MYSQL_PASSWORD:-user_strong_password_here}@mysql:3306/${MYSQL_DATABASE:-cnm_mk_hb}
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - JWT_ACCESS_EXPIRES_IN=${JWT_ACCESS_EXPIRES_IN:-15m}
+      - JWT_REFRESH_EXPIRES_IN=${JWT_REFRESH_EXPIRES_IN:-7d}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost}
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-gemini-1.5-flash}
+      - DATA_IMAGES_DIR=/app/data/images
+      - UPLOADS_DIR=/app/services/api/uploads
+      - CHAT_STORAGE_PATH=/app/data/chat-sessions.json
+      - AI_SERVICE_URL=http://ai-service:5001
     volumes:
-      - ./services/api/data:/app/data
+      # Persistent storage for product images and uploads
+      - ./data/images:/app/data/images:ro
       - ./services/api/uploads:/app/services/api/uploads
+      # Persistent AI rules store so hitCounts and new rules persist across deployments
+      - ./services/api/src/data:/app/services/api/src/data
+    depends_on:
+      mysql:
+        condition: service_healthy
     networks:
       - cnm_network
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4000/api/health',(res)=>process.exit(res.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 20s
+
+  ai-service:
+    build:
+      context: ./services/ai-service
+      dockerfile: Dockerfile
+    container_name: cnm_ai_service_prod
+    restart: always
+    environment:
+      - PORT=5001
+    volumes:
+      - ./services/ai-service/data_store:/app/data_store
+      - ./data:/app/data:ro
+      - ./services/api/src/data:/app/services/api/src/data:ro
+    networks:
+      - cnm_network
+    deploy:
+      resources:
+        limits:
+          memory: 500M
 
   web:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        VITE_API_BASE_URL: ${API_BASE_URL:-https://yourdomain.com/api}
+        # Relative API base URL works seamlessly behind Nginx on any IP or domain
+        - VITE_API_BASE_URL=/api
     container_name: cnm_web_prod
-    restart: unless-stopped
+    restart: always
     depends_on:
-      api:
-        condition: service_healthy
+      - api
     networks:
       - cnm_network
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:5173',(res)=>process.exit(res.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 20s
 
   nginx:
     image: nginx:alpine
     container_name: cnm_nginx_prod
-    restart: unless-stopped
+    restart: always
     ports:
       - "80:80"
-      - "443:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-      - ./logs/nginx:/var/log/nginx
+      - ./nginx/nginx.http.conf:/etc/nginx/nginx.conf:ro
+      - ./data/images:/var/www/data/images:ro
+      - ./services/api/uploads:/var/www/uploads:ro
     depends_on:
       - api
       - web
     networks:
       - cnm_network
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
 volumes:
-  postgres_data:
+  mysql_data:
 
 networks:
   cnm_network:

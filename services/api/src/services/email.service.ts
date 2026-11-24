@@ -55,7 +55,7 @@ export async function verifyEmailConnection(): Promise<void> {
     await transporter.verify();
     _transporterReady = true;
     console.log(`[Email] ✅ Gmail SMTP connected as ${env.mailUser}`);
-  } catch (err) {
+  } catch (err: any) {
     console.warn("[Email] ⚠️  Gmail SMTP connection failed:", (err as Error).message);
     console.warn("[Email] Make sure MAIL_USER / MAIL_PASS are set correctly in .env");
   }
@@ -83,7 +83,7 @@ export async function sendEmail(options: {
     });
     console.log(`[Email] ✅ Sent to ${options.to}: ${info.messageId}`);
     return true;
-  } catch (err) {
+  } catch (err: any) {
     console.error(`[Email] ❌ Failed to send to ${options.to}:`, (err as Error).message);
     return false;
   }

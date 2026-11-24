@@ -44,7 +44,7 @@ describe("Unified LLM Adapter & Multi-Provider Strategy Test Suite", () => {
       model: "gemini-1.5-flash"
     });
 
-    const res = await service.generateText({
+    const res: any = await service.generateText({
       prompt: "Hướng dẫn làm món phở bò Nam Định"
     });
 
@@ -60,7 +60,7 @@ describe("Unified LLM Adapter & Multi-Provider Strategy Test Suite", () => {
       model: "gemini-1.5-flash"
     });
 
-    const res = await service.generateText({
+    const res: any = await service.generateText({
       prompt: "Tư vấn cấu hình PC 15 triệu chơi game"
     });
 

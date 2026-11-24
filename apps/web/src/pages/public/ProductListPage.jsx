@@ -194,6 +194,7 @@ export function ProductListPage() {
   const [products,    setProducts]    = useState([]);
   const [categories,  setCategories]  = useState([]);
   const [brands,      setBrands]      = useState([]);
+  const [brandSearch, setBrandSearch] = useState("");
   const [attributes,  setAttributes]  = useState([]);
   const [pagination,  setPagination]  = useState({ page: 1, limit: 12, totalItems: 0, totalPages: 0 });
   const [loading,     setLoading]     = useState(true);
@@ -494,29 +495,58 @@ export function ProductListPage() {
             {/* Brand */}
             {brands.length > 0 && (
               <FilterSection title="Thương hiệu" icon="🏷️" defaultOpen={false}>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {brands.map((b) => {
-                    const isActive = String(filters.brand_id) === String(b.id);
-                    return (
-                      <button
-                        key={b.id}
-                        type="button"
-                        onClick={() => setFilters(p => ({ ...p, brand_id: isActive ? "" : String(b.id), page: 1 }))}
-                        style={{
-                          padding: "5px 12px", borderRadius: 99,
-                          border: `1px solid ${isActive ? "rgba(37,99,235,0.4)" : "var(--market-border, #e2e8f0)"}`,
-                          background: isActive ? "rgba(37,99,235,0.1)" : "var(--market-surface-soft, #f8fafc)",
-                          color: isActive ? "#1d4ed8" : "var(--market-text, #475569)",
-                          fontSize: 12, fontWeight: isActive ? 700 : 500,
-                          cursor: "pointer",
-                          transition: "all 0.18s cubic-bezier(0.34,1.56,0.64,1)",
-                          transform: isActive ? "scale(1.04)" : "scale(1)",
-                        }}
-                      >
-                        {b.name}
-                      </button>
-                    );
-                  })}
+                <div style={{ marginBottom: 8 }}>
+                  <input
+                    type="text"
+                    value={brandSearch}
+                    onChange={(e) => setBrandSearch(e.target.value)}
+                    placeholder="🔍 Lọc thương hiệu..."
+                    style={{
+                      width: "100%",
+                      padding: "6px 10px",
+                      borderRadius: 6,
+                      border: "1px solid var(--market-border, #cbd5e1)",
+                      fontSize: 12,
+                      background: "var(--market-surface, #ffffff)",
+                      color: "var(--market-text, #1e293b)"
+                    }}
+                  />
+                </div>
+                <div style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 6,
+                  maxHeight: 200,
+                  overflowY: "auto",
+                  paddingRight: 4,
+                  scrollbarWidth: "thin"
+                }}>
+                  {brands
+                    .filter((b) => b.name.toLowerCase().includes(brandSearch.trim().toLowerCase()))
+                    .map((b) => {
+                      const isActive = String(filters.brand_id) === String(b.id);
+                      return (
+                        <button
+                          key={b.id}
+                          type="button"
+                          onClick={() => setFilters(p => ({ ...p, brand_id: isActive ? "" : String(b.id), page: 1 }))}
+                          style={{
+                            padding: "5px 12px",
+                            borderRadius: 99,
+                            border: `1px solid ${isActive ? "rgba(37,99,235,0.4)" : "var(--market-border, #e2e8f0)"}`,
+                            background: isActive ? "rgba(37,99,235,0.1)" : "var(--market-surface-soft, #f8fafc)",
+                            color: isActive ? "#1d4ed8" : "var(--market-text, #475569)",
+                            fontSize: 12,
+                            fontWeight: isActive ? 700 : 500,
+                            cursor: "pointer",
+                            transition: "all 0.18s cubic-bezier(0.34,1.56,0.64,1)",
+                            transform: isActive ? "scale(1.04)" : "scale(1)",
+                          }}
+                        >
+                          {b.name}
+                        </button>
+                      );
+                    })}
                 </div>
               </FilterSection>
             )}

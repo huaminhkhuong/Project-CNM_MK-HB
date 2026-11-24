@@ -111,7 +111,7 @@ export const createSession = async (req: Request, res: Response) => {
     emitToStaffChatQueue("queue:new_session", sessionData);
 
     res.status(201).json({ success: true, data: sessionData });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error creating chat session:", error);
     res.status(500).json({
       success: false,
@@ -133,7 +133,7 @@ export const getSession = async (req: Request, res: Response) => {
     }
 
     res.status(200).json({ success: true, data: mapSession(session) });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error getting chat session:", error);
     res.status(500).json({ success: false, message: "Failed to get session" });
   }
@@ -196,7 +196,7 @@ export const sendMessage = async (req: Request, res: Response) => {
     emitToStaffChatQueue("queue:updated", { sessionId: id, status: nextStatus });
 
     res.status(201).json({ success: true, data: messageData });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error sending chat message:", error);
     res.status(500).json({ success: false, message: "Failed to send message" });
   }
@@ -211,7 +211,7 @@ export const getQueue = async (_req: Request, res: Response) => {
     });
 
     res.status(200).json({ success: true, data: sessions.map(mapSession) });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error getting chat queue:", error);
     res.status(500).json({ success: false, message: "Failed to get queue" });
   }
@@ -231,7 +231,7 @@ export const getQueueStats = async (_req: Request, res: Response) => {
         total: all.length
       }
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error getting chat queue stats:", error);
     res.status(500).json({ success: false, message: "Failed to get queue stats" });
   }
@@ -282,7 +282,7 @@ export const acceptSession = async (req: Request, res: Response) => {
     emitToStaffChatQueue("queue:updated", { sessionId: id, status: "active" });
 
     res.status(200).json({ success: true, data: refreshedData });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error accepting chat session:", error);
     res.status(500).json({ success: false, message: "Failed to accept session" });
   }
@@ -327,7 +327,7 @@ export const closeSession = async (req: Request, res: Response) => {
     emitToStaffChatQueue("queue:updated", { sessionId: req.params.id, status: "closed" });
 
     res.status(200).json({ success: true, data: refreshedData });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error closing chat session:", error);
     res.status(500).json({ success: false, message: "Failed to close session" });
   }
@@ -403,7 +403,7 @@ export const handleAiConsultation = async (req: Request, res: Response) => {
         type: "build_recommendation"
       }
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error in AI Consultation controller:", error);
     res.status(500).json({ success: false, message: "AI Consultation failed" });
   }

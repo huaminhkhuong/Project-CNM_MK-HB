@@ -70,3 +70,44 @@ jobs:
             echo '```' >> $GITHUB_STEP_SUMMARY
             exit 1
           }
+
+  deploy-to-ec2:
+    name: Deploy to AWS EC2
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: 🔐 SSH & Deploy to AWS EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: ${{ secrets.EC2_PORT || 22 }}
+          script_stop: true
+          script: |
+            echo "🚀 [1/5] Bắt đầu kết nối và triển khai trên EC2..."
+            PROJECT_DIR="/home/${{ secrets.EC2_USER }}/Khoa_luan"
+            
+            if [ ! -d "$PROJECT_DIR" ]; then
+              echo "❌ Thư mục $PROJECT_DIR không tồn tại. Vui lòng clone repo vào $PROJECT_DIR trước."
+              exit 1
+            fi
+            
+            cd "$PROJECT_DIR"
+
+            echo "📥 [2/5] Kéo mã nguồn mới nhất từ nhánh main..."
+            git pull origin main
+
+            echo "📁 [3/5] Đảm bảo các thư mục dữ liệu tồn tại..."
+            mkdir -p data/images services/api/uploads services/api/src/data logs/nginx nginx/ssl
+
+            echo "🐳 [4/5] Build và khởi chạy Docker Compose Production..."
+            docker compose -f docker-compose.prod.yml up -d --build
+
+            echo "🧹 [5/5] Dọn dẹp Docker images cũ (dangling) để tiết kiệm dung lượng đĩa..."
+            docker image prune -f
+
+            echo "✅ Trạng thái các dịch vụ đang chạy:"
+            docker compose -f docker-compose.prod.yml ps

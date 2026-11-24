@@ -12,6 +12,7 @@ services:
       - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./database/cnm_mk_hb_dump.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
       interval: 5s
@@ -44,9 +45,33 @@ services:
       - NODE_ENV=development
       - PORT=4000
       - DATABASE_URL=mysql://root:root@mysql:3306/cnm_mk_hb
+      - JWT_ACCESS_SECRET=dev_jwt_access_secret_key_32_characters_minimum
+      - JWT_REFRESH_SECRET=dev_jwt_refresh_secret_key_32_characters_minimum
+      - FRONTEND_URL=http://localhost:5173
+      - DATA_IMAGES_DIR=/app/data/images
+      - AI_SERVICE_URL=http://ai-service:5001
+    volumes:
+      - ./data/images:/app/data/images:ro
+      - ./services/api/uploads:/app/services/api/uploads
+      - ./services/api/src/data:/app/services/api/src/data
     depends_on:
       mysql:
         condition: service_healthy
+
+  ai-service:
+    build:
+      context: ./services/ai-service
+      dockerfile: Dockerfile
+    container_name: cnm_ai_service
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    environment:
+      - PORT=5001
+    volumes:
+      - ./services/ai-service/data_store:/app/data_store
+      - ./data:/app/data:ro
+      - ./services/api/src/data:/app/services/api/src/data:ro
 
   frontend:
     build:

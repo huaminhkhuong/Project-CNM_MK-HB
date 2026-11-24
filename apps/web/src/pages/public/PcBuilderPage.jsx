@@ -1280,18 +1280,29 @@ export function PcBuilderPage() {
       let candidateData = null;
       let apiData = null;
       const rawPrompt = overrideOptions?.customPrompt || overrideOptions?.promptText || "";
+      const allAnswers = overrideOptions?.answers || {};
+      const answersSummary = Object.entries(allAnswers)
+        .map(([k, v]) => `[${k}]: ${v}`)
+        .join(", ");
+
+      const extractedPlatform = overrideOptions?.platformPref || (allAnswers.cpu_platform_pref && allAnswers.cpu_platform_pref !== "auto" ? allAnswers.cpu_platform_pref : suggestionForm?.platformPref || "auto");
+      const extractedGpuBrand = overrideOptions?.gpuBrandPref || (allAnswers.gpu_preference?.includes("nvidia") ? "nvidia" : allAnswers.gpu_preference?.includes("amd") ? "amd" : suggestionForm?.gpuBrandPref || "auto");
+      const extractedAesthetic = overrideOptions?.aesthetic || allAnswers.aesthetic_style || suggestionForm?.aesthetic || "";
+      const extractedStorage = overrideOptions?.minStorage || allAnswers.storage_plan || suggestionForm?.minStorage || "";
+
       const extraCriteriaDetails = [
         overrideOptions?.subPurpose ? `Nhu cầu chi tiết: ${overrideOptions.subPurpose}` : "",
-        overrideOptions?.platformPref && overrideOptions.platformPref !== "auto" ? `Ưu tiên CPU: ${overrideOptions.platformPref.toUpperCase()}` : "",
-        overrideOptions?.gpuBrandPref && overrideOptions.gpuBrandPref !== "auto" ? `Ưu tiên GPU: ${overrideOptions.gpuBrandPref.toUpperCase()}` : "",
-        overrideOptions?.aesthetic ? `Thẩm mỹ: ${overrideOptions.aesthetic}` : "",
+        extractedPlatform !== "auto" ? `Ưu tiên CPU: ${extractedPlatform.toUpperCase()}` : "",
+        extractedGpuBrand !== "auto" ? `Ưu tiên GPU: ${extractedGpuBrand.toUpperCase()}` : "",
+        extractedAesthetic ? `Thẩm mỹ: ${extractedAesthetic}` : "",
         overrideOptions?.caseSize ? `Vỏ case: ${overrideOptions.caseSize}` : "",
         overrideOptions?.coolingPref ? `Tản nhiệt: ${overrideOptions.coolingPref}` : "",
         overrideOptions?.minRam ? `RAM tối thiểu: ${overrideOptions.minRam.toUpperCase()}` : "",
-        overrideOptions?.minStorage ? `SSD tối thiểu: ${overrideOptions.minStorage.toUpperCase()}` : "",
+        extractedStorage ? `SSD tối thiểu: ${extractedStorage.toUpperCase()}` : "",
         overrideOptions?.needWifi ? `Cần Wi-Fi & Bluetooth tích hợp` : "",
         overrideOptions?.acousticPref && overrideOptions.acousticPref !== "balanced" ? `Độ ồn: ${overrideOptions.acousticPref}` : "",
-        overrideOptions?.futureNeed && overrideOptions.futureNeed !== "none" ? `Dự trù nâng cấp: ${overrideOptions.futureNeed}` : ""
+        overrideOptions?.futureNeed && overrideOptions.futureNeed !== "none" ? `Dự trù nâng cấp: ${overrideOptions.futureNeed}` : "",
+        answersSummary ? `Tiêu chí từ khảo sát AI: ${answersSummary}` : ""
       ].filter(Boolean).join(". ");
 
       const synthesizedCustomPrompt = rawPrompt
@@ -1300,6 +1311,33 @@ export function PcBuilderPage() {
 
       if (isAiRequest) {
         // ── 🚀 CHỨC NĂNG 1: AI STREAMING TUYỂN CHỌN TỪ POOL 32 LINH KIỆN ──
+        let initialCandidates = {};
+        let initialTotalPrice = targetBudget;
+        let initialUtilization = 100;
+
+        try {
+          const fastRes = await httpClient.post("/pc-builder/suggest", {
+            budget: targetBudget,
+            useCase: purpose,
+            resolution,
+            preference,
+            futureNeed,
+            engineType: "ai",
+            customPrompt: synthesizedCustomPrompt,
+            answers: allAnswers,
+            platformPref: extractedPlatform,
+            gpuBrandPref: extractedGpuBrand
+          });
+          const fastData = fastRes.data?.data || fastRes.data;
+          if (fastData?.candidates) {
+            initialCandidates = fastData.candidates;
+            initialTotalPrice = fastData.candidates.bestValue?.totalPrice || targetBudget;
+            initialUtilization = fastData.candidates.bestValue?.budgetUtilization || 100;
+          }
+        } catch (fastErr) {
+          console.warn("Fast suggest pre-fetch failed, will rely on stream", fastErr);
+        }
+
         setProposalModalData({
           useCase: purpose,
           subPurpose: overrideOptions?.subPurpose || "",
@@ -1307,15 +1345,15 @@ export function PcBuilderPage() {
           resolution,
           engineType: "ai",
           aiAdvice: "⚡ Đang kết nối tới Hội Đồng Thẩm Định AI để phân tích 32 linh kiện ứng viên từ kho hàng...",
-          provider: "Google Gemini (gemini-3.5-flash-lite)",
+          provider: "PC Mall AI Engine",
           isStreaming: true,
-          candidates: {},
-          totalPrice: targetBudget,
-          budgetUtilization: 100,
-          platformPref: overrideOptions?.platformPref || suggestionForm?.platformPref || "auto",
-          gpuBrandPref: overrideOptions?.gpuBrandPref || suggestionForm?.gpuBrandPref || "auto",
+          candidates: initialCandidates,
+          totalPrice: initialTotalPrice,
+          budgetUtilization: initialUtilization,
+          platformPref: extractedPlatform,
+          gpuBrandPref: extractedGpuBrand,
           minRam: overrideOptions?.minRam || suggestionForm?.minRam || "32gb",
-          minStorage: overrideOptions?.minStorage || suggestionForm?.minStorage || "1tb",
+          minStorage: extractedStorage || suggestionForm?.minStorage || "1tb",
           needWifi: overrideOptions?.needWifi !== undefined ? overrideOptions.needWifi : suggestionForm?.needWifi
         });
         setIsProposalModalOpen(true);
@@ -1330,11 +1368,12 @@ export function PcBuilderPage() {
               preference,
               futureNeed,
               customPrompt: synthesizedCustomPrompt,
-              platformPref: overrideOptions?.platformPref,
-              gpuBrandPref: overrideOptions?.gpuBrandPref,
+              answers: allAnswers,
+              platformPref: extractedPlatform,
+              gpuBrandPref: extractedGpuBrand,
               minRam: overrideOptions?.minRam,
-              minStorage: overrideOptions?.minStorage,
-              aesthetic: overrideOptions?.aesthetic,
+              minStorage: extractedStorage,
+              aesthetic: extractedAesthetic,
               coolingPref: overrideOptions?.coolingPref
             },
             {
@@ -1360,7 +1399,7 @@ export function PcBuilderPage() {
                   ...prev,
                   isStreaming: false,
                   aiAdvice: result.advice,
-                  provider: result.provider || "Google Gemini (gemini-3.5-flash-lite)",
+                  provider: result.provider || "PC Mall AI Engine",
                   totalPrice: result.totalPrice,
                   budgetUtilization: result.budgetUtilization,
                   dynamicBottleneck: result.dynamicBottleneck,
@@ -1379,7 +1418,33 @@ export function PcBuilderPage() {
                 setProcessingComponent(null);
                 setLocalMessage("✨ AI đã hoàn tất tuyển chọn 8 linh kiện từ 32 ứng viên trong kho!");
               },
-              onError: (err) => {
+              onError: async (err) => {
+                console.warn("AI Stream error, falling back to suggest API...", err);
+                try {
+                  const fallbackRes = await httpClient.post("/pc-builder/suggest", {
+                    budget: targetBudget,
+                    useCase: purpose,
+                    resolution,
+                    preference,
+                    futureNeed,
+                    engineType: "ai",
+                    customPrompt: synthesizedCustomPrompt
+                  });
+                  const fbData = fallbackRes.data?.data || fallbackRes.data;
+                  if (fbData?.candidates) {
+                    setProposalModalData((prev) => ({
+                      ...prev,
+                      isStreaming: false,
+                      candidates: fbData.candidates,
+                      totalPrice: fbData.candidates.bestValue?.totalPrice || targetBudget,
+                      budgetUtilization: fbData.candidates.bestValue?.budgetUtilization || 100,
+                      aiAdvice: fbData.message || "Cấu hình cân bằng tối ưu dựa trên phân tích tương thích và ngân sách của bạn."
+                    }));
+                    return;
+                  }
+                } catch (fbErr) {
+                  console.warn("Fallback suggest also failed", fbErr);
+                }
                 setProposalModalData((prev) => ({
                   ...prev,
                   isStreaming: false,
@@ -1709,7 +1774,7 @@ export function PcBuilderPage() {
 
       // Lấy lời khuyên chi tiết từ AI LLM nếu đây là yêu cầu AI
       let aiAdviceText = "";
-      let aiProviderName = isAiRequest ? "gemini-2.5-flash" : "system-heuristics";
+      let aiProviderName = isAiRequest ? "PC Mall AI Engine" : "system-heuristics";
 
       if (isAiRequest) {
         try {
@@ -2373,12 +2438,13 @@ export function PcBuilderPage() {
 
             <div className="sidebar-divider" />
 
-            {/* AI Control Panel */}
+            {/* AI Control Panel - Beginner Guide */}
             <AIControlPanel
               suggestionForm={suggestionForm}
               setSuggestionForm={setSuggestionForm}
               onAutoRecommend={handleAutoRecommend}
               isAutoBuilding={isAutoBuilding}
+              onOpenWizard={() => setIsReqWizardOpen(true)}
             />
 
             <div className="sidebar-divider" />
@@ -2420,16 +2486,16 @@ export function PcBuilderPage() {
                 >
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                      <span style={{ fontSize: "22px" }}>🚀</span>
+                      <span style={{ fontSize: "22px" }}>🧠</span>
                       <h2 style={{ margin: 0, fontSize: "1.25rem", fontWeight: 800, color: "#0f172a" }}>
-                        Khởi Tạo Cấu Hình PC Theo Tiêu Chí Chuẩn Mực
+                        Khởi Tạo Cấu Hình PC Cùng Trợ Lý AI Thông Minh
                       </h2>
-                      <span style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px", borderRadius: "999px", backgroundColor: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe" }}>
-                        1 Luồng Tiêu Chuẩn 5 Bước
+                      <span style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px", borderRadius: "999px", backgroundColor: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0" }}>
+                        Tư Vấn Thông Minh
                       </span>
                     </div>
                     <p style={{ margin: 0, fontSize: "13px", color: "#64748b", maxWidth: "680px", lineHeight: "1.5" }}>
-                      Bắt đầu từ nút <strong>"Build PC Của Bạn"</strong>, bạn sẽ thiết lập trọn vẹn mọi tiêu chí kỹ thuật qua 5 bước. Tại bước cuối, bạn lựa chọn <strong>⚙️ Hệ Thống Đề Xuất</strong> (chỉ nhận tiêu chí, tính toán 100% tương thích tức thì) hoặc <strong>✨ AI Tư Vấn</strong> (nhận tiêu chí + cho phép nhập thêm yêu cầu cá nhân hóa).
+                      Nhập tự do nhu cầu (ví dụ: <em>"chơi game gta v"</em>, <em>"văn phòng mượt mà"</em>), Trợ lý AI sẽ tương tác qua vài câu hỏi ngắn gọn, kiểm tra tương thích và đề xuất cấu hình hoàn hảo nhất trong tầm giá.
                     </p>
                   </div>
 
@@ -2442,19 +2508,19 @@ export function PcBuilderPage() {
                       gap: "8px",
                       padding: "12px 24px",
                       borderRadius: "12px",
-                      backgroundColor: "#0f172a",
+                      backgroundColor: "#2563eb",
                       color: "#ffffff",
                       border: "none",
                       fontWeight: 800,
                       fontSize: "13.5px",
                       cursor: "pointer",
-                      boxShadow: "0 4px 14px rgba(15, 23, 42, 0.2)",
-                      transition: "background-color 0.15s ease",
+                      boxShadow: "0 4px 14px rgba(37, 99, 235, 0.35)",
+                      transition: "all 0.15s ease",
                       whiteSpace: "nowrap"
                     }}
                   >
-                    <span>🚀</span>
-                    <span>Build PC Của Bạn Ngay</span>
+                    <span>✨</span>
+                    <span>Bắt Đầu AI Build PC Ngay</span>
                   </button>
                 </div>
 

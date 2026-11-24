@@ -42,7 +42,7 @@ export async function createNotification(payload: {
     `INSERT INTO user_notifications (user_id, type, title, message, link, is_read) VALUES (?, ?, ?, ?, ?, 0)`,
     [payload.userId, payload.type || "SYSTEM", payload.title, payload.message, payload.link || null]
   );
-  return { id: result.insertId, ...payload, isRead: false };
+  return { id: (result as any).insertId, ...payload, isRead: false };
 }
 
 export async function getUserNotifications(userId: number) {

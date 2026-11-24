@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import fs from "fs";
 import path from "path";
 import swaggerUi from "swagger-ui-express";
 import { env } from "./config/env";
@@ -17,10 +18,31 @@ import { apiRouter } from "./routes";
 
 export function createApp() {
   const app = express();
-  const uploadsDirs = [
+
+  // Multi-environment uploads directory discovery (Local Windows & Linux Docker)
+  const candidateUploadsDirs = [
+    process.env.UPLOADS_DIR,
     path.resolve(process.cwd(), "services/api/uploads"),
-    path.resolve(__dirname, "../uploads")
-  ];
+    path.resolve(process.cwd(), "uploads"),
+    path.resolve(__dirname, "../uploads"),
+    path.resolve(__dirname, "../../uploads")
+  ].filter(Boolean) as string[];
+
+  const activeUploadsDir = candidateUploadsDirs.find((dir) => fs.existsSync(dir)) || path.resolve(process.cwd(), "services/api/uploads");
+  if (!fs.existsSync(activeUploadsDir)) {
+    fs.mkdirSync(activeUploadsDir, { recursive: true });
+  }
+
+  // Multi-environment product images directory discovery (Local Windows & Linux Docker)
+  const candidateImagesDirs = [
+    process.env.DATA_IMAGES_DIR,
+    path.resolve(process.cwd(), "data/images"),
+    path.resolve(process.cwd(), "../data/images"),
+    path.resolve(__dirname, "../../../data/images"),
+    path.resolve(__dirname, "../../data/images")
+  ].filter(Boolean) as string[];
+
+  const activeImagesDir = candidateImagesDirs.find((dir) => fs.existsSync(dir));
 
   app.set("etag", false);
 
@@ -45,12 +67,11 @@ export function createApp() {
     next();
   });
   
-  // Serve static files from uploads and data directories.
-  uploadsDirs.forEach((uploadsDir) => {
-    app.use("/uploads", express.static(uploadsDir));
-  });
-  app.use("/data/images", express.static(path.resolve(process.cwd(), "../../data/images")));
-  app.use("/data/images", express.static("T:/Khoa_luan/data/images"));
+  // Serve static files from uploads and data directories
+  app.use("/uploads", express.static(activeUploadsDir));
+  if (activeImagesDir) {
+    app.use("/data/images", express.static(activeImagesDir));
+  }
   
   app.use("/api", apiRouter);
   app.use(notFoundHandler);

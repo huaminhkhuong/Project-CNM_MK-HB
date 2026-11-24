@@ -26,8 +26,6 @@ function validateForm(values) {
 
   if (!String(values.password || "").trim()) {
     errors.password = "Vui lòng nhập mật khẩu";
-  } else if (String(values.password).length < 6) {
-    errors.password = "Mật khẩu phải có ít nhất 6 ký tự";
   }
 
   return errors;

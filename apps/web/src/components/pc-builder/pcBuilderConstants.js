@@ -9,7 +9,8 @@ export const COMPONENT_SECTIONS = [
   { componentType: "storage_2", label: "Ổ phụ (SSD 2 / HDD)", categoryName: "SSD", categoryKeywords: ["SSD", "STORAGE", "HDD", "Ổ CỨNG", "Ổ SSD", "M.2", "NVME"], icon: "💽", optional: true },
   { componentType: "psu",       label: "PSU",          categoryName: "PSU",       categoryKeywords: ["PSU", "NGUỒN", "POWER SUPPLY"], icon: "⚡" },
   { componentType: "case",      label: "Case",         categoryName: "CASE",      categoryKeywords: ["CASE", "VỎ CASE", "VỎ MÁY TÍNH"], icon: "📦" },
-  { componentType: "cooling",   label: "Cooling",      categoryName: "COOLING",   categoryKeywords: ["COOLING", "TẢN NHIỆT", "QUẠT", "AIO"], icon: "❄️" }
+  { componentType: "cooling",   label: "Cooling",      categoryName: "COOLING",   categoryKeywords: ["COOLING", "TẢN NHIỆT", "QUẠT", "AIO"], icon: "❄️" },
+  { componentType: "monitor",   label: "Màn hình (Tùy chọn)", categoryName: "MONITOR", categoryKeywords: ["MONITOR", "MÀN HÌNH", "SCREEN", "DISPLAY"], icon: "🖥️", optional: true }
 ];
 
 export const PRESET_BUILDS = [

@@ -25,6 +25,101 @@ const COMPONENT_LABELS = {
   cooling: "Tản nhiệt (Cooling)"
 };
 
+function FormattedAuditReport({ text }) {
+  if (!text) return null;
+  const cleanText = text
+    .replace(/```json[\s\S]*?```/g, "")
+    .replace(/```json[\s\S]*$/g, "")
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/```[\s\S]*$/g, "")
+    .trim();
+  const lines = cleanText.split("\n");
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+      {lines.map((line, lIdx) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={lIdx} style={{ height: "4px" }} />;
+
+        // Nhận diện và làm sạch ký tự #
+        const headingMatch = trimmed.match(/^(#{1,6})\s*(.*)/);
+        const isBullet = !headingMatch && !/^\*{2}/.test(trimmed) && /^([-*]\s+|•\s*)/.test(trimmed);
+        const rawContent = headingMatch 
+          ? headingMatch[2] 
+          : isBullet 
+          ? trimmed.replace(/^([-*]\s+|•\s*)/, "") 
+          : trimmed;
+
+        const isSectionHeader = !headingMatch && !isBullet && (/^\*{2}\s*\d+\..*\*{2}$/.test(rawContent) || /^\d+\.\s+[A-ZĐ].*:?$/.test(rawContent));
+
+        // Xử lý in đậm **text**
+        const parts = [];
+        const boldRegex = /\*\*(.*?)\*\*/g;
+        let lastIndex = 0;
+        let match;
+
+        while ((match = boldRegex.exec(rawContent)) !== null) {
+          if (match.index > lastIndex) {
+            parts.push(rawContent.substring(lastIndex, match.index));
+          }
+          parts.push(
+            <strong key={match.index} style={{ color: "#0f172a", fontWeight: 700 }}>
+              {match[1]}
+            </strong>
+          );
+          lastIndex = boldRegex.lastIndex;
+        }
+        if (lastIndex < rawContent.length) {
+          const remaining = rawContent.substring(lastIndex);
+          parts.push(remaining.replace(/^\*\*/, "").replace(/\*\*$/, ""));
+        }
+
+        const content = parts.length > 0 ? parts : rawContent;
+
+        if (isSectionHeader) {
+          return (
+            <div key={lIdx} style={{ marginTop: "14px", marginBottom: "4px", display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ width: "4px", height: "16px", background: "#d97706", borderRadius: "2px", display: "inline-block" }} />
+              <h4 style={{ margin: 0, fontSize: "14px", fontWeight: 800, color: "#92400e" }}>
+                {content}
+              </h4>
+            </div>
+          );
+        }
+
+        if (headingMatch) {
+          const level = headingMatch[1].length;
+          return (
+            <div key={lIdx} style={{ marginTop: level <= 2 ? "12px" : "8px", marginBottom: "4px", display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ width: "4px", height: level <= 2 ? "18px" : "14px", background: level <= 2 ? "#d97706" : "#2563eb", borderRadius: "2px" }} />
+              <h4 style={{ margin: 0, fontSize: level <= 2 ? "15px" : "13.5px", fontWeight: 800, color: "#0f172a" }}>
+                {content}
+              </h4>
+            </div>
+          );
+        }
+
+        if (isBullet) {
+          return (
+            <div key={lIdx} style={{ display: "flex", alignItems: "flex-start", gap: "8px", paddingLeft: "6px" }}>
+              <span style={{ color: "#2563eb", fontSize: "14px", lineHeight: "1.4" }}>•</span>
+              <span style={{ flex: 1, fontSize: "13px", color: "#334155", lineHeight: "1.6" }}>
+                {content}
+              </span>
+            </div>
+          );
+        }
+
+        return (
+          <p key={lIdx} style={{ margin: 0, fontSize: "13px", color: "#334155", lineHeight: "1.65" }}>
+            {content}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 export function AiBuildAuditModal({
   isOpen,
   onClose,
@@ -284,7 +379,7 @@ export function AiBuildAuditModal({
                     border: "1px solid #334155"
                   }}
                 >
-                  Strict Auditor • Gemini 3.5 Flash
+                  Hệ Thống Thẩm Định • Expert XAI
                 </span>
               </div>
               <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "#94a3b8" }}>
@@ -478,7 +573,7 @@ export function AiBuildAuditModal({
                 >
                   <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⚙️</span>
                   <span>
-                    <strong>AI đang trực tiếp phân tích từng thông số phần cứng...</strong> Phản hồi đang được streaming real-time từ Google Gemini.
+                    <strong>Đang phân tích từng thông số phần cứng...</strong> Hệ thống đang thẩm định và bóc tách dữ liệu theo thời gian thực.
                   </span>
                 </div>
               )}
@@ -699,17 +794,8 @@ export function AiBuildAuditModal({
                   </h4>
                 </div>
 
-                <div
-                  style={{
-                    fontSize: "13.5px",
-                    lineHeight: "1.7",
-                    color: "#334155",
-                    whiteSpace: "pre-wrap",
-                    fontFamily: "inherit"
-                  }}
-                >
-                  {/* Remove JSON code block for clean reading */}
-                  {streamedReport.replace(/```json[\s\S]*?```/g, "").trim() || "Đang tải biên bản giám định..."}
+                <div>
+                  <FormattedAuditReport text={streamedReport || "Đang tải biên bản giám định..."} />
                 </div>
               </div>
             </div>
@@ -803,8 +889,12 @@ export function AiBuildAuditModal({
                           whiteSpace: "pre-wrap"
                         }}
                       >
-                        {/* Remove JSON code block from chat display */}
-                        {msg.content.replace(/```json[\s\S]*?```/g, "").trim() || (isChatStreaming ? "..." : "")}
+                        {/* Formatted chat display without stray # */}
+                        {isUser ? (
+                          msg.content
+                        ) : (
+                          <FormattedAuditReport text={msg.content || (isChatStreaming ? "..." : "")} />
+                        )}
 
                         {/* REPLACEMENT CARDS IN CHAT */}
                         {msg.replacements && msg.replacements.length > 0 && (

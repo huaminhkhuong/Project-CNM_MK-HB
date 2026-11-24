@@ -17,6 +17,9 @@ export function authenticate(req: Request, _res: Response, next: NextFunction) {
 
   try {
     const payload = jwt.verify(token, env.jwtAccessSecret) as AuthTokenPayload;
+    if (!payload.id && payload.userId) {
+      payload.id = payload.userId;
+    }
     req.user = payload;
     return next();
   } catch (_error) {
@@ -65,6 +68,9 @@ export function optionalAuthenticate(req: Request, _res: Response, next: NextFun
   const token = authHeader.split(" ")[1];
   try {
     const payload = jwt.verify(token, env.jwtAccessSecret) as AuthTokenPayload;
+    if (!payload.id && payload.userId) {
+      payload.id = payload.userId;
+    }
     req.user = payload;
   } catch (_error) {
     // Non-blocking: continue as guest if token is invalid or expired
@@ -119,3 +125,4 @@ export function requirePermission(permission: Permission | string) {
 }
 
 export { ROLES };
+export { normalizeRole, expandRole, roleMatches, hasAnyRole } from "../constants/roles";

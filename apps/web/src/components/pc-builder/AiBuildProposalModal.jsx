@@ -27,27 +27,54 @@ const COMPONENT_LABELS = {
 function FormattedAiAdvice({ text, isStreaming = false }) {
   if (!text) return null;
 
-  // Loại bỏ các khối json codeblock nếu AI xuất ra ở cuối để tránh làm bẩn UI
-  const cleanText = text.replace(/```json[\s\S]*?```/g, "").trim();
+  // Loại bỏ các khối json codeblock (cả khối đã đóng và khối đang streaming dở dang)
+  const cleanText = text
+    .replace(/```json[\s\S]*?```/g, "")
+    .replace(/```json[\s\S]*$/g, "")
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/```[\s\S]*$/g, "")
+    .trim();
   const lines = cleanText.split("\n");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
       {lines.map((line, lIdx) => {
-        const trimmed = line.trim();
+        // Nhận diện heading trước khi loại bỏ ký tự #
+        const headingMatch = line.match(/^(#{1,6})\s*(.*)$/);
+        let trimmed = (headingMatch ? headingMatch[2] : line).replace(/#{1,6}\s*/g, "").trim();
         if (!trimmed) return <div key={lIdx} style={{ height: "4px" }} />;
 
-        const isBullet = /^[-*•]\s*/.test(trimmed);
-        const remaining = trimmed.replace(/^[-*•]\s*/, "");
+        // Chuẩn hóa loại bỏ tiền tố pipe | nếu có
+        trimmed = trimmed.replace(/^\|\s*/, "");
 
+        // Kiểm tra xem có phải Section Header (kể cả có tiền tố bullet • hoặc dấu sao *1. ...)
+        const sectionHeaderMatch = trimmed.match(/^(?:•\s*|\*\s*|\-\s*)?\*?\*?\s*(\d+\.\s+[A-ZĐ\s\(\)\/\-]+)\*?\*?:?$/);
+        const isSectionHeader = Boolean(sectionHeaderMatch);
+
+        let rawContent = "";
+        let isBullet = false;
+
+        if (isSectionHeader) {
+          rawContent = sectionHeaderMatch[1].replace(/^\*+/, "").replace(/\*+$/, "").trim();
+        } else if (headingMatch) {
+          rawContent = headingMatch[2];
+        } else {
+          isBullet = !/^\*{2}/.test(trimmed) && /^([-*]\s+|•\s*)/.test(trimmed);
+          rawContent = isBullet ? trimmed.replace(/^([-*]\s+|•\s*)/, "") : trimmed;
+        }
+
+        // Làm sạch asterisks mồ côi (ví dụ `*1.` hoặc `**` ở cuối)
+        rawContent = rawContent.replace(/^\*([^*])/, "$1").replace(/([^*])\*$/, "$1");
+
+        // Xử lý in đậm **text**
         const parts = [];
         const boldRegex = /\*\*(.*?)\*\*/g;
         let lastIndex = 0;
         let match;
 
-        while ((match = boldRegex.exec(remaining)) !== null) {
+        while ((match = boldRegex.exec(rawContent)) !== null) {
           if (match.index > lastIndex) {
-            parts.push(remaining.substring(lastIndex, match.index));
+            parts.push(rawContent.substring(lastIndex, match.index));
           }
           parts.push(
             <strong key={match.index} style={{ color: "#0f172a", fontWeight: 700 }}>
@@ -56,12 +83,50 @@ function FormattedAiAdvice({ text, isStreaming = false }) {
           );
           lastIndex = boldRegex.lastIndex;
         }
-        if (lastIndex < remaining.length) {
-          parts.push(remaining.substring(lastIndex));
+        if (lastIndex < rawContent.length) {
+          const remaining = rawContent.substring(lastIndex);
+          // Triệt tiêu ký tự ** sót lại nếu đang streaming dở dang hoặc lỗi cú pháp
+          parts.push(remaining.replace(/^\*+/, "").replace(/\*+$/, ""));
         }
 
-        const content = parts.length > 0 ? parts : remaining;
+        const content = parts.length > 0 ? parts : rawContent;
 
+        // Render Section Header đẹp mắt
+        if (isSectionHeader) {
+          return (
+            <div key={lIdx} style={{ marginTop: "14px", marginBottom: "4px", display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ width: "4px", height: "16px", background: "#2563eb", borderRadius: "2px", display: "inline-block" }} />
+              <h4 style={{ margin: 0, fontSize: "14px", fontWeight: 800, color: "#1e3a8a" }}>
+                {content}
+              </h4>
+            </div>
+          );
+        }
+
+        // Render Heading đẹp mắt không dính ký tự #
+        if (headingMatch) {
+          const level = headingMatch[1].length;
+          if (level <= 2) {
+            return (
+              <div key={lIdx} style={{ marginTop: "12px", marginBottom: "4px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ width: "4px", height: "18px", background: "#2563eb", borderRadius: "2px", display: "inline-block" }} />
+                <h4 style={{ margin: 0, fontSize: "14.5px", fontWeight: 800, color: "#0f172a" }}>
+                  {content}
+                </h4>
+              </div>
+            );
+          } else {
+            return (
+              <div key={lIdx} style={{ marginTop: "8px", marginBottom: "2px" }}>
+                <h5 style={{ margin: 0, fontSize: "13.5px", fontWeight: 700, color: "#1e40af" }}>
+                  {content}
+                </h5>
+              </div>
+            );
+          }
+        }
+
+        // Render Bullet Point
         if (isBullet) {
           return (
             <div
@@ -131,7 +196,7 @@ export default function AiBuildProposalModal({
     resolution = "1080p",
     engineType = "ai",
     aiAdvice = "",
-    provider = "gemini-2.5-flash",
+    provider = "PC Mall AI Engine",
     dynamicBottleneck = null,
     ramArchitecture = null,
     candidates = {}
@@ -286,7 +351,7 @@ export default function AiBuildProposalModal({
                   color: engineType === "ai" ? "#1e40af" : "#334155"
                 }}
               >
-                {engineType === "ai" ? `Engine: ${provider}` : "Heuristic Rule Engine"}
+                {engineType === "ai" ? "Hệ Thống Đề Xuất Thông Minh" : "Hệ Chuyên Gia Tri Thức"}
               </span>
             </div>
             <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>

@@ -290,7 +290,7 @@ export const getMyOrders = asyncHandler(async (req: Request, res: Response) => {
     throw new AppError("Unauthorized", 401);
   }
 
-  const orders = await getOrdersByUser(req.user.userId);
+  const orders = await getOrdersByUser(String(req.user.userId));
 
   res.status(200).json({
     success: true,
@@ -494,7 +494,7 @@ export const createMomoUrl = asyncHandler(async (req: Request, res: Response) =>
       success: true,
       data: { paymentUrl: payUrl, requestId, provider: "MOMO" }
     });
-  } catch (error) {
+  } catch (error: any) {
     // Fallback to Mock Payment Mode if MoMo sandbox is unreachable
     const frontendUrl = env.frontendUrl || process.env.FRONTEND_URL || "http://localhost:5173";
     const mockUrl = `${frontendUrl}/payment/mock?orderId=${order.id}&amount=${amount}&provider=MOMO`;
@@ -730,7 +730,7 @@ export const vnpayIpn = asyncHandler(async (req: Request, res: Response) => {
           });
           sendAsync({ to: customer.email, subject, html });
         }
-      } catch (e) {
+      } catch (e: any) {
         console.warn("[VNPay IPN Email Error]", (e as Error).message);
       }
     }
@@ -793,7 +793,7 @@ export const momoIpn = asyncHandler(async (req: Request, res: Response) => {
           });
           sendAsync({ to: customer.email, subject, html });
         }
-      } catch (e) {
+      } catch (e: any) {
         console.warn("[MoMo IPN Email Error]", (e as Error).message);
       }
     }

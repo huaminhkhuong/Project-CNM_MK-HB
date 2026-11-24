@@ -134,6 +134,7 @@ export function AppRouter() {
         { index: true, element: <Navigate to={routeConfig.admin.dashboard} replace /> },
         { path: routeConfig.admin.dashboard.replace(/^\/admin\//, ""), element: <AdminDashboardPage /> },
         { path: routeConfig.admin.aiConfig.replace(/^\/admin\//, ""), element: <AdminAiConfigPage /> },
+        { path: "ai-documents", element: <AdminAiConfigPage initialTab="rag" /> },
         { path: routeConfig.admin.system.replace(/^\/admin\//, ""), element: <AdminSystemPage /> },
         { path: routeConfig.admin.products.replace(/^\/admin\//, ""), element: <AdminProductsPage /> },
         { path: routeConfig.admin.attributes.replace(/^\/admin\//, ""), element: <AdminAttributesPage /> },

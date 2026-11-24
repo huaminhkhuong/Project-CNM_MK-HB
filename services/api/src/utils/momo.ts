@@ -80,7 +80,7 @@ export async function generateMomoUrl(
     }
 
     throw new Error(response.data?.message || `MoMo Gateway Error (Code: ${response.data?.resultCode})`);
-  } catch (error) {
+  } catch (error: any) {
     if (axios.isAxiosError(error) && error.response) {
       console.error("[MoMo Gateway Error]", error.response.data);
       throw new Error(`MoMo response: ${error.response.data?.message || error.message}`);

@@ -12,6 +12,7 @@ COPY packages/shared/package.json packages/shared/package.json
 RUN npm ci --workspace services/api --include-workspace-root=false
 
 COPY services/api ./services/api
+COPY data/rules.json ./data/rules.json
 
 RUN npm run prisma:generate -w services/api
 

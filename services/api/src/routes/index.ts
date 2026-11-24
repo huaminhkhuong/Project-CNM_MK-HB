@@ -14,20 +14,13 @@ import { chatRouter } from "../modules/chat/chat.route";
 import { couponsRouter } from "../modules/coupons/coupons.route";
 import { notificationsRouter } from "../modules/notifications/notifications.route";
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const aiRouter = require("../modules/ai/ai.route");
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const productsRouter = require("../modules/products/products.route");
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const adminRouter = require("../modules/admin/admin.route");
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const staffRouter = require("../modules/staff/staff.route");
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const shipmentsRouter = require("../modules/shipments/shipments.route");
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const paymentsRouter = require("../modules/payments/payments.route");
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const compatibilityRouter = require("../modules/compatibility/compatibility.route");
+import aiRouter from "../modules/ai/ai.route";
+import productsRouter from "../modules/products/products.route";
+import adminRouter from "../modules/admin/admin.route";
+import staffRouter from "../modules/staff/staff.route";
+import shipmentsRouter from "../modules/shipments/shipments.route";
+import paymentsRouter from "../modules/payments/payments.route";
+import compatibilityRouter from "../modules/compatibility/compatibility.route";
 
 import { authRateLimiter, aiRateLimiter, generalApiLimiter } from "../middlewares/rate-limiter.middleware";
 
@@ -47,7 +40,7 @@ apiRouter.get("/health", async (_req, res) => {
   });
 });
 
-apiRouter.use("/auth", authRateLimiter, authRouter);
+apiRouter.use("/auth", authRouter);
 apiRouter.use("/users", usersRouter);
 apiRouter.use("/admin", adminRouter);
 apiRouter.use("/staff", staffRouter);
@@ -61,7 +54,7 @@ apiRouter.use("/pc-builder", pcBuilderRouter);
 apiRouter.use("/compatibility", compatibilityRouter);
 apiRouter.use("/tickets", ticketsRouter);
 apiRouter.use("/ai-advisor", aiRateLimiter, aiAdvisorRouter);
-apiRouter.use("/ai", aiRateLimiter, aiRouter);
+apiRouter.use("/ai", aiRouter);
 apiRouter.use("/warranties", warrantiesRouter);
 apiRouter.use("/chat", aiRateLimiter, chatRouter);
 apiRouter.use("/coupons", couponsRouter);

@@ -29,7 +29,7 @@ export function createRateLimiter(options: RateLimitOptions) {
   }, 5 * 60 * 1000).unref();
 
   return (req: Request, res: Response, next: NextFunction) => {
-    if (process.env.NODE_ENV === "test") {
+    if (process.env.NODE_ENV === "test" || process.env.NODE_ENV === "development") {
       return next();
     }
     const ip = req.ip || req.socket.remoteAddress || "127.0.0.1";

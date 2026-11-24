@@ -255,10 +255,6 @@ export function RegisterPage() {
             </div>
           ) : null}
 
-          <button type="button" onClick={() => setShowMockGoogle(true)} disabled={isSubmitting} style={{ width: "100%", height: 52, borderRadius: 16, border: "1px solid #dbe4ef", background: "#fff", fontWeight: 900, cursor: "pointer", marginBottom: 16 }}>
-            Tiếp tục với Google <span style={{ color: "#64748b" }}>(DEMO)</span>
-          </button>
-
           <form onSubmit={handleSubmit} style={{ display: "grid", gap: 14 }}>
             <div className="register-field">
               <label>Họ và tên</label>
