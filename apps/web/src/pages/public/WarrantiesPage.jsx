@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import axios from "axios";
 
@@ -12,7 +12,7 @@ import {
   submitWarrantyRequest
 } from "../../services/warranty.service";
 
-const API_ORIGIN = (import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api").replace(/\/api\/?$/, "");
+const API_ORIGIN = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/api\/?$/, "");
 
 const WARRANTY_META = {
   ACTIVE: { label: "Còn bảo hành", tone: "#047857", bg: "#ecfdf5", border: "#bbf7d0" },
@@ -42,7 +42,7 @@ function getErrorMessage(error, fallbackMessage) {
 }
 
 function formatDate(value) {
-  return value ? new Date(value).toLocaleDateString("vi-VN") : "â€”";
+  return value ? new Date(value).toLocaleDateString("vi-VN") : "—";
 }
 
 function isWarrantyExpired(warranty) {
@@ -178,7 +178,7 @@ function ProductCard({ warranty, onRequest, onTrack, isSelected = false }) {
           <div>
             <h3>{warranty.item?.productName || "Sản phẩm"}</h3>
             <p>
-              Serial: <strong>{warranty.serialNumber || warranty.item?.sku || "â€”"}</strong>
+              Serial: <strong>{warranty.serialNumber || warranty.item?.sku || "—"}</strong>
             </p>
           </div>
           <StatusBadge status={currentStatus} />
@@ -195,7 +195,7 @@ function ProductCard({ warranty, onRequest, onTrack, isSelected = false }) {
           </div>
           <div>
               <span>Đơn hàng</span>
-            <strong>{warranty.orderNumber || `#${warranty.orderId || "â€”"}`}</strong>
+            <strong>{warranty.orderNumber || `#${warranty.orderId || "—"}`}</strong>
           </div>
           <div>
               <span>Mã bảo hành</span>
@@ -407,21 +407,34 @@ export function WarrantiesPage() {
     });
   }
 
-  async function handleLookup(event) {
-    event.preventDefault();
-    if (!lookupCode.trim()) return;
+  async function runLookupQuery(codeToLookup) {
+    const cleanCode = String(codeToLookup || "").trim();
+    if (!cleanCode) return;
 
     try {
       setLookupLoading(true);
       setLookupError("");
       setLookupResult(null);
-      const response = await lookupWarranty(lookupCode.trim());
+      const response = await lookupWarranty(cleanCode);
       setLookupResult(response.data);
     } catch (error) {
       setLookupError(getErrorMessage(error, "Không tìm thấy thông tin bảo hành. Vui lòng kiểm tra mã đơn hàng, serial hoặc số điện thoại."));
     } finally {
       setLookupLoading(false);
     }
+  }
+
+  useEffect(() => {
+    const queryLookup = searchParams.get("lookup");
+    if (queryLookup && queryLookup.trim()) {
+      setLookupCode(queryLookup.trim());
+      runLookupQuery(queryLookup.trim());
+    }
+  }, [searchParams]);
+
+  async function handleLookup(event) {
+    event.preventDefault();
+    await runLookupQuery(lookupCode);
   }
 
   async function handleSubmitRequest(event) {

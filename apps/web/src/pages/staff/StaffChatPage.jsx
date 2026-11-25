@@ -12,6 +12,7 @@ import {
   getChatSession,
   sendChatMessage
 } from "../../services/chat.service";
+import { getProducts } from "../../services/catalog.service";
 
 const QUICK_REPLIES = [
   "Chào bạn, PC Mall rất vui được hỗ trợ bạn.",
@@ -105,6 +106,8 @@ export default function StaffChatPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [productTitle, setProductTitle] = useState("");
   const [productUrl, setProductUrl] = useState("");
+  const [productSearchQuery, setProductSearchQuery] = useState("");
+  const [productSearchResults, setProductSearchResults] = useState([]);
   const [productSuggestionError, setProductSuggestionError] = useState("");
   const [customerNote, setCustomerNote] = useState("");
   const [loading, setLoading] = useState(true);
@@ -159,30 +162,60 @@ export default function StaffChatPage() {
     loadQueue();
   }, [loadQueue]);
 
-  // 🔌 Socket.io: Đăng ký nhận thông báo real-time cho nhân viên bán hàng
+  // 🔌 Socket.io: Đăng ký nhận thông báo real-time cho nhân viên bán hàng & tham gia routing pool
   useEffect(() => {
-    // Tham gia room hàng đợi nhân viên
-    joinRoom("join_staff_queue");
+    // Tham gia room hàng đợi nhân viên kèm thông tin danh tính nhân viên
+    joinRoom("join_staff_queue", {
+      staffId: authState?.user?.id,
+      staffName: staffName,
+      role: authState?.user?.role || "SALES_STAFF"
+    });
 
-    // Khi có session mới từ khách hàng
-    on("queue:new_session", (newSession) => {
+    const offAssigned = on("staff:session_assigned", (assignedSession) => {
       setSessions((prev) => {
-        // Tránh duplicate
+        const filtered = prev.filter((s) => s.sessionId !== assignedSession.sessionId && s.id !== assignedSession.id);
+        return [assignedSession, ...filtered];
+      });
+      // Nếu chưa chọn phiên nào hoặc đang rảnh, tự động mở phiên được giao
+      setActiveSession((current) => current ? current : assignedSession);
+      setSuccessMessage(`Bạn vừa được hệ thống tự động phân phối phiên tư vấn của ${assignedSession.customerName || "khách hàng"}!`);
+    });
+
+    const offNewSession = on("queue:new_session", (newSession) => {
+      setSessions((prev) => {
         const exists = prev.some((s) => s.sessionId === newSession.sessionId || s.id === newSession.id);
         if (exists) return prev;
         return [newSession, ...prev];
       });
     });
 
-    // Khi queue cập nhật (có tin nhắn mới, status thay đổi)
-    on("queue:updated", ({ sessionId, status }) => {
+    const offQueueUpdated = on("queue:updated", ({ sessionId, status, lastMessage, updatedAt, staffName: nextStaffName }) => {
+      const normalized = String(status || "").toLowerCase();
+      if (normalized === "closed" || normalized === "resolved") {
+        setSessions((prev) => prev.filter((s) => s.sessionId !== sessionId));
+        return;
+      }
       setSessions((prev) =>
         prev.map((s) =>
-          s.sessionId === sessionId ? { ...s, status: status || s.status } : s
+          s.sessionId === sessionId
+            ? {
+                ...s,
+                status: status || s.status,
+                lastMessage: lastMessage || s.lastMessage,
+                updatedAt: updatedAt || s.updatedAt,
+                staffName: nextStaffName || s.staffName
+              }
+            : s
         )
       );
     });
-  }, [joinRoom, on]);
+
+    return () => {
+      offAssigned?.();
+      offNewSession?.();
+      offQueueUpdated?.();
+    };
+  }, [joinRoom, on, authState?.user?.id, authState?.user?.role, staffName]);
 
   // 🔌 Socket.io: Lắng nghe tin nhắn real-time trong session đang xem
   useEffect(() => {
@@ -191,8 +224,7 @@ export default function StaffChatPage() {
     // Tham gia room của session này
     joinRoom("join_chat", activeSession.sessionId);
 
-    // Nhận tin nhắn mới ngay tức thì
-    on("chat:new_message", (message) => {
+    const offNewMessage = on("chat:new_message", (message) => {
       setActiveSession((prev) => {
         if (!prev) return prev;
         const alreadyExists = prev.messages?.some(
@@ -206,21 +238,21 @@ export default function StaffChatPage() {
       });
     });
 
-    // Khi session được cập nhật (nhân viên khác nhận, status thay đổi)
-    on("chat:session_updated", (updatedSession) => {
+    const offSessionUpdated = on("chat:session_updated", (updatedSession) => {
       setActiveSession(updatedSession);
     });
 
-    // Khi session bị đóng
-    on("chat:session_closed", () => {
+    const offSessionClosed = on("chat:session_closed", () => {
       setActiveSession((prev) =>
         prev ? { ...prev, status: "closed" } : prev
       );
-      setSuccessMessage("Phên tư vấn đã được kết thúc.");
+      setSuccessMessage("Phiên tư vấn đã được kết thúc.");
     });
 
-    // Cleanup: rời room khi đổi session
     return () => {
+      offNewMessage?.();
+      offSessionUpdated?.();
+      offSessionClosed?.();
       leaveRoom("leave_chat", activeSession.sessionId);
     };
   }, [activeSession?.sessionId, joinRoom, leaveRoom, on]);
@@ -353,6 +385,24 @@ export default function StaffChatPage() {
     }
   }
 
+  useEffect(() => {
+    const q = productSearchQuery.trim();
+    if (q.length < 2) {
+      setProductSearchResults([]);
+      return undefined;
+    }
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await getProducts({ keyword: q, limit: 5 });
+        const items = res?.data?.items || res?.items || (Array.isArray(res?.data) ? res.data : []);
+        setProductSearchResults(items.slice(0, 5));
+      } catch {
+        setProductSearchResults([]);
+      }
+    }, 260);
+    return () => window.clearTimeout(timer);
+  }, [productSearchQuery]);
+
   async function handleShareBuild() {
     const refreshedBuild = await refreshCurrentBuild?.();
     const buildToSend = refreshedBuild?.components ? refreshedBuild : activeBuild;
@@ -361,7 +411,14 @@ export default function StaffChatPage() {
       setErrorMessage("Chưa có linh kiện trong cấu hình tư vấn. Mở PC Builder để chọn.");
       return;
     }
-    handleSendMessage(buildToSend);
+    const computedTotal = Object.values(components).reduce(
+      (sum, item) => sum + Number(item?.variant?.price || item?.price || 0) * Number(item?.quantity || 1),
+      0
+    );
+    handleSendMessage({
+      ...buildToSend,
+      totalPrice: Number(buildToSend?.totalPrice || totalPrice || computedTotal || 0)
+    });
   }
 
   return (
@@ -739,7 +796,52 @@ export default function StaffChatPage() {
           background: #eff6ff;
           color: #334155;
           font-weight: 600;
+          white-space: pre-wrap;
           animation: salesChatFadeUp 180ms ease;
+        }
+        .sales-chat-briefing-card {
+          justify-self: center;
+          max-width: 95%;
+          width: 100%;
+          border-radius: 18px;
+          background: #ffffff;
+          border: 1.5px solid #93c5fd;
+          box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.12), 0 8px 10px -6px rgba(59, 130, 246, 0.08);
+          overflow: hidden;
+          margin-bottom: 8px;
+          animation: salesChatFadeUp 180ms ease;
+        }
+        .sales-chat-briefing-header {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 12px 18px;
+          background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+          color: #ffffff;
+        }
+        .sales-chat-briefing-badge {
+          display: inline-block;
+          padding: 4px 10px;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.22);
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: 0.5px;
+          text-transform: uppercase;
+        }
+        .sales-chat-briefing-title {
+          font-size: 13px;
+          font-weight: 800;
+          letter-spacing: 0.3px;
+        }
+        .sales-chat-briefing-content {
+          padding: 16px 20px;
+          font-size: 13.5px;
+          line-height: 1.65;
+          color: #1e293b;
+          white-space: pre-wrap;
+          font-family: inherit;
+          background: #f8fafc;
         }
         .sales-chat-row {
           display: flex;
@@ -1132,6 +1234,21 @@ export default function StaffChatPage() {
               <div ref={messagesContainerRef} className="sales-chat-messages">
                 {(activeSession.messages || []).map((m) => {
                   if (m.sender === "system") {
+                    const isBriefing = m.buildData?.isHandoffSummary || String(m.text || "").includes("TÓM TẮT NGỮ CẢNH TƯ VẤN (AI ➔ NHÂN VIÊN BÁN HÀNG)");
+                    if (isBriefing) {
+                      return (
+                        <div key={m.id} className="sales-chat-briefing-card">
+                          <div className="sales-chat-briefing-header">
+                            <span className="sales-chat-briefing-badge">🤖 AI ➔ HUMAN HANDOFF</span>
+                            <span className="sales-chat-briefing-title">HỒ SƠ TÓM TẮT NGỮ CẢNH TƯ VẤN TỪ AI CHATBOT</span>
+                          </div>
+                          <div className="sales-chat-briefing-content">
+                            {m.text}
+                          </div>
+                        </div>
+                      );
+                    }
+
                     return (
                       <div key={m.id} className="sales-chat-system">
                         {m.text}
@@ -1149,8 +1266,10 @@ export default function StaffChatPage() {
                             <strong>Đề xuất cấu hình</strong>
                             {Object.entries(m.buildData.components).map(([type, item]) => (
                               <div key={type} className="sales-chat-build-line">
-                                <span>{type.toUpperCase()}</span>
-                                <span>{Number(item?.variant?.price || item?.price || 0).toLocaleString("vi-VN")} đ</span>
+                                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                                  <strong>{type.toUpperCase()}:</strong> {item?.name || item?.productName || item?.sku || "Linh kiện"}
+                                </span>
+                                <span style={{ whiteSpace: "nowrap" }}>{Number(item?.variant?.price || item?.price || 0).toLocaleString("vi-VN")} đ</span>
                               </div>
                             ))}
                             <div className="sales-chat-build-total">
@@ -1218,8 +1337,63 @@ export default function StaffChatPage() {
 
           <section className="sales-chat-tool-card">
             <h3>Gửi sản phẩm đề xuất</h3>
-            <p>Nhập tên sản phẩm hoặc link cần gửi cho khách ngay trong cuộc trò chuyện.</p>
+            <p>Tìm nhanh linh kiện trong kho hoặc nhập tên/link sản phẩm để gửi ngay cho khách.</p>
             <div className="sales-chat-tool-actions">
+              <div style={{ position: "relative" }}>
+                <input
+                  className="sales-chat-input"
+                  value={productSearchQuery}
+                  onChange={(event) => setProductSearchQuery(event.target.value)}
+                  placeholder="🔍 Tìm nhanh sản phẩm trong kho (VD: RTX 4060, i5)..."
+                />
+                {productSearchResults.length > 0 ? (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      border: "1px solid #bfdbfe",
+                      borderRadius: 14,
+                      background: "#fff",
+                      boxShadow: "0 12px 24px rgba(15, 23, 42, 0.12)",
+                      maxHeight: 220,
+                      overflowY: "auto",
+                      display: "grid"
+                    }}
+                  >
+                    {productSearchResults.map((prod) => {
+                      const price = Number(prod.price || prod.min_price || 0);
+                      const slugOrId = prod.slug || prod.id;
+                      return (
+                        <button
+                          key={prod.id || slugOrId}
+                          type="button"
+                          onClick={() => {
+                            setProductTitle(`${prod.name}${price > 0 ? ` — ${price.toLocaleString("vi-VN")}đ` : ""}`);
+                            setProductUrl(`/products/${slugOrId}`);
+                            setProductSearchQuery("");
+                            setProductSearchResults([]);
+                            setProductSuggestionError("");
+                          }}
+                          style={{
+                            textAlign: "left",
+                            padding: "10px 12px",
+                            border: "none",
+                            borderBottom: "1px solid #f1f5f9",
+                            background: "transparent",
+                            cursor: "pointer",
+                            display: "grid",
+                            gap: 2
+                          }}
+                        >
+                          <strong style={{ fontSize: 13, color: "#0f172a" }}>{prod.name}</strong>
+                          <small style={{ fontSize: 12, color: "#1d4ed8", fontWeight: 700 }}>
+                            {price > 0 ? `${price.toLocaleString("vi-VN")} đ` : "Liên hệ"} · Kho: {prod.stock ?? "Sẵn hàng"}
+                          </small>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
               <input
                 className="sales-chat-input"
                 value={productTitle}

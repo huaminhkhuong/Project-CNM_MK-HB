@@ -39,7 +39,11 @@ const envSchema = z.object({
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().default("gemini-1.5-flash"),
   GROQ_API_KEY: z.string().optional(),
-  OPENAI_API_KEY: z.string().optional()
+  OPENAI_API_KEY: z.string().optional(),
+  // Public/Gateway URLs and timeout
+  BACKEND_URL: z.string().optional(),
+  API_BASE_URL: z.string().optional(),
+  PAYMENT_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(30)
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
@@ -52,7 +56,7 @@ let dbHost = process.env.DB_HOST || "127.0.0.1";
 let dbPort = Number(process.env.DB_PORT || 3306);
 let dbUser = process.env.DB_USER || "root";
 let dbPassword = process.env.DB_PASSWORD || "";
-let dbName = process.env.DB_NAME || "cnm_ecommerce";
+let dbName = process.env.DB_NAME || "cnm_mk_hb";
 
 if (parsedEnv.data.DATABASE_URL) {
   try {
@@ -103,5 +107,9 @@ export const env = {
   llmMaxTokens: parsedEnv.data.LLM_MAX_TOKENS,
   geminiApiKey: parsedEnv.data.GEMINI_API_KEY,
   geminiModel: parsedEnv.data.GEMINI_MODEL,
-  groqApiKey: parsedEnv.data.GROQ_API_KEY
+  groqApiKey: parsedEnv.data.GROQ_API_KEY,
+  openaiApiKey: parsedEnv.data.OPENAI_API_KEY,
+  backendUrl: parsedEnv.data.BACKEND_URL || parsedEnv.data.API_BASE_URL || `http://localhost:${parsedEnv.data.PORT}`,
+  apiBaseUrl: parsedEnv.data.API_BASE_URL || parsedEnv.data.BACKEND_URL || `http://localhost:${parsedEnv.data.PORT}`,
+  paymentTimeoutMinutes: parsedEnv.data.PAYMENT_TIMEOUT_MINUTES
 };

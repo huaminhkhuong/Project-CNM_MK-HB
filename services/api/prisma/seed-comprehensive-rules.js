@@ -18,46 +18,65 @@ async function seedComprehensiveRules() {
   await prisma.compatibilityRule.deleteMany({});
   console.log("🧹 Đã làm sạch các rules cũ trong database.");
 
-  // Helper tìm attribute value ID
-  async function getValId(attrName, valStr) {
-    const attr = await prisma.attribute.findFirst({
-      where: { name: { equals: attrName } }
+  // Helper tìm attribute value ID linh hoạt
+  async function getValId(attrNameOrKeys, valStr) {
+    const names = Array.isArray(attrNameOrKeys) ? attrNameOrKeys : [attrNameOrKeys];
+    for (const name of names) {
+      const attr = await prisma.attribute.findFirst({
+        where: {
+          OR: [
+            { name: { equals: name } },
+            { name: { contains: name } }
+          ]
+        }
+      });
+      if (!attr) continue;
+      const val = await prisma.attributeValue.findFirst({
+        where: {
+          attribute_id: attr.id,
+          OR: [
+            { value: { equals: valStr } },
+            { value: { contains: valStr } }
+          ]
+        }
+      });
+      if (val?.id) return val.id;
+    }
+    // Fallback: tìm theo value trực tiếp nếu có
+    const fallbackVal = await prisma.attributeValue.findFirst({
+      where: { value: { equals: valStr } }
     });
-    if (!attr) return null;
-    const val = await prisma.attributeValue.findFirst({
-      where: { attribute_id: attr.id, value: { equals: valStr } }
-    });
-    return val?.id || null;
+    return fallbackVal?.id || null;
   }
 
   // Lấy trước các ID thuộc tính quan trọng
-  const socket1700 = await getValId("socket", "LGA1700");
-  const socketAM5  = await getValId("socket", "AM5");
-  const socketAM4  = await getValId("socket", "AM4");
-  const socket1200 = await getValId("socket", "LGA1200");
-  const socket1851 = await getValId("socket", "LGA1851");
+  const socket1700 = await getValId(["Socket hỗ trợ", "socket", "Socket"], "LGA1700");
+  const socketAM5  = await getValId(["Socket hỗ trợ", "socket", "Socket"], "AM5");
+  const socketAM4  = await getValId(["Socket hỗ trợ", "socket", "Socket"], "AM4");
+  const socket1200 = await getValId(["Socket hỗ trợ", "socket", "Socket"], "LGA1200");
+  const socket1851 = await getValId(["Socket hỗ trợ", "socket", "Socket"], "LGA1851");
 
-  const ramDDR5    = await getValId("ram_type", "DDR5");
-  const ramDDR4    = await getValId("ram_type", "DDR4");
+  const ramDDR5    = await getValId(["Chuẩn RAM", "ram_type", "RAM"], "DDR5");
+  const ramDDR4    = await getValId(["Chuẩn RAM", "ram_type", "RAM"], "DDR4");
 
-  const formATX    = await getValId("form_factor", "ATX");
-  const formMATX   = await getValId("form_factor", "mATX");
-  const formITX    = await getValId("form_factor", "ITX");
+  const formATX    = await getValId(["Kích thước Form Factor", "form_factor", "Hỗ trợ Mainboard"], "ATX");
+  const formMATX   = (await getValId(["Kích thước Form Factor", "form_factor", "Hỗ trợ Mainboard"], "Micro-ATX")) || (await getValId(["Kích thước Form Factor", "form_factor"], "mATX"));
+  const formITX    = (await getValId(["Kích thước Form Factor", "form_factor", "Hỗ trợ Mainboard"], "Mini-ITX")) || (await getValId(["Kích thước Form Factor", "form_factor"], "ITX"));
 
-  const psu550     = await getValId("psu_wattage", "550W");
-  const psu650     = await getValId("psu_wattage", "650W");
-  const psu750     = await getValId("psu_wattage", "750W");
-  const psu850     = await getValId("psu_wattage", "850W");
+  const psu550     = await getValId(["Công suất nguồn", "psu_wattage", "Nguồn đề xuất (PSU)"], "550W");
+  const psu650     = await getValId(["Công suất nguồn", "psu_wattage", "Nguồn đề xuất (PSU)"], "650W");
+  const psu750     = await getValId(["Công suất nguồn", "psu_wattage", "Nguồn đề xuất (PSU)"], "750W");
+  const psu850     = await getValId(["Công suất nguồn", "psu_wattage", "Nguồn đề xuất (PSU)"], "850W");
 
-  const radSupport240 = await getValId("case_radiator_support", "240mm");
-  const radSupport360 = await getValId("case_radiator_support", "360mm");
-  const radSupport120 = await getValId("case_radiator_support", "120mm");
+  const radSupport240 = await getValId(["Hỗ trợ Tản nước", "case_radiator_support"], "240mm");
+  const radSupport360 = await getValId(["Hỗ trợ Tản nước", "case_radiator_support"], "360mm");
+  const radSupport120 = await getValId(["Hỗ trợ Tản nước", "case_radiator_support"], "120mm");
 
-  const radSize240 = await getValId("radiator_size", "240mm");
-  const radSize360 = await getValId("radiator_size", "360mm");
+  const radSize240 = await getValId(["Kích thước Tản / Radiator", "radiator_size"], "240mm");
+  const radSize360 = await getValId(["Kích thước Tản / Radiator", "radiator_size"], "360mm");
 
-  const coolerMultiSocket = await getValId("socket_support", "LGA1700, AM5, AM4, LGA1200");
-  const coolerModernSocket = await getValId("socket_support", "LGA1700, AM5, AM4");
+  const coolerMultiSocket = await getValId(["Socket hỗ trợ", "socket_support"], "LGA1700, AM5, AM4, LGA1200");
+  const coolerModernSocket = await getValId(["Socket hỗ trợ", "socket_support"], "LGA1700, AM5, AM4");
 
   // Danh mục: 1:CPU, 2:MAINBOARD, 3:RAM, 4:GPU, 5:STORAGE, 6:PSU, 7:CASE, 8:COOLING
   const rules = [
@@ -408,6 +427,50 @@ async function seedComprehensiveRules() {
       operator: "EQ", is_compatible: true,
       attribute_value_1: null, attribute_value_2: null,
       description: "Ổ cứng SSD SATA chuẩn 2.5 inch cắm qua cáp SATA tương thích 100% với cổng SATA 6Gb/s của Mainboard."
+    },
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // NHÓM 8: GPU (4) ↔ CASE (7) — CHIỀU DÀI VẬT LÝ (GPU CLEARANCE)
+    // ══════════════════════════════════════════════════════════════════════════
+    {
+      name: "Chiều dài VGA ↔ Khoảng trống Case (GPU Length <= Case Clearance)",
+      source_category_id: 4, target_category_id: 7,
+      source_attribute_key: "gpu_length", target_attribute_key: "case_gpu_clearance",
+      operator: "LTE", is_compatible: true,
+      attribute_value_1: null, attribute_value_2: null,
+      description: "Card màn hình có chiều dài nằm trong giới hạn cho phép của Vỏ Case, lắp đặt vừa vặn không cấn quạt mặt trước."
+    },
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // NHÓM 9: COOLING (8) ↔ CASE (7) — CHIỀU CAO TẢN KHÍ (COOLER HEIGHT)
+    // ══════════════════════════════════════════════════════════════════════════
+    {
+      name: "Chiều cao Tản khí ↔ Giới hạn Case (Cooler Height <= Case Clearance)",
+      source_category_id: 8, target_category_id: 7,
+      source_attribute_key: "cooler_height", target_attribute_key: "case_cooler_clearance",
+      operator: "LTE", is_compatible: true,
+      attribute_value_1: null, attribute_value_2: null,
+      description: "Chiều cao tháp tản nhiệt khí CPU thấp hơn khoảng trống tối đa của Vỏ Case, đóng được nắp kính hông bình thường."
+    },
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // NHÓM 10: STORAGE (5) ↔ MAINBOARD (2) — CHUẨN KHE M.2 PCIe GEN 4 / GEN 5
+    // ══════════════════════════════════════════════════════════════════════════
+    {
+      name: "SSD M.2 PCIe Gen 5 ↔ Mainboard Khe M.2 Gen 5",
+      source_category_id: 5, target_category_id: 2,
+      source_attribute_key: "pcie_gen", target_attribute_key: "m2_gen5_slots",
+      operator: "GTE", is_compatible: true,
+      attribute_value_1: null, attribute_value_2: null,
+      description: "Ổ cứng SSD PCIe Gen 5 (tốc độ > 10.000 MB/s) hoạt động tối đa băng thông trên khe M.2 Gen 5 của bo mạch chủ."
+    },
+    {
+      name: "SSD M.2 PCIe Gen 4 ↔ Mainboard Khe M.2 Gen 4/5",
+      source_category_id: 5, target_category_id: 2,
+      source_attribute_key: "pcie_gen", target_attribute_key: "m2_gen4_slots",
+      operator: "GTE", is_compatible: true,
+      attribute_value_1: null, attribute_value_2: null,
+      description: "Ổ cứng SSD PCIe Gen 4x4 (tốc độ ~7.000 MB/s) tương thích hoàn hảo với khe M.2 PCIe 4.0/5.0."
     }
   ];
 

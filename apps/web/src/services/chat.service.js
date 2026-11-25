@@ -34,3 +34,9 @@ export async function sendChatMessage(sessionId, payload) {
   const response = await httpClient.post(`/chat/session/${sessionId}/message`, payload);
   return response.data;
 }
+
+export async function handoffChatSession(sessionId, payload = {}) {
+  const response = await httpClient.post(`/chat/session/${sessionId}/handoff`, payload);
+  return response.data;
+}
+

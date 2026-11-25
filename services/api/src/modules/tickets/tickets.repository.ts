@@ -78,7 +78,14 @@ export function getTicketsByReporter(userId: string) {
     where: { user_id: numericUserId },
     include: {
       users_tickets_user_idTousers: { select: { id: true, email: true, full_name: true, Role: { select: { name: true } } } },
-      users_tickets_assigned_to_idTousers: { select: { id: true, email: true, full_name: true, Role: { select: { name: true } } } }
+      users_tickets_assigned_to_idTousers: { select: { id: true, email: true, full_name: true, Role: { select: { name: true } } } },
+      TicketMessage: {
+        where: { visibility: "PUBLIC" },
+        include: {
+          User: { select: { id: true, email: true, full_name: true, Role: { select: { name: true } } } }
+        },
+        orderBy: { created_at: "asc" }
+      }
     },
     orderBy: { created_at: "desc" }
   }).then((tickets: any[]) => tickets.map(normalizeTicket));
@@ -161,6 +168,12 @@ export function listTickets(filters: TicketListFilters = {}) {
         },
         users_tickets_assigned_to_idTousers: {
           select: { id: true, email: true, full_name: true, Role: { select: { name: true } } }
+        },
+        TicketMessage: {
+          include: {
+            User: { select: { id: true, email: true, full_name: true, Role: { select: { name: true } } } }
+          },
+          orderBy: { created_at: "asc" }
         }
       },
       orderBy: { created_at: "desc" }

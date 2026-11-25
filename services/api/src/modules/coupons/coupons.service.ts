@@ -1,89 +1,262 @@
-import { getDbPool } from "../../config/database";
+import { prisma } from "../../config/prisma";
+import { AppError } from "../../errors/app-error";
 
-export async function initCouponsTable() {
-  const pool = getDbPool();
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS coupons (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      code VARCHAR(50) NOT NULL UNIQUE,
-      description VARCHAR(255) NULL,
-      discount_type ENUM('PERCENT', 'FIXED') NOT NULL DEFAULT 'FIXED',
-      discount_value DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
-      min_order_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
-      max_discount_amount DECIMAL(12, 2) NULL,
-      usage_limit INT NULL DEFAULT NULL,
-      used_count INT NOT NULL DEFAULT 0,
-      is_active TINYINT(1) NOT NULL DEFAULT 1,
-      expires_at DATETIME NULL,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await pool.query(`
-    INSERT INTO coupons (code, description, discount_type, discount_value, min_order_amount, max_discount_amount, is_active)
-    VALUES 
-      ('PCMALL50K', 'Giảm 50.000đ cho đơn hàng từ 500.000đ', 'FIXED', 50000, 500000, 50000, 1),
-      ('PCMALL10', 'Giảm 10% tối đa 500.000đ cho đơn hàng từ 2.000.000đ', 'PERCENT', 10, 2000000, 500000, 1),
-      ('VIPBUILD', 'Giảm 1.000.000đ cho bộ máy PC từ 20.000.000đ', 'FIXED', 1000000, 20000000, 1000000, 1)
-    ON DUPLICATE KEY UPDATE description = VALUES(description);
-  `);
+export interface CartItemLike {
+  productId?: number | null;
+  product_id?: number | null;
+  categoryId?: number | null;
+  category_id?: number | null;
+  unitPrice: number;
+  quantity: number;
+  lineTotal?: number;
 }
 
-export async function validateCoupon(code: string, orderAmount: number) {
-  const pool = getDbPool();
-  const normalizedCode = String(code || "").trim().toUpperCase();
-  if (!normalizedCode) {
-    throw new Error("Mã giảm giá không hợp lệ");
-  }
+export interface CouponValidationResult {
+  valid: boolean;
+  message?: string;
+  coupon?: {
+    id: number;
+    code: string;
+    name: string;
+    description: string | null;
+    discountType: string;
+    discountValue: number;
+    maxDiscountAmount: number | null;
+    minOrderValue: number;
+    targetType: string;
+    targetIds: number[] | null;
+    endDate: Date;
+  };
+  discountAmount: number;
+  eligibleAmount: number;
+  finalAmount?: number;
+}
 
-  const [rows]: any = await pool.query(
-    `SELECT * FROM coupons WHERE code = ? AND is_active = 1 LIMIT 1`,
-    [normalizedCode]
-  );
+/**
+ * Lấy danh sách các mã giảm giá đang hoạt động và còn hạn sử dụng
+ */
+export async function listAvailableCoupons(userId?: number | null) {
+  const now = new Date();
 
-  const coupon = rows[0];
-  if (!coupon) {
-    throw new Error("Mã giảm giá không tồn tại hoặc đã hết hạn");
-  }
-
-  if (coupon.expires_at && new Date(coupon.expires_at).getTime() < Date.now()) {
-    throw new Error("Mã giảm giá đã hết thời gian sử dụng");
-  }
-
-  if (coupon.usage_limit && coupon.used_count >= coupon.usage_limit) {
-    throw new Error("Mã giảm giá đã hết lượt sử dụng");
-  }
-
-  const minAmount = Number(coupon.min_order_amount || 0);
-  if (orderAmount < minAmount) {
-    throw new Error(`Đơn hàng tối thiểu phải từ ${minAmount.toLocaleString("vi-VN")}đ để áp dụng mã này`);
-  }
-
-  let discountAmount = 0;
-  if (coupon.discount_type === "PERCENT") {
-    discountAmount = Math.round((orderAmount * Number(coupon.discount_value)) / 100);
-    if (coupon.max_discount_amount && discountAmount > Number(coupon.max_discount_amount)) {
-      discountAmount = Number(coupon.max_discount_amount);
+  const coupons = await prisma.coupon.findMany({
+    where: {
+      is_active: true,
+      start_date: { lte: now },
+      end_date: { gte: now }
+    },
+    orderBy: {
+      discount_value: "desc"
     }
-  } else {
-    discountAmount = Number(coupon.discount_value);
+  });
+
+  const availableCoupons = [];
+
+  for (const coupon of coupons) {
+    // Kiểm tra giới hạn lượt dùng toàn sàn
+    if (coupon.usage_limit !== null && coupon.used_count >= coupon.usage_limit) {
+      continue;
+    }
+
+    let userUsedCount = 0;
+    if (userId) {
+      userUsedCount = await prisma.couponUsage.count({
+        where: {
+          coupon_id: coupon.id,
+          user_id: Number(userId)
+        }
+      });
+
+      if (coupon.usage_limit_per_user !== null && userUsedCount >= coupon.usage_limit_per_user) {
+        continue;
+      }
+    }
+
+    let targetIds: number[] | null = null;
+    if (coupon.target_ids) {
+      try {
+        targetIds = JSON.parse(coupon.target_ids);
+      } catch {
+        targetIds = null;
+      }
+    }
+
+    availableCoupons.push({
+      id: coupon.id,
+      code: coupon.code,
+      name: coupon.name,
+      description: coupon.description,
+      discountType: coupon.discount_type,
+      discountValue: Number(coupon.discount_value),
+      maxDiscountAmount: coupon.max_discount_amount ? Number(coupon.max_discount_amount) : null,
+      minOrderValue: Number(coupon.min_order_value || 0),
+      targetType: coupon.target_type,
+      targetIds,
+      usageLimit: coupon.usage_limit,
+      usedCount: coupon.used_count,
+      usageLimitPerUser: coupon.usage_limit_per_user,
+      userRemainingUses: coupon.usage_limit_per_user ? Math.max(0, coupon.usage_limit_per_user - userUsedCount) : null,
+      startDate: coupon.start_date,
+      endDate: coupon.end_date
+    });
   }
+
+  return availableCoupons;
+}
+
+/**
+ * Kiểm tra tính hợp lệ và tính toán số tiền giảm giá của Coupon
+ */
+export async function validateAndCalculateCoupon(params: {
+  code: string;
+  userId?: number | null;
+  items: CartItemLike[];
+  totalAmount?: number;
+  shippingFee?: number;
+}): Promise<CouponValidationResult> {
+  const { code, userId, items } = params;
+  const cleanCode = String(code || "").trim().toUpperCase();
+
+  if (!cleanCode) {
+    throw new AppError("Mã giảm giá không được để trống", 400);
+  }
+
+  const coupon = await prisma.coupon.findUnique({
+    where: { code: cleanCode }
+  });
+
+  if (!coupon || !coupon.is_active) {
+    throw new AppError("Mã giảm giá không tồn tại hoặc đã ngừng hoạt động", 404);
+  }
+
+  const now = new Date();
+  if (coupon.start_date > now) {
+    throw new AppError("Chương trình khuyến mãi của mã giảm giá này chưa bắt đầu", 400);
+  }
+  if (coupon.end_date < now) {
+    throw new AppError("Mã giảm giá đã hết hạn sử dụng", 400);
+  }
+
+  // Giới hạn lượt dùng toàn hệ thống
+  if (coupon.usage_limit !== null && coupon.used_count >= coupon.usage_limit) {
+    throw new AppError("Mã giảm giá đã hết lượt sử dụng", 400);
+  }
+
+  // Giới hạn lượt dùng của từng người dùng
+  if (userId && coupon.usage_limit_per_user !== null) {
+    const userUsedCount = await prisma.couponUsage.count({
+      where: {
+        coupon_id: coupon.id,
+        user_id: Number(userId)
+      }
+    });
+
+    if (userUsedCount >= coupon.usage_limit_per_user) {
+      throw new AppError(
+        `Bạn đã sử dụng tối đa ${coupon.usage_limit_per_user} lần cho mã giảm giá này`,
+        400
+      );
+    }
+  }
+
+  // Tính tổng tiền đơn hàng nếu chưa truyền vào
+  const subtotal = params.totalAmount !== undefined
+    ? Number(params.totalAmount)
+    : items.reduce((sum, item) => sum + Number(item.unitPrice || 0) * Number(item.quantity || 1), 0);
+
+  let targetIds: number[] = [];
+  if (coupon.target_ids) {
+    try {
+      targetIds = JSON.parse(coupon.target_ids);
+    } catch {
+      targetIds = [];
+    }
+  }
+
+  // Xác định phạm vi áp dụng (tổng đơn / danh mục linh kiện / sản phẩm cụ thể)
+  let eligibleAmount = 0;
+
+  if (coupon.target_type === "ALL") {
+    eligibleAmount = subtotal;
+  } else if (coupon.target_type === "CATEGORY") {
+    // Lọc các linh kiện thuộc danh mục chỉ định
+    const eligibleItems = items.filter((item) => {
+      const catId = item.categoryId ?? item.category_id;
+      return catId !== null && catId !== undefined && targetIds.includes(Number(catId));
+    });
+
+    if (eligibleItems.length === 0) {
+      throw new AppError(
+        `Mã giảm giá chỉ áp dụng cho nhóm linh kiện chuyên biệt (Danh mục ID: ${targetIds.join(", ")})`,
+        400
+      );
+    }
+
+    eligibleAmount = eligibleItems.reduce(
+      (sum, item) => sum + Number(item.unitPrice || 0) * Number(item.quantity || 1),
+      0
+    );
+  } else if (coupon.target_type === "PRODUCT") {
+    // Lọc sản phẩm cụ thể
+    const eligibleItems = items.filter((item) => {
+      const prodId = item.productId ?? item.product_id;
+      return prodId !== null && prodId !== undefined && targetIds.includes(Number(prodId));
+    });
+
+    if (eligibleItems.length === 0) {
+      throw new AppError("Mã giảm giá chỉ áp dụng cho một số sản phẩm linh kiện được chỉ định", 400);
+    }
+
+    eligibleAmount = eligibleItems.reduce(
+      (sum, item) => sum + Number(item.unitPrice || 0) * Number(item.quantity || 1),
+      0
+    );
+  }
+
+  const minOrderValue = Number(coupon.min_order_value || 0);
+  if (eligibleAmount < minOrderValue) {
+    const formattedMin = minOrderValue.toLocaleString("vi-VN");
+    throw new AppError(
+      `Đơn hàng chưa đạt giá trị tối thiểu ${formattedMin} đ để áp dụng mã này (hiện tại: ${eligibleAmount.toLocaleString("vi-VN")} đ)`,
+      400
+    );
+  }
+
+  // Tính số tiền giảm giá
+  let discountAmount = 0;
+  const discountVal = Number(coupon.discount_value);
+
+  if (coupon.discount_type === "FIXED_AMOUNT") {
+    discountAmount = Math.min(discountVal, eligibleAmount);
+  } else if (coupon.discount_type === "PERCENTAGE") {
+    const rawDiscount = (eligibleAmount * discountVal) / 100;
+    if (coupon.max_discount_amount) {
+      discountAmount = Math.min(rawDiscount, Number(coupon.max_discount_amount));
+    } else {
+      discountAmount = rawDiscount;
+    }
+  }
+
+  discountAmount = Math.round(discountAmount);
+  const shippingFee = Number(params.shippingFee || 0);
+  const finalAmount = Math.max(0, subtotal - discountAmount + shippingFee);
 
   return {
-    id: coupon.id,
-    code: coupon.code,
-    description: coupon.description,
-    discountType: coupon.discount_type,
-    discountValue: Number(coupon.discount_value),
-    discountAmount: Math.min(discountAmount, orderAmount),
-    finalAmount: Math.max(0, orderAmount - discountAmount)
+    valid: true,
+    coupon: {
+      id: coupon.id,
+      code: coupon.code,
+      name: coupon.name,
+      description: coupon.description,
+      discountType: coupon.discount_type,
+      discountValue: discountVal,
+      maxDiscountAmount: coupon.max_discount_amount ? Number(coupon.max_discount_amount) : null,
+      minOrderValue,
+      targetType: coupon.target_type,
+      targetIds,
+      endDate: coupon.end_date
+    },
+    discountAmount,
+    eligibleAmount,
+    finalAmount
   };
-}
-
-export async function getActiveCoupons() {
-  const pool = getDbPool();
-  const [rows]: any = await pool.query(
-    `SELECT id, code, description, discount_type as discountType, discount_value as discountValue, min_order_amount as minOrderAmount, max_discount_amount as maxDiscountAmount, expires_at as expiresAt FROM coupons WHERE is_active = 1 ORDER BY min_order_amount ASC`
-  );
-  return rows;
 }

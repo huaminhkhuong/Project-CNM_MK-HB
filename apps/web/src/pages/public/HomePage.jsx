@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { usePageSeo } from "../../hooks/usePageSeo";
 
 import { CategoryGrid } from "../../components/marketplace/CategoryGrid";
 
@@ -43,6 +44,12 @@ const MAX_PAGES = 5; // allow up to 5 pages
 
 export function HomePage() {
   const { isAuthenticated } = useAuth();
+
+  usePageSeo({
+    title: "PC Mall - Hệ Thống Máy Tính & Linh Kiện Chính Hãng | PC Builder AI",
+    description: "Khám phá kho linh kiện máy tính, PC Gaming, Laptop chính hãng tại PC Mall. Ráp máy thông minh với trợ lý AI và bảo hành điện tử chính hãng số 1 Việt Nam."
+  });
+
   const [categories, setCategories] = useState([]);
   const [page, setPage] = useState(1);
   const [pageProducts, setPageProducts] = useState({});   // { 1: [...], 2: [...] }

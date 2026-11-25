@@ -32,8 +32,8 @@ export function generateVnpayUrl(
   amountInVnd: number,
   orderInfo: string
 ) {
-  const tmnCode = env.vnpayTmnCode || process.env.VNPAY_TMN_CODE;
-  const secretKey = env.vnpayHashSecret || process.env.VNPAY_HASH_SECRET;
+  const tmnCode = process.env.VNPAY_TMN_CODE || env.vnpayTmnCode;
+  const secretKey = process.env.VNPAY_HASH_SECRET || env.vnpayHashSecret;
   let vnpUrl = env.vnpayUrl || process.env.VNPAY_URL || "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
   const returnUrl = `${env.frontendUrl || process.env.FRONTEND_URL}/payment/result`;
 
@@ -72,7 +72,7 @@ export function generateVnpayUrl(
 export function verifyVnpayReturn(vnp_Params: any) {
   const params = { ...(vnp_Params || {}) };
   const secureHash = params["vnp_SecureHash"];
-  const secretKey = env.vnpayHashSecret || process.env.VNPAY_HASH_SECRET;
+  const secretKey = process.env.VNPAY_HASH_SECRET || env.vnpayHashSecret;
 
   if (!secureHash || !secretKey) {
     return false;

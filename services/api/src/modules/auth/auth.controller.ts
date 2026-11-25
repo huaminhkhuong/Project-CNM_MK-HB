@@ -8,6 +8,7 @@ import {
   signRefreshToken,
   verifyRefreshToken
 } from "../../services/token.service";
+import { blacklistToken, isTokenBlacklisted } from "../../services/token-blacklist.service";
 import { prisma } from "../../config/prisma";
 import { asyncHandler } from "../../utils/async-handler";
 import { loginSchema, refreshSchema, registerSchema } from "./auth.validator";
@@ -89,7 +90,8 @@ function buildAuthResponse(user: NonNullable<Awaited<ReturnType<typeof findUserB
       email: user.email || "",
       fullName: user.full_name,
       phone: user.phone || null,
-      role: tokenPayload.role
+      role: tokenPayload.role,
+      createdAt: user.created_at
     },
     accessToken: signAccessToken(tokenPayload),
     refreshToken: signRefreshToken(tokenPayload)
@@ -99,6 +101,12 @@ function buildAuthResponse(user: NonNullable<Awaited<ReturnType<typeof findUserB
 export const refresh = asyncHandler(async (req: Request, res: Response) => {
   const payload = refreshSchema.parse(req.body);
   const tokenPayload = verifyRefreshToken(payload.refreshToken);
+
+  // Reject if token was explicitly logged out
+  const blacklisted = await isTokenBlacklisted(payload.refreshToken);
+  if (blacklisted) {
+    throw new AppError("Token has been revoked", 401);
+  }
 
   const user = await findUserById(tokenPayload.userId);
   if (!user) {
@@ -112,6 +120,26 @@ export const refresh = asyncHandler(async (req: Request, res: Response) => {
   res.status(200).json({
     success: true,
     data: buildAuthResponse(user)
+  });
+});
+
+export const logout = asyncHandler(async (req: Request, res: Response) => {
+  const { refreshToken } = req.body as { refreshToken?: string };
+
+  if (!refreshToken || typeof refreshToken !== "string") {
+    throw new AppError("refreshToken is required", 400);
+  }
+
+  // Blacklist the token — ignores invalid/expired tokens gracefully
+  try {
+    await blacklistToken(refreshToken);
+  } catch {
+    // If blacklist fails (e.g. DB issue) we still log out the client
+  }
+
+  res.status(200).json({
+    success: true,
+    data: { loggedOut: true }
   });
 });
 
@@ -157,6 +185,7 @@ export const me = asyncHandler(async (req: Request, res: Response) => {
       fullName: user.full_name,
       phone: user.phone,
       role: (user as any).Role?.name || "USER",
+      createdAt: user.created_at,
       addresses: addresses.map(formatAddress)
     }
   });
@@ -307,6 +336,7 @@ export const updateCurrentProfile = asyncHandler(async (req: Request, res: Respo
       fullName: user.full_name,
       phone: user.phone,
       role: user.Role?.name || "USER",
+      createdAt: user.created_at,
       addresses: user.Address.map(formatAddress)
     }
   });

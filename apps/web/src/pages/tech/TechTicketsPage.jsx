@@ -281,6 +281,7 @@ export function TechTicketsPage() {
   const [sortBy, setSortBy] = useState("newest");
   const [keyword, setKeyword] = useState("");
   const [replyMessage, setReplyMessage] = useState("");
+  const [replyFiles, setReplyFiles] = useState([]);
   const [internalNotes, setInternalNotes] = useState(() => {
     try {
       return JSON.parse(window.localStorage.getItem(STORAGE_INTERNAL_NOTES) || "{}");
@@ -297,6 +298,7 @@ export function TechTicketsPage() {
   const [showCloseModal, setShowCloseModal] = useState(false);
   const messageListRef = useRef(null);
   const replyTextareaRef = useRef(null);
+  const replyFileInputRef = useRef(null);
 
   const loadStats = useCallback(async () => {
     try {
@@ -449,49 +451,77 @@ export function TechTicketsPage() {
     joinRoom("join_tech_queue");
 
     // Ticket mới được tạo → cập nhật danh sách
-    on("tickets:new_ticket", (newTicket) => {
+    const unsubNewTicket = on("tickets:new_ticket", (newTicket) => {
       setTickets((prev) => {
-        const exists = prev.some((t) => t.id === newTicket.id);
+        const exists = prev.some((t) => Number(t.id) === Number(newTicket.id));
         if (exists) return prev;
         return [newTicket, ...prev];
       });
       loadStats();
     });
 
-    // Trạng thái ticket thay đổi → cập nhật trong danh sách
-    on("tickets:queue_updated", ({ ticketId, status }) => {
+    // Trạng thái / tin nhắn ticket thay đổi → cập nhật trong danh sách
+    const unsubQueueUpdated = on("tickets:queue_updated", ({ ticketId, status }) => {
       setTickets((prev) =>
         prev.map((t) =>
-          t.id === ticketId ? { ...t, status: status || t.status } : t
+          Number(t.id) === Number(ticketId) ? { ...t, status: status || t.status } : t
         )
       );
+      if (ticketId) {
+        getTicketDetail(ticketId)
+          .then((response) => {
+            const detail = getEnvelopeData(response, null);
+            if (!detail) return;
+            setTickets((prev) =>
+              prev.map((t) => (Number(t.id) === Number(ticketId) ? { ...t, ...detail } : t))
+            );
+            if (Number(ticketId) === Number(selectedTicketId)) {
+              setSelectedTicket(detail);
+            }
+          })
+          .catch(() => {});
+      }
       loadStats();
     });
-  }, [joinRoom, on, loadStats]);
+
+    return () => {
+      if (typeof unsubNewTicket === "function") unsubNewTicket();
+      if (typeof unsubQueueUpdated === "function") unsubQueueUpdated();
+    };
+  }, [joinRoom, on, loadStats, selectedTicketId]);
 
   // 🔌 Socket.io: Lắng nghe cập nhật real-time khi đang xem chi tiết ticket
   useEffect(() => {
-    if (!selectedTicketId) return;
+    if (!selectedTicketId) return undefined;
 
     joinRoom("join_ticket", selectedTicketId);
 
     // Tin nhắn mới trong ticket → cập nhật ngay
-    on("ticket:new_message", ({ ticketId }) => {
+    const unsubNewMessage = on("ticket:new_message", ({ ticketId }) => {
       if (String(ticketId) !== String(selectedTicketId)) return;
-      // Reload chi tiết ticket để lấy tin nhắn mới nhất
       getTicketDetail(selectedTicketId)
-        .then((response) => setSelectedTicket(getEnvelopeData(response, null)))
+        .then((response) => {
+          const detail = getEnvelopeData(response, null);
+          setSelectedTicket(detail);
+          if (detail) {
+            setTickets((prev) => prev.map((t) => (Number(t.id) === Number(selectedTicketId) ? { ...t, ...detail } : t)));
+          }
+        })
         .catch(() => {});
     });
 
     // Trạng thái ticket thay đổi → cập nhật selectedTicket
-    on("ticket:status_changed", (updatedTicket) => {
-      if (updatedTicket?.id === selectedTicketId) {
-        setSelectedTicket(updatedTicket);
+    const unsubStatusChanged = on("ticket:status_changed", (updatedTicket) => {
+      if (Number(updatedTicket?.id) === Number(selectedTicketId)) {
+        getTicketDetail(selectedTicketId)
+          .then((response) => setSelectedTicket(getEnvelopeData(response, updatedTicket)))
+          .catch(() => setSelectedTicket(updatedTicket));
       }
     });
 
     return () => {
+      if (typeof unsubNewMessage === "function") unsubNewMessage();
+      if (typeof unsubStatusChanged === "function") unsubStatusChanged();
       leaveRoom("leave_ticket", selectedTicketId);
     };
   }, [selectedTicketId, joinRoom, leaveRoom, on]);
@@ -640,8 +670,23 @@ export function TechTicketsPage() {
       let response;
 
       if (type === "reply") {
-        response = await addTicketMessage(selectedTicketResolved.id, { message: data });
+        response = await addTicketMessage(selectedTicketResolved.id, {
+          message: data,
+          attachments: replyFiles,
+          visibility: "PUBLIC"
+        });
         setReplyMessage("");
+        setReplyFiles([]);
+        if (replyFileInputRef.current) replyFileInputRef.current.value = "";
+      } else if (type === "internal_note") {
+        response = await addTicketMessage(selectedTicketResolved.id, {
+          message: data,
+          visibility: "INTERNAL"
+        });
+        setInternalNotes((prev) => ({
+          ...prev,
+          [selectedTicketResolved.id]: ""
+        }));
       } else {
         response = await updateTicket(selectedTicketResolved.id, data);
       }
@@ -649,7 +694,13 @@ export function TechTicketsPage() {
       const updated = getEnvelopeData(response, null);
       setSelectedTicket(updated);
       setTickets((prev) => prev.map((ticket) => (ticket.id === selectedTicketResolved.id ? { ...ticket, ...updated } : ticket)));
-      setSuccessMessage(type === "reply" ? "Đã gửi phản hồi cho khách hàng." : "Đã cập nhật ticket.");
+      setSuccessMessage(
+        type === "reply"
+          ? "Đã gửi phản hồi cho khách hàng."
+          : type === "internal_note"
+            ? "Đã lưu và đồng bộ ghi chú nội bộ lên hệ thống."
+            : "Đã cập nhật ticket."
+      );
       await loadStats();
     } catch (error) {
       setErrorMessage(getErrorMessage(error, "Không thể thực hiện thao tác này."));
@@ -660,12 +711,21 @@ export function TechTicketsPage() {
 
   function handleSendReply() {
     const trimmed = replyMessage.trim();
-    if (!trimmed) return;
-    handleAction("reply", trimmed);
+    if (!trimmed && replyFiles.length === 0) return;
+    handleAction("reply", trimmed || "Kỹ thuật viên đã gửi tệp đính kèm.");
   }
 
   function handleAssignToMe() {
     handleAction("assign", { assignedToId: currentUserId, status: "IN_PROGRESS" });
+  }
+
+  function handleTransferOrUnassign() {
+    if (!selectedTicketResolved) return;
+    if (isMine) {
+      handleAction("unassign", { assignedToId: null, status: "OPEN" });
+    } else {
+      handleAction("assign", { assignedToId: currentUserId, status: "IN_PROGRESS" });
+    }
   }
 
   function handleResolve() {
@@ -678,7 +738,12 @@ export function TechTicketsPage() {
 
   function saveInternalNote() {
     if (!selectedTicketResolved) return;
-    setSuccessMessage("Đã lưu ghi chú nội bộ trên trình duyệt này.");
+    const draft = String(internalNotes[selectedTicketResolved.id] || "").trim();
+    if (!draft) {
+      setErrorMessage("Vui lòng nhập nội dung ghi chú nội bộ trước khi lưu.");
+      return;
+    }
+    handleAction("internal_note", draft);
   }
 
   function setNeedMoreInfoTemplate() {
@@ -1073,10 +1138,17 @@ export function TechTicketsPage() {
                     <button
                       type="button"
                       className="tech-ticket-btn tech-ticket-btn--secondary"
-                      disabled
-                      title="Hệ thống hiện chưa có API chuyển bộ phận cho ticket"
+                      onClick={handleTransferOrUnassign}
+                      disabled={!selectedTicketResolved.assignedToId || selectedTicketResolved.status === "CLOSED" || Boolean(actionLoading)}
+                      title={
+                        !selectedTicketResolved.assignedToId
+                          ? "Ticket đang ở hàng chờ chung"
+                          : isMine
+                            ? "Trả ticket về hàng chờ chung để kỹ thuật viên khác tiếp nhận"
+                            : "Nhận tiếp quản ticket này từ kỹ thuật viên khác"
+                      }
                     >
-                      Chuyển bộ phận
+                      {isMine ? "Trả về hàng chờ" : "Nhận tiếp quản"}
                     </button>
                     <button
                       type="button"
@@ -1177,13 +1249,40 @@ export function TechTicketsPage() {
                         ) : (
                           (selectedTicketResolved.messages || []).map((message) => {
                             const isTech = isTechSender(message.sender?.role);
+                            const isInternal = String(message.visibility || "PUBLIC").toUpperCase() === "INTERNAL";
                             const attachmentMentions = extractAttachmentMentions(message.message);
                             return (
                               <article key={message.id} className={`tech-ticket-message-row${isTech ? " tech-ticket-message-row--tech" : ""}`}>
                                 <div className="tech-ticket-message-meta">
                                   {message.sender?.fullName || message.sender?.email || "Người dùng"} · {formatTime(message.createdAt)}
+                                  {isInternal ? (
+                                    <span
+                                      style={{
+                                        marginLeft: 8,
+                                        padding: "2px 8px",
+                                        borderRadius: 999,
+                                        background: "#fef3c7",
+                                        color: "#b45309",
+                                        fontSize: 11,
+                                        fontWeight: 900
+                                      }}
+                                    >
+                                      🔒 Ghi chú nội bộ (Khách không thấy)
+                                    </span>
+                                  ) : null}
                                 </div>
-                                <div className={`tech-ticket-message-bubble${isTech ? " tech-ticket-message-bubble--tech" : ""}`}>
+                                <div
+                                  className={`tech-ticket-message-bubble${isTech ? " tech-ticket-message-bubble--tech" : ""}`}
+                                  style={
+                                    isInternal
+                                      ? {
+                                          background: "#fffbeb",
+                                          borderColor: "#fcd34d",
+                                          color: "#78350f"
+                                        }
+                                      : undefined
+                                  }
+                                >
                                   {normalizeTicketText(message.message) || "Khách hàng đã gửi metadata tệp đính kèm."}
                                   {attachmentMentions.length ? (
                                     <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
@@ -1237,23 +1336,54 @@ export function TechTicketsPage() {
                                 disabled={Boolean(actionLoading)}
                               />
                               <div className="tech-ticket-inline">
+                                <input
+                                  ref={replyFileInputRef}
+                                  type="file"
+                                  multiple
+                                  accept=".jpg,.jpeg,.png,.gif,.mp4,.webm,.mov,.pdf,image/*,video/*,application/pdf"
+                                  style={{ display: "none" }}
+                                  onChange={(event) => {
+                                    const files = Array.from(event.target.files || []).slice(0, 5);
+                                    setReplyFiles(files);
+                                  }}
+                                />
                                 <button
                                   type="button"
                                   className="tech-ticket-btn tech-ticket-btn--secondary"
-                                  disabled
-                                  title="Ticket hiện chỉ lưu metadata file trong nội dung tin nhắn, chưa có API upload nhị phân riêng"
+                                  onClick={() => replyFileInputRef.current?.click()}
+                                  disabled={Boolean(actionLoading)}
+                                  title="Đính kèm ảnh, video hoặc tài liệu PDF (tối đa 5 tệp)"
                                 >
-                                  Tải tệp đính kèm
+                                  📎 Đính kèm tệp {replyFiles.length > 0 ? `(${replyFiles.length})` : ""}
                                 </button>
                                 <button
                                   type="button"
                                   className="tech-ticket-btn tech-ticket-btn--primary"
                                   onClick={handleSendReply}
-                                  disabled={!replyMessage.trim() || actionLoading === "reply"}
+                                  disabled={(!replyMessage.trim() && replyFiles.length === 0) || actionLoading === "reply"}
                                 >
                                   {actionLoading === "reply" ? "Đang gửi..." : "Gửi phản hồi"}
                                 </button>
                               </div>
+                              {replyFiles.length > 0 ? (
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12, color: "#5b21b6", fontWeight: 700 }}>
+                                  {replyFiles.map((f) => (
+                                    <span key={`${f.name}-${f.size}`} style={{ padding: "4px 10px", background: "#f3e8ff", borderRadius: 999 }}>
+                                      {f.name}
+                                    </span>
+                                  ))}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setReplyFiles([]);
+                                      if (replyFileInputRef.current) replyFileInputRef.current.value = "";
+                                    }}
+                                    style={{ border: "none", background: "transparent", color: "#dc2626", cursor: "pointer", fontWeight: 800 }}
+                                  >
+                                    ✕ Xóa tệp
+                                  </button>
+                                </div>
+                              ) : null}
                             </div>
 
                             <div className="tech-ticket-reply-sidebar">
@@ -1354,9 +1484,14 @@ export function TechTicketsPage() {
                       placeholder="Ví dụ: đã hướng dẫn khách cập nhật BIOS, chờ khách xác nhận lại..."
                     />
                     <div className="tech-ticket-inline">
-                      <span className="tech-ticket-note-caption">Ghi chú này không được gửi cho khách và chưa đồng bộ lên server.</span>
-                      <button type="button" className="tech-ticket-btn tech-ticket-btn--secondary" onClick={saveInternalNote}>
-                        Lưu ghi chú
+                      <span className="tech-ticket-note-caption">Ghi chú nội bộ được đồng bộ lên hệ thống và ẩn hoàn toàn với khách hàng.</span>
+                      <button
+                        type="button"
+                        className="tech-ticket-btn tech-ticket-btn--secondary"
+                        onClick={saveInternalNote}
+                        disabled={Boolean(actionLoading)}
+                      >
+                        {actionLoading === "internal_note" ? "Đang lưu..." : "Lưu ghi chú nội bộ"}
                       </button>
                     </div>
                   </section>

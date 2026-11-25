@@ -17,8 +17,8 @@ const swaggerDefinition = {
       description: "Development API Server"
     },
     {
-      url: "http://localhost:8081/api",
-      description: "Nginx Proxy / Production Server"
+      url: "/api",
+      description: "Production / Reverse Proxy API"
     }
   ],
   components: {
@@ -37,6 +37,8 @@ const swaggerDefinition = {
     { name: "Cart", description: "API Giỏ hàng người dùng" },
     { name: "Orders", description: "API Đặt hàng, Thanh toán VNPay/COD & Quản lý Đơn hàng" },
     { name: "PC Builder", description: "API Xây dựng cấu hình PC & Kiểm tra Tương thích Linh kiện" },
+    { name: "Coupons", description: "API Khuyến mãi, Voucher & Mã giảm giá" },
+    { name: "Notifications", description: "API Thông báo hệ thống, đơn hàng & bảo hành" },
     { name: "Warranties", description: "API Tra cứu Bảo hành & Yêu cầu Bảo hành Sản phẩm" },
     { name: "Tickets", description: "API Vé hỗ trợ kỹ thuật Khách hàng" },
     { name: "AI Advisor", description: "API Tư vấn cấu hình & Giải đáp thắc mắc bằng AI" },
@@ -47,7 +49,7 @@ const swaggerDefinition = {
     "/api/health": {
       get: {
         tags: ["Health"],
-        summary: "Kiểm tra trạng thái API & kết nối CSDL PostgreSQL",
+        summary: "Kiểm tra trạng thái API & kết nối CSDL MySQL 8.0",
         responses: {
           "200": {
             description: "Hệ thống hoạt động bình thường",
@@ -286,6 +288,80 @@ const swaggerDefinition = {
         },
         responses: {
           "200": { description: "Gợi ý cấu hình từ AI Advisor" }
+        }
+      }
+    },
+    "/api/products/filter-options": {
+      get: {
+        tags: ["Products & Catalog"],
+        summary: "Lấy danh sách facet thuộc tính lọc động theo danh mục (Socket, RAM, VRAM, Form Factor...)",
+        parameters: [
+          { name: "category_id", in: "query", required: false, schema: { type: "integer" }, example: 1 }
+        ],
+        responses: {
+          "200": { description: "Danh sách danh mục, thương hiệu và thuộc tính kỹ thuật có sẵn để lọc" }
+        }
+      }
+    },
+    "/api/coupons/available": {
+      get: {
+        tags: ["Coupons"],
+        summary: "Lấy danh sách mã giảm giá/voucher còn hiệu lực cho khách hàng",
+        responses: {
+          "200": { description: "Danh sách voucher hợp lệ kèm điều kiện tối thiểu và mức giảm" }
+        }
+      }
+    },
+    "/api/coupons/validate": {
+      post: {
+        tags: ["Coupons"],
+        summary: "Kiểm tra và tính toán số tiền giảm giá của mã voucher cho giỏ hàng",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              example: {
+                code: "WELCOMEPC",
+                subtotal: 1500000,
+                items: [{ product_variant_id: 1, quantity: 1, price: 1500000 }]
+              }
+            }
+          }
+        },
+        responses: {
+          "200": { description: "Chi tiết mức giảm giá và số tiền thanh toán cuối cùng" }
+        }
+      }
+    },
+    "/api/notifications/my": {
+      get: {
+        tags: ["Notifications"],
+        security: [{ bearerAuth: [] }],
+        summary: "Lấy danh sách thông báo của người dùng đăng nhập",
+        responses: {
+          "200": { description: "Danh sách thông báo đơn hàng, bảo hành và hệ thống" }
+        }
+      }
+    },
+    "/api/pc-builder/check-compatibility": {
+      post: {
+        tags: ["PC Builder"],
+        summary: "Kiểm tra tương thích chuyên sâu đa linh kiện dựa trên 44+ quy tắc CSDL",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              example: {
+                components: [
+                  { component_type: "cpu", variant_id: 1 },
+                  { component_type: "mainboard", variant_id: 3 }
+                ]
+              }
+            }
+          }
+        },
+        responses: {
+          "200": { description: "Báo cáo chi tiết độ tương thích, điểm số và các cảnh báo kỹ thuật" }
         }
       }
     }

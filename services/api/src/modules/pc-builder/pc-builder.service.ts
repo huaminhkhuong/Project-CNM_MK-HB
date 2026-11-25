@@ -6,6 +6,7 @@ import { env } from "../../config/env";
 import { createError, toPositiveInteger } from "../../utils/service-helpers";
 import { ResultSetHeader, RowDataPacket } from "mysql2";
 import { xaiExplanationService } from "./xai-explanation.service";
+import { getProductTagsMap } from "../admin/admin-tags.service";
 
 export interface BuildItem {
   id: number;
@@ -944,6 +945,17 @@ class PcBuilderService {
     }
 
     const allItems = Array.from(skuMap.values());
+    const uniqueProductIds = Array.from(new Set(allItems.map((i) => Number(i.productId)).filter(Boolean)));
+    try {
+      const tagsMap = await getProductTagsMap(uniqueProductIds);
+      for (const item of allItems) {
+        item.tags = tagsMap.get(Number(item.productId)) || [];
+      }
+    } catch (_tagErr) {
+      for (const item of allItems) {
+        item.tags = [];
+      }
+    }
 
     // Category mapping supporting overlaps:
     // CPU: 1
@@ -1016,7 +1028,32 @@ class PcBuilderService {
     const pickBest = (pool: any[], maxSubBudget: number, filterFn?: (item: any) => boolean): any => {
       if (!pool || pool.length === 0) return null;
       const filtered = filterFn ? pool.filter(filterFn) : pool;
-      const candidates = filtered.length > 0 ? filtered : pool;
+      const baseCandidates = filtered.length > 0 ? filtered : pool;
+
+      // Tag-aware filtering:
+      // - Sản phẩm khớp tag mục tiêu được ưu tiên
+      // - Sản phẩm có 0 tag được hiểu là dùng chung cho nhiều nhu cầu (giữ lại)
+      // - Sản phẩm có tag nhưng không khớp tag mục tiêu sẽ bị loại (nếu vẫn còn ứng viên)
+      const useCaseLower = String(useCase || "gaming").toLowerCase();
+      let targetTags: string[] = ["gaming", "esports", "aaa"];
+      if (useCaseLower.includes("esport")) targetTags = ["esports", "gaming"];
+      else if (useCaseLower.includes("aaa")) targetTags = ["aaa", "gaming"];
+      else if (useCaseLower.includes("office") || useCaseLower.includes("van_phong") || useCaseLower.includes("văn phòng")) targetTags = ["van_phong"];
+      else if (useCaseLower.includes("render") || useCaseLower.includes("edit") || useCaseLower.includes("do_hoa") || useCaseLower.includes("workstation")) targetTags = ["do_hoa", "workstation"];
+      else if (useCaseLower.includes("ai") || useCaseLower.includes("deep")) targetTags = ["ai", "do_hoa"];
+      else if (useCaseLower.includes("lap_trinh") || useCaseLower.includes("code") || useCaseLower.includes("dev")) targetTags = ["lap_trinh", "gaming"];
+
+      const tagEligible = baseCandidates.filter((i) => {
+        const tags: string[] = Array.isArray(i.tags) ? i.tags : [];
+        return tags.length === 0 || tags.some((t) => targetTags.includes(t));
+      });
+      const poolAfterTag = tagEligible.length > 0 ? tagEligible : baseCandidates;
+
+      const directTagMatches = poolAfterTag.filter((i) => {
+        const tags: string[] = Array.isArray(i.tags) ? i.tags : [];
+        return tags.some((t) => targetTags.includes(t)) && i.price <= maxSubBudget;
+      });
+      const candidates = directTagMatches.length > 0 ? directTagMatches : poolAfterTag;
 
       // Color scheme prioritization (e.g., White theme)
       if (options.colorScheme === "white") {
@@ -1044,27 +1081,56 @@ class PcBuilderService {
 
       const inBudget = candidates.filter(i => i.price <= maxSubBudget);
       if (inBudget.length > 0) {
-        return inBudget.sort((a, b) => b.price - a.price)[0];
+        // Giới hạn tối đa 4 ứng viên tốt nhất trong tầm giá cho mỗi loại linh kiện
+        return inBudget.sort((a, b) => b.price - a.price).slice(0, 4)[0];
       }
-      // If none within subBudget, pick lowest price candidate
-      return [...candidates].sort((a, b) => a.price - b.price)[0];
+      // If none within subBudget, pick lowest price candidate (tối đa 4 ứng viên)
+      return [...candidates].sort((a, b) => a.price - b.price).slice(0, 4)[0];
     };
 
     const selectedComponents: Record<string, any> = {};
     const excluded = options.excludedTypes || [];
+    const hasGpuNeed = (ratios.gpu || 0) > 0 && !excluded.includes("gpu");
+    const isGpuFirst = /(aaa|render|rendering|editing|do_hoa|ai|deep|workstation)/i.test(String(useCase || ""));
 
-    // 1. Pick CPU
+    let gpuItem: any = null;
+    let gpuTdp = 0;
     let cpuItem: any = null;
     let cpuSocket = "LGA1700";
     let cpuTdp = 65;
 
-    if (!excluded.includes("cpu")) {
-      const cpuMax = Math.round(budget * (ratios.cpu || 0.18) * multiplier * 1.15);
-      cpuItem = pickBest(cpuPool, cpuMax);
-      if (cpuItem) {
-        selectedComponents.cpu = cpuItem;
-        cpuSocket = this.getCpuSocket(cpuItem);
-        cpuTdp = this.getCpuTdp(cpuItem);
+    if (isGpuFirst && hasGpuNeed && gpuPool.length > 0) {
+      // Nhánh chuyên Game nặng / AI / Đồ họa: Chọn GPU trước -> sau đó chọn CPU đủ sức kéo chiếc GPU đó
+      const gpuMax = Math.round(budget * (ratios.gpu || 0.35) * multiplier * 1.15);
+      gpuItem = pickBest(gpuPool, gpuMax);
+      if (gpuItem) {
+        selectedComponents.gpu = gpuItem;
+        gpuTdp = this.getGpuTdp(gpuItem);
+      }
+
+      if (!excluded.includes("cpu")) {
+        const cpuMax = Math.round(budget * (ratios.cpu || 0.18) * multiplier * 1.15);
+        cpuItem = pickBest(cpuPool, cpuMax, (c) => {
+          if (!gpuItem) return true;
+          const bn = this.calculateDynamicBottleneck(c, gpuItem, "2k");
+          return !(bn.bottleneckComponent === "CPU" && bn.bottleneckPercentage > 20);
+        });
+        if (cpuItem) {
+          selectedComponents.cpu = cpuItem;
+          cpuSocket = this.getCpuSocket(cpuItem);
+          cpuTdp = this.getCpuTdp(cpuItem);
+        }
+      }
+    } else {
+      // Nhánh phổ thông / đa dụng: Chọn CPU trước
+      if (!excluded.includes("cpu")) {
+        const cpuMax = Math.round(budget * (ratios.cpu || 0.18) * multiplier * 1.15);
+        cpuItem = pickBest(cpuPool, cpuMax);
+        if (cpuItem) {
+          selectedComponents.cpu = cpuItem;
+          cpuSocket = this.getCpuSocket(cpuItem);
+          cpuTdp = this.getCpuTdp(cpuItem);
+        }
       }
     }
 
@@ -1096,11 +1162,8 @@ class PcBuilderService {
       }
     }
 
-    // 4. Pick GPU (from GPU + VGA pools)
-    const hasGpuNeed = (ratios.gpu || 0) > 0 && !excluded.includes("gpu");
-    let gpuItem = null;
-    let gpuTdp = 0;
-    if (hasGpuNeed && gpuPool.length > 0) {
+    // 4. Pick GPU (nếu ở nhánh CPU-First)
+    if (!isGpuFirst && hasGpuNeed && gpuPool.length > 0) {
       const gpuMax = Math.round(budget * (ratios.gpu || 0.35) * multiplier * 1.15);
       gpuItem = pickBest(gpuPool, gpuMax);
       if (gpuItem) {
@@ -2969,25 +3032,77 @@ Bắt đầu bài phân tích kỹ thuật của bạn:`;
       }
     }
 
-    // 3. Khóa chặt phạm vi ngân sách: Điều chỉnh linh kiện nếu vượt quá +-5%
+    // 3. Khóa chặt phạm vi ngân sách: Bám sát +-5% (0.95 * budget đến 1.05 * budget)
     let calcTotal = Object.values(selectedComponents).reduce((sum: number, item: any) => sum + Number(item.price || 0), 0);
     const maxAllowed = budget * 1.05;
+    const minTarget = budget * 0.95;
+    const replacedCats = new Set<string>();
+
+    const applyReplacement = (cat: string, replacement: any) => {
+      const cur = selectedComponents[cat];
+      calcTotal = calcTotal - Number(cur?.price || 0) + Number(replacement.price || 0);
+      selectedComponents[cat] = {
+        id: replacement.productId || replacement.variantId,
+        variantId: replacement.variantId,
+        skuId: replacement.variantId,
+        productId: replacement.productId,
+        name: replacement.name,
+        productName: replacement.name,
+        price: replacement.price,
+        imageUrl: replacement.imageUrl,
+        image: replacement.imageUrl,
+        image_url: replacement.imageUrl,
+        specs: replacement.specs,
+        stock: replacement.stock
+      };
+      replacedCats.add(cat);
+    };
+
+    const isCompatibleCandidate = (cat: string, candidate: any): boolean => {
+      if (cat === "cpu" && selectedComponents.mainboard) {
+        return this.getCpuSocket(candidate) === this.getMainboardSocket(selectedComponents.mainboard);
+      }
+      if (cat === "mainboard" && selectedComponents.cpu) {
+        return this.getMainboardSocket(candidate) === this.getCpuSocket(selectedComponents.cpu);
+      }
+      if (cat === "ram" && selectedComponents.mainboard) {
+        return this.getRamType(candidate) === this.getMainboardRamType(selectedComponents.mainboard);
+      }
+      return true;
+    };
+
     if (calcTotal > maxAllowed) {
-      const adjustCats = ["gpu", "cpu", "cooling", "ram", "storage"];
+      // Ưu tiên tìm 1 linh kiện giảm giá tối thiểu nhưng đủ đưa tổng <= maxAllowed (tránh sụt giá quá sâu)
+      const adjustCats = ["cooling", "case", "ram", "storage", "mainboard", "cpu", "gpu"];
       for (const cat of adjustCats) {
         if (calcTotal <= maxAllowed) break;
         const cur = selectedComponents[cat];
         if (!cur) continue;
-        const cheaperList = (pool[cat] || []).filter((it: any) => it.price < cur.price);
+        const needToCut = calcTotal - maxAllowed;
+        const cheaperList = (pool[cat] || [])
+          .filter((it: any) => Number(it.price) < Number(cur.price) && isCompatibleCandidate(cat, it))
+          .sort((a: any, b: any) => Number(b.price) - Number(a.price));
         if (cheaperList.length > 0) {
-          cheaperList.sort((a: any, b: any) => b.price - a.price);
-          const replacement = cheaperList[0];
-          calcTotal = calcTotal - cur.price + replacement.price;
-          selectedComponents[cat] = {
-            id: replacement.productId || replacement.variantId, variantId: replacement.variantId, skuId: replacement.variantId,
-            productId: replacement.productId, name: replacement.name, productName: replacement.name,
-            price: replacement.price, imageUrl: replacement.imageUrl, image: replacement.imageUrl, image_url: replacement.imageUrl, specs: replacement.specs, stock: replacement.stock
-          };
+          // Chọn món đắt nhất mà vẫn đủ cắt giảm, nếu không đủ thì chọn món sát dưới nhất
+          const exactFit = cheaperList.find((it: any) => Number(cur.price) - Number(it.price) >= needToCut);
+          applyReplacement(cat, exactFit || cheaperList[0]);
+        }
+      }
+    }
+
+    // Nếu sau điều chỉnh mà tổng tiền tụt quá sâu (< 88% ngân sách), tự động nâng cấp lại các linh kiện khác bằng phần tiền dư (giữ nguyên tương thích Socket/RAM)
+    if (calcTotal < minTarget) {
+      const upgradeOrder = ["gpu", "cpu", "ram", "storage", "mainboard", "psu", "cooling"];
+      for (const cat of upgradeOrder) {
+        if (calcTotal >= budget * 0.95) break;
+        const cur = selectedComponents[cat];
+        if (!cur) continue;
+        const headroom = maxAllowed - calcTotal;
+        const betterList = (pool[cat] || [])
+          .filter((it: any) => Number(it.price) > Number(cur.price) && Number(it.price) - Number(cur.price) <= headroom && isCompatibleCandidate(cat, it))
+          .sort((a: any, b: any) => Number(b.price) - Number(a.price));
+        if (betterList.length > 0) {
+          applyReplacement(cat, betterList[0]);
         }
       }
     }
@@ -3033,7 +3148,10 @@ Bắt đầu bài phân tích kỹ thuật của bạn:`;
       if (!hasSectionHeader || !hasComponentDetails) {
         const priceFmt = Number(comp.price || 0).toLocaleString("vi-VN") + "đ";
         const explanation = this.generateComponentExplanation(item.key, comp, budget, 0, useCase);
-        const autoSection = `\n\n| ${item.num}. ${item.title}\n• Đề xuất: [SKU_ID: ${comp.skuId || comp.id}] ${comp.name} - Giá: ${priceFmt}\n• Lý do chọn: ${explanation}\n• Đánh giá kho hàng: Được tuyển chọn nghiêm ngặt từ kho PC Mall, bảo đảm 100% tương thích phần cứng, tối ưu hiệu năng/chi phí và kiểm soát nhiệt độ an toàn.`;
+        const prefixNote = replacedCats.has(item.key)
+          ? `🔄 [ĐIỀU CHỈNH NGÂN SÁCH/TƯƠNG THÍCH] ${item.num}. ${item.title}`
+          : `| ${item.num}. ${item.title}`;
+        const autoSection = `\n\n${prefixNote}\n• Đề xuất: [SKU_ID: ${comp.skuId || comp.id}] ${comp.name} - Giá: ${priceFmt}\n• Lý do chọn: ${explanation}\n• Đánh giá kho hàng: Được tuyển chọn nghiêm ngặt từ kho PC Mall, bảo đảm 100% tương thích phần cứng, tối ưu hiệu năng/chi phí và kiểm soát nhiệt độ an toàn.`;
         accumulatedAdvice += autoSection;
         onChunk(autoSection);
       }
@@ -3041,7 +3159,9 @@ Bắt đầu bài phân tích kỹ thuật của bạn:`;
 
     // Đảm bảo có phần tổng kết kiến trúc sư
     if (!accumulatedAdvice.toLowerCase().includes("tổng kết") && !accumulatedAdvice.toLowerCase().includes("nhận xét tổng")) {
-      const summarySection = `\n\n| 9. TỔNG KẾT & ĐÁNH GIÁ CHUYÊN MÔN\n• Tổng chi phí cấu hình: ${totalPrice.toLocaleString("vi-VN")}đ (${budgetUtilization}% ngân sách mục tiêu).\n• Nhận xét kiến trúc sư: Toàn bộ 8 linh kiện đạt độ tương thích phần cứng 100%, tỷ lệ nghẽn cổ chai lý tưởng ${(dynamicBottleneck as any)?.bottleneckPercentage || bottleneckPercent}%, sẵn sàng phục vụ bền bỉ lâu dài.`;
+      const bnPct = Number((dynamicBottleneck as any)?.bottleneckPercentage ?? bottleneckPercent ?? 0);
+      const bnLabel = bnPct <= 10 ? `lý tưởng ${bnPct}%` : bnPct <= 20 ? `chấp nhận tốt ${bnPct}%` : `ở mức ${bnPct}% (${(dynamicBottleneck as any)?.bottleneckComponent || "CPU/GPU"} chênh nhẹ theo đặc thù tải)`;
+      const summarySection = `\n\n| 9. TỔNG KẾT & ĐÁNH GIÁ CHUYÊN MÔN\n• Tổng chi phí cấu hình: ${totalPrice.toLocaleString("vi-VN")}đ (${budgetUtilization}% ngân sách mục tiêu).\n• Nhận xét kiến trúc sư: Toàn bộ 8 linh kiện đạt độ tương thích phần cứng 100%, tỷ lệ nghẽn cổ chai ${bnLabel}, sẵn sàng phục vụ bền bỉ lâu dài.`;
       accumulatedAdvice += summarySection;
       onChunk(summarySection);
     }

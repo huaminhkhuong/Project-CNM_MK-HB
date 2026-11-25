@@ -13,3 +13,17 @@ export const addCartItemSchema = z.object({
 export const updateCartItemSchema = z.object({
   quantity: z.coerce.number().int().min(1).max(99)
 });
+
+export const mergeCartSchema = z.object({
+  items: z.array(
+    z.object({
+      productId: z.union([z.string(), z.number()]).optional(),
+      productVariantId: z.union([z.string(), z.number()]).optional(),
+      variantId: z.union([z.string(), z.number()]).optional(),
+      quantity: z.coerce.number().int().min(1).max(99).default(1)
+    }).refine(
+      (data) => Boolean(data.productId || data.productVariantId || data.variantId),
+      { message: "productId or productVariantId is required" }
+    )
+  )
+});

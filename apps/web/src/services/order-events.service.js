@@ -1,6 +1,6 @@
 import { getStoredAuth } from "../utils/storage";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 
 export function subscribeToOrderEvents(onOrderUpdated) {
   const token = getStoredAuth()?.accessToken;

@@ -47,8 +47,10 @@ export function WhatIfComparisonPanel({
     const rawCur = currentComps[type] || {};
     const curProduct = rawCur.product || rawCur;
     const curVariant = rawCur.variant || {};
-    const curName = curProduct.name || curProduct.product_name || curProduct.productName || "Chưa chọn";
-    const curPrice = Number(curVariant.price || curProduct.price || rawCur.price || 0);
+    const curQty = Math.max(1, Number(rawCur.quantity || 1));
+    const baseCurName = curProduct.name || curProduct.product_name || curProduct.productName || "Chưa chọn";
+    const curName = curQty > 1 && baseCurName !== "Chưa chọn" ? `${baseCurName} (x${curQty})` : baseCurName;
+    const curPrice = Number(curVariant.price || curProduct.price || rawCur.price || 0) * curQty;
 
     const rawSim = simComps[type] || {};
     const simProduct = rawSim.product || rawSim;

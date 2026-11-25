@@ -80,10 +80,16 @@ async function seedHardwareSpecs() {
       // ── 1. CPU (Bộ vi xử lý) ──────────────────────────
       if (categoryName.includes("CPU") || nameUpper.includes("INTEL") || nameUpper.includes("RYZEN") || nameUpper.includes("CORE I")) {
         let socket = "LGA1700";
-        if (nameUpper.includes("AM5") || /7\d00|8\d00|9\d00/i.test(nameUpper)) socket = "AM5";
-        else if (nameUpper.includes("AM4") || /5\d00|4\d00|3\d00/i.test(nameUpper)) socket = "AM4";
-        else if (nameUpper.includes("LGA1200") || /10\d00|11\d00/i.test(nameUpper)) socket = "LGA1200";
-        else if (nameUpper.includes("LGA1700") || /12\d00|13\d00|14\d00/i.test(nameUpper)) socket = "LGA1700";
+        if (nameUpper.includes("RYZEN") || nameUpper.includes("AMD")) {
+          if (nameUpper.includes("AM5") || /7\d00|8\d00|9\d00/i.test(nameUpper)) socket = "AM5";
+          else if (nameUpper.includes("AM4") || /5\d00|4\d00|3\d00/i.test(nameUpper)) socket = "AM4";
+          else socket = "AM5";
+        } else {
+          // Intel CPU
+          if (nameUpper.includes("LGA1200") || /10\d00|11\d00/i.test(nameUpper)) socket = "LGA1200";
+          else if (nameUpper.includes("LGA1851") || nameUpper.includes("ULTRA")) socket = "LGA1851";
+          else socket = "LGA1700"; // Gen 12/13/14
+        }
 
         let cores = "6 nhân / 12 luồng";
         if (nameUpper.includes("14900") || nameUpper.includes("13900") || nameUpper.includes("7950")) cores = "24 nhân / 32 luồng";
@@ -119,7 +125,18 @@ async function seedHardwareSpecs() {
         if (nameUpper.includes("ITX") || nameUpper.includes("MINI")) formFactor = "Mini-ITX";
         else if (nameUpper.includes("PRO") && !nameUpper.includes("M") || nameUpper.includes("STRIX") || nameUpper.includes("AORUS MASTER")) formFactor = "ATX";
 
+        let chipset = "Intel B760";
+        if (nameUpper.includes("B650")) chipset = "AMD B650";
+        else if (nameUpper.includes("X670")) chipset = "AMD X670";
+        else if (nameUpper.includes("A620")) chipset = "AMD A620";
+        else if (nameUpper.includes("B550")) chipset = "AMD B550";
+        else if (nameUpper.includes("Z790")) chipset = "Intel Z790";
+        else if (nameUpper.includes("H610")) chipset = "Intel H610";
+        else if (nameUpper.includes("Z690")) chipset = "Intel Z690";
+        else if (nameUpper.includes("B760")) chipset = "Intel B760";
+
         specsToApply["Socket hỗ trợ"] = socket;
+        specsToApply["Chipset"] = chipset;
         specsToApply["Chuẩn RAM"] = ramType;
         specsToApply["Kích thước Form Factor"] = formFactor;
         specsToApply["Số khe RAM"] = formFactor === "Mini-ITX" ? "2 khe DDR" : "4 khe Dual Channel";
@@ -129,7 +146,7 @@ async function seedHardwareSpecs() {
       // ── 3. RAM (Bộ nhớ) ───────────────────────────────
       else if (categoryName.includes("RAM") || nameUpper.includes("RAM") || nameUpper.includes("DDR4") || nameUpper.includes("DDR5")) {
         const isDdr5 = nameUpper.includes("DDR5") || /5200|5600|6000|6400|7200/i.test(nameUpper);
-        const ramType = isDdr5 ? "DDR5 High Speed" : "DDR4 Standard";
+        const ramType = isDdr5 ? "DDR5" : "DDR4";
 
         let cap = "16GB (2x8GB)";
         if (nameUpper.includes("64GB")) cap = "64GB (2x32GB)";
@@ -162,6 +179,7 @@ async function seedHardwareSpecs() {
         else if (nameUpper.includes("6500") || nameUpper.includes("1650")) { vram = "4GB GDDR6"; psu = "450W"; tdp = "75W"; }
 
         specsToApply["VRAM"] = vram;
+        specsToApply["Dung lượng VRAM"] = vram;
         specsToApply["Nguồn đề xuất (PSU)"] = psu;
         specsToApply["TDP Tiêu thụ"] = tdp;
         specsToApply["Giao tiếp"] = "PCIe 4.0 x16";
@@ -240,6 +258,19 @@ async function seedHardwareSpecs() {
 
         if (Array.isArray(prod.ProductSku)) {
           for (const sku of prod.ProductSku) {
+            // Remove any old conflicting attribute value for the same attribute
+            const oldSkuAttrs = await prisma.skuAttribute.findMany({
+              where: {
+                sku_id: sku.id,
+                AttributeValue: { attribute_id: attrId }
+              }
+            });
+            for (const old of oldSkuAttrs) {
+              if (old.attribute_value_id !== attrValId) {
+                await prisma.skuAttribute.delete({ where: { id: old.id } });
+              }
+            }
+
             const existingSkuAttr = await prisma.skuAttribute.findFirst({
               where: { sku_id: sku.id, attribute_value_id: attrValId }
             });
@@ -263,9 +294,13 @@ async function seedHardwareSpecs() {
   }
 }
 
-seedHardwareSpecs()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(() => prisma.$disconnect());
+if (require.main === module) {
+  seedHardwareSpecs()
+    .catch((e) => {
+      console.error(e);
+      process.exit(1);
+    })
+    .finally(() => prisma.$disconnect());
+}
+
+module.exports = { seedHardwareSpecs };

@@ -8,8 +8,20 @@ import {
   getStaffOrderDetail,
   getStaffOrders,
   updateStaffConsultationNote,
-  updateStaffOrderStatus
+  updateStaffOrderStatus,
+  getStaffOrderSerials,
+  assignStaffOrderSerials,
+  autoGenerateStaffOrderSerials
 } from "../../services/staff.service";
+import { approvePaymentProof } from "../../services/order.service";
+
+const API_ORIGIN = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/api\/?$/, "");
+
+function resolveUploadUrl(path) {
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${API_ORIGIN}${path.startsWith("/") ? path : `/${path}`}`;
+}
 
 const STORAGE_KEY = "pcmall_staff_selected_order";
 
@@ -133,14 +145,25 @@ function getItemThumbnail(item) {
 function getPaymentTone(paymentStatus) {
   const normalized = String(paymentStatus || "").toUpperCase();
   if (normalized === "PAID") return "success";
-  if (normalized === "PENDING") return "warning";
+  if (["PENDING", "PENDING_GATEWAY", "AWAITING_ADMIN_CONFIRMATION", "PENDING_VERIFICATION"].includes(normalized)) {
+    return "warning";
+  }
+  if (["REJECTED", "EXPIRED", "PAYMENT_CANCELLED", "FAILED"].includes(normalized)) {
+    return "danger";
+  }
   return "neutral";
 }
 
 function getPaymentLabel(paymentStatus) {
   const normalized = String(paymentStatus || "").toUpperCase();
   if (normalized === "PAID") return "Đã thanh toán";
-  if (normalized === "PENDING") return "Chờ thanh toán";
+  if (normalized === "AWAITING_ADMIN_CONFIRMATION" || normalized === "PENDING_VERIFICATION") {
+    return "Chờ duyệt minh chứng";
+  }
+  if (normalized === "PENDING_GATEWAY" || normalized === "PENDING") return "Chờ thanh toán";
+  if (normalized === "REJECTED") return "Từ chối minh chứng";
+  if (normalized === "EXPIRED") return "Hết hạn TT";
+  if (normalized === "PAYMENT_CANCELLED") return "Đã hủy TT";
   return "Chưa thanh toán";
 }
 
@@ -419,24 +442,294 @@ function StaffOrderItemsTable({ selectedOrder }) {
   );
 }
 
-function StaffPaymentPanel({ selectedOrder }) {
+function StaffSerialNumbersManager({
+  orderSerialsInfo,
+  serialsLoading,
+  serialsSaving,
+  serialsError,
+  serialInputs,
+  setSerialInputs,
+  handleSaveSerials,
+  handleAutoGenerateSerials,
+  selectedOrder
+}) {
+  const isCanceled = selectedOrder?.status === "CANCELED";
+  const isDeliveredOrCompleted = selectedOrder?.status === "DELIVERED" || selectedOrder?.status === "COMPLETED";
+
+  const handleInputChange = (orderItemId, slotIndex, value) => {
+    setSerialInputs((prev) => {
+      const currentList = [...(prev[orderItemId] || [])];
+      currentList[slotIndex] = value;
+      return {
+        ...prev,
+        [orderItemId]: currentList
+      };
+    });
+  };
+
+  const isComplete = Boolean(orderSerialsInfo?.isFullyAssigned);
+  const totalRequired = orderSerialsInfo?.totalRequiredSerials || 0;
+  const totalAssigned = orderSerialsInfo?.totalAssignedSerials || 0;
+
+  return (
+    <section className="staff-card staff-serials-manager" style={{ border: isComplete ? "1px solid #bbf7d0" : "1px solid #fde68a" }}>
+      <div className="staff-orders-section__head" style={{ flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <h3 style={{ margin: 0 }}>Quản trị Serial Number / IMEI xuất kho</h3>
+            <span
+              className={`staff-badge ${isComplete ? "staff-badge--success" : "staff-badge--warning"}`}
+              style={{ fontSize: 13, padding: "3px 12px" }}
+            >
+              {isComplete ? `✅ Đã gán đủ ${totalAssigned}/${totalRequired} S/N` : `⚠️ Chưa đủ (${totalAssigned}/${totalRequired} S/N)`}
+            </span>
+          </div>
+          <p style={{ margin: "4px 0 0", color: "#64748b" }}>
+            Gán Serial Number thực tế in trên vỏ hộp & thân linh kiện để đồng bộ bảo hành điện tử chính hãng 1:1 khi xuất kho.
+          </p>
+        </div>
+
+        {!isCanceled && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="staff-btn staff-btn--secondary"
+              onClick={handleAutoGenerateSerials}
+              disabled={serialsSaving || serialsLoading}
+              title="Tự động sinh mã Serial Number thực tế mẫu cho demo kho"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 }}
+            >
+              🎲 Tự động điền S/N mẫu
+            </button>
+            <button
+              type="button"
+              className="staff-btn staff-btn--primary"
+              onClick={handleSaveSerials}
+              disabled={serialsSaving || serialsLoading}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 }}
+            >
+              {serialsSaving ? "Đang lưu..." : "💾 Lưu Serial Number"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {serialsError ? (
+        <div className="staff-orders-alert staff-orders-alert--error" style={{ fontSize: 14 }}>
+          {serialsError}
+        </div>
+      ) : null}
+
+      {!isComplete && !isCanceled && selectedOrder?.status === "PROCESSING" ? (
+        <div style={{ padding: "10px 14px", borderRadius: 12, background: "#fffbeb", border: "1px solid #fef08a", color: "#854d0e", fontSize: 13, fontWeight: 700 }}>
+          ⚠️ Bắt buộc: Nhân viên kho cần gán đủ Serial Number cho tất cả linh kiện trước khi bấm "Chuyển sang giao hàng (SHIPPED)".
+        </div>
+      ) : null}
+
+      {serialsLoading ? (
+        <div style={{ padding: 20, textAlign: "center", color: "#64748b" }}>Đang tải danh sách Serial Number...</div>
+      ) : (orderSerialsInfo?.items || []).length === 0 ? (
+        <div className="staff-orders-empty">Đơn hàng không có linh kiện cần gán Serial Number.</div>
+      ) : (
+        <div style={{ display: "grid", gap: 16 }}>
+          {(orderSerialsInfo?.items || []).map((item) => {
+            const assigned = item.assignedSerials || [];
+            const required = item.requiredQuantity || 1;
+            const currentInputs = serialInputs[item.orderItemId] || [];
+
+            return (
+              <div
+                key={item.orderItemId}
+                style={{
+                  padding: 16,
+                  borderRadius: 16,
+                  background: "#f8fafc",
+                  border: item.isComplete ? "1px solid #cbd5e1" : "1px solid #fde047"
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+                  <div>
+                    <strong style={{ fontSize: 15, color: "#0f172a" }}>{item.productName}</strong>
+                    <div style={{ fontSize: 13, color: "#64748b", marginTop: 2 }}>
+                      SKU: <code style={{ background: "#e2e8f0", padding: "1px 6px", borderRadius: 4 }}>{item.sku}</code> • Số lượng: <strong>{required} cái</strong>
+                    </div>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 800,
+                      padding: "4px 10px",
+                      borderRadius: 8,
+                      background: item.isComplete ? "#dcfce7" : "#fef9c3",
+                      color: item.isComplete ? "#166534" : "#854d0e"
+                    }}
+                  >
+                    {item.isComplete ? `Đã đủ ${assigned.length}/${required}` : `Chưa đủ (${assigned.length}/${required})`}
+                  </span>
+                </div>
+
+                <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
+                  {Array.from({ length: required }).map((_, slotIdx) => {
+                    const assignedRecord = assigned[slotIdx];
+                    const val = currentInputs[slotIdx] !== undefined ? currentInputs[slotIdx] : (assignedRecord?.serialNumber || "");
+                    const isAssigned = Boolean(assignedRecord?.serialNumber);
+
+                    return (
+                      <div key={slotIdx} style={{ display: "grid", gap: 4 }}>
+                        <label style={{ fontSize: 12, fontWeight: 700, color: "#475569", display: "flex", justifyContent: "space-between" }}>
+                          <span>🏷️ Serial / IMEI #{slotIdx + 1}</span>
+                          {assignedRecord?.warrantyId ? (
+                            <span style={{ color: "#059669", fontSize: 11 }}>Đã kích hoạt BH</span>
+                          ) : isAssigned ? (
+                            <span style={{ color: "#2563eb", fontSize: 11 }}>Đã gán</span>
+                          ) : null}
+                        </label>
+                        <input
+                          type="text"
+                          className="staff-orders-field"
+                          placeholder={`Nhập/Quét S/N #${slotIdx + 1}`}
+                          value={val}
+                          disabled={isCanceled || isDeliveredOrCompleted}
+                          onChange={(e) => handleInputChange(item.orderItemId, slotIdx, e.target.value)}
+                          style={{
+                            fontFamily: "monospace",
+                            fontWeight: 700,
+                            background: val ? "#ffffff" : "#f1f5f9",
+                            borderColor: val ? "#3b82f6" : "#cbd5e1"
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function StaffPaymentPanel({ selectedOrder, onApprovePaymentProof, actionLoading, onZoomProof }) {
+  const paymentProofRaw =
+    selectedOrder.paymentProof ||
+    selectedOrder.payment_proof ||
+    selectedOrder.proofImageUrl ||
+    selectedOrder.proof_image_url ||
+    "";
+  const paymentProofUrl = resolveUploadUrl(paymentProofRaw);
+  const normalizedPaymentStatus = String(selectedOrder.paymentStatus || selectedOrder.payment_status || "").toUpperCase();
+  const isBankTransfer = String(selectedOrder.paymentMethod || selectedOrder.payment_method || "").toUpperCase() === "BANK_TRANSFER";
+  const canVerifyProof =
+    isBankTransfer &&
+    selectedOrder.status !== "CANCELED" &&
+    (normalizedPaymentStatus === "AWAITING_ADMIN_CONFIRMATION" ||
+      normalizedPaymentStatus === "PENDING_VERIFICATION" ||
+      Boolean(paymentProofUrl && normalizedPaymentStatus !== "PAID"));
+
+  const rows = [
+    { label: "Phương thức", value: selectedOrder.paymentMethod || "COD" },
+    {
+      label: "Trạng thái thanh toán",
+      value: (
+        <span className={`staff-badge staff-badge--${getPaymentTone(selectedOrder.paymentStatus)}`}>
+          {getPaymentLabel(selectedOrder.paymentStatus)}
+        </span>
+      )
+    },
+    { label: "Tạm tính linh kiện", value: `${formatCurrency(selectedOrder.totalAmount || getOrderAmount(selectedOrder))} đ` }
+  ];
+
+  if (Number(selectedOrder.discountAmount || 0) > 0 || selectedOrder.couponCode) {
+    rows.push({
+      label: `Giảm giá${selectedOrder.couponCode ? ` (${selectedOrder.couponCode})` : ""}`,
+      value: `-${formatCurrency(selectedOrder.discountAmount || 0)} đ`
+    });
+  }
+
+  rows.push(
+    { label: "Phí vận chuyển", value: `${formatCurrency(selectedOrder.shippingFee)} đ` },
+    { label: "Tổng thanh toán", value: `${formatCurrency(getOrderAmount(selectedOrder))} đ` },
+    { label: "Mã giao dịch", value: selectedOrder.transactionCode || selectedOrder.paymentTransactionId || "—", wrap: true, full: true }
+  );
+
   return (
     <section className="staff-card">
       <div className="staff-orders-section__head">
         <div>
-          <h3>Thanh toán</h3>
-          <p>Trạng thái chi phí và giao dịch.</p>
+          <h3>Thanh toán & Minh chứng</h3>
+          <p>Trạng thái chi phí, mã giảm giá và duyệt biên lai chuyển khoản.</p>
         </div>
       </div>
-      <InfoList
-        rows={[
-          { label: "Phương thức", value: selectedOrder.paymentMethod || "COD" },
-          { label: "Trạng thái thanh toán", value: <span className={`staff-badge staff-badge--${getPaymentTone(selectedOrder.paymentStatus)}`}>{getPaymentLabel(selectedOrder.paymentStatus)}</span> },
-          { label: "Phí vận chuyển", value: `${formatCurrency(selectedOrder.shippingFee)} đ` },
-          { label: "Tổng tiền", value: `${formatCurrency(getOrderAmount(selectedOrder))} đ` },
-          { label: "Mã giao dịch", value: selectedOrder.transactionCode || selectedOrder.paymentTransactionId || "—", wrap: true, full: true }
-        ]}
-      />
+      <InfoList rows={rows} />
+
+      {isBankTransfer ? (
+        <div style={{ padding: 16, borderRadius: 16, background: "#f8fafc", border: "1px solid #e2e8f0", display: "grid", gap: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <strong style={{ fontSize: 14, color: "#0f172a" }}>📸 Biên lai / Minh chứng chuyển khoản QR</strong>
+            {paymentProofUrl ? (
+              <button
+                type="button"
+                onClick={() => onZoomProof?.(paymentProofUrl)}
+                style={{ fontSize: 12, fontWeight: 800, color: "#2563eb", background: "none", border: "none", cursor: "pointer" }}
+              >
+                🔍 Phóng to toàn màn hình
+              </button>
+            ) : null}
+          </div>
+
+          {paymentProofUrl ? (
+            <div
+              onClick={() => onZoomProof?.(paymentProofUrl)}
+              style={{
+                border: "1px solid #cbd5e1",
+                borderRadius: 12,
+                overflow: "hidden",
+                cursor: "zoom-in",
+                background: "#fff",
+                maxHeight: 280,
+                display: "grid",
+                placeItems: "center"
+              }}
+              title="Nhấp để phóng to biên lai"
+            >
+              <img
+                src={paymentProofUrl}
+                alt="Minh chứng chuyển khoản"
+                style={{ width: "100%", maxHeight: 260, objectFit: "contain", display: "block" }}
+              />
+            </div>
+          ) : (
+            <div style={{ fontSize: 13, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", padding: "10px 14px", borderRadius: 12 }}>
+              ⚠️ Khách hàng chưa tải lên ảnh biên lai chuyển khoản cho đơn hàng này.
+            </div>
+          )}
+
+          {canVerifyProof ? (
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="staff-btn staff-btn--success"
+                disabled={Boolean(actionLoading)}
+                onClick={() => onApprovePaymentProof?.(true)}
+                style={{ flex: 1 }}
+              >
+                {actionLoading === "approve_payment" ? "Đang duyệt..." : "✅ Duyệt thanh toán & Chuyển xử lý"}
+              </button>
+              <button
+                type="button"
+                className="staff-btn staff-btn--danger"
+                disabled={Boolean(actionLoading)}
+                onClick={() => onApprovePaymentProof?.(false)}
+                style={{ flex: 1 }}
+              >
+                {actionLoading === "reject_payment" ? "Đang từ chối..." : "❌ Từ chối biên lai"}
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -539,6 +832,12 @@ export function StaffOrdersPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [trackingError, setTrackingError] = useState("");
+  const [orderSerialsInfo, setOrderSerialsInfo] = useState(null);
+  const [serialInputs, setSerialInputs] = useState({});
+  const [serialsLoading, setSerialsLoading] = useState(false);
+  const [serialsSaving, setSerialsSaving] = useState(false);
+  const [serialsError, setSerialsError] = useState("");
+  const [zoomProofUrl, setZoomProofUrl] = useState(null);
 
   useEffect(() => {
     loadOrders();
@@ -548,6 +847,8 @@ export function StaffOrdersPage() {
   useEffect(() => {
     if (!selectedOrderId) {
       setSelectedOrder(null);
+      setOrderSerialsInfo(null);
+      setSerialInputs({});
       window.localStorage.removeItem(STORAGE_KEY);
       return;
     }
@@ -666,6 +967,81 @@ export function StaffOrdersPage() {
     }
   }
 
+  async function loadOrderSerials(orderId) {
+    if (!orderId) {
+      setOrderSerialsInfo(null);
+      setSerialInputs({});
+      return;
+    }
+    try {
+      setSerialsLoading(true);
+      setSerialsError("");
+      const response = await getStaffOrderSerials(orderId);
+      const info = getEnvelopeData(response, null);
+      setOrderSerialsInfo(info);
+
+      const initial = {};
+      (info?.items || []).forEach((item) => {
+        const assigned = (item.assignedSerials || []).map((s) => s.serialNumber);
+        const slots = [];
+        for (let i = 0; i < item.requiredQuantity; i++) {
+          slots.push(assigned[i] || "");
+        }
+        initial[item.orderItemId] = slots;
+      });
+      setSerialInputs(initial);
+    } catch (err) {
+      setSerialsError(getErrorMessage(err, "Không thể tải thông tin Serial Number."));
+    } finally {
+      setSerialsLoading(false);
+    }
+  }
+
+  async function handleSaveSerials() {
+    if (!selectedOrder?.id) return;
+    try {
+      setSerialsSaving(true);
+      setSerialsError("");
+      const assignments = Object.entries(serialInputs).map(([itemId, serials]) => ({
+        orderItemId: Number(itemId),
+        serials: (serials || []).map((s) => String(s || "").trim()).filter(Boolean)
+      }));
+
+      const response = await assignStaffOrderSerials(selectedOrder.id, assignments);
+      const info = getEnvelopeData(response, null);
+      setOrderSerialsInfo(info);
+      setSuccessMessage("Đã lưu Serial Number thành công!");
+      await loadOrderDetail(selectedOrder.id);
+    } catch (err) {
+      setSerialsError(getErrorMessage(err, "Không thể lưu Serial Number."));
+    } finally {
+      setSerialsSaving(false);
+    }
+  }
+
+  async function handleAutoGenerateSerials() {
+    if (!selectedOrder?.id) return;
+    try {
+      setSerialsSaving(true);
+      setSerialsError("");
+      const response = await autoGenerateStaffOrderSerials(selectedOrder.id);
+      const info = getEnvelopeData(response, null);
+      setOrderSerialsInfo(info);
+
+      const initial = {};
+      (info?.items || []).forEach((item) => {
+        initial[item.orderItemId] = (item.assignedSerials || []).map((s) => s.serialNumber);
+      });
+      setSerialInputs(initial);
+      setSuccessMessage("Đã tự động tạo và gán Serial Number mẫu thành công!");
+      await loadOrderDetail(selectedOrder.id);
+    } catch (err) {
+      setSerialsError(getErrorMessage(err, "Không thể tự động tạo Serial Number."));
+    } finally {
+      setSerialsSaving(false);
+    }
+  }
+
   async function loadOrderDetail(orderId) {
     try {
       setDetailLoading(true);
@@ -676,6 +1052,7 @@ export function StaffOrdersPage() {
       setTrackingCode(order?.shipment?.trackingCode || "");
       setConsultationNote(order?.note || "");
       setTrackingError("");
+      loadOrderSerials(orderId);
     } catch (error) {
       setErrorMessage(getErrorMessage(error, "Không thể tải chi tiết đơn hàng."));
     } finally {
@@ -690,6 +1067,9 @@ export function StaffOrdersPage() {
     setTrackingCode(order?.shipment?.trackingCode || "");
     setConsultationNote(order?.note || "");
     setTrackingError("");
+    if (order?.id) {
+      loadOrderSerials(order.id);
+    }
   }
 
   async function refreshCurrentOrder() {
@@ -718,6 +1098,14 @@ export function StaffOrdersPage() {
 
   async function handleShipOrder() {
     if (!selectedOrder) return;
+
+    // Strict validation: Require serial numbers for all hardware items before shipping
+    if (orderSerialsInfo && !orderSerialsInfo.isFullyAssigned) {
+      setErrorMessage(
+        `Không thể xuất kho: Đơn hàng chưa được gán đủ Serial Number cho các linh kiện (${orderSerialsInfo.totalAssignedSerials || 0}/${orderSerialsInfo.totalRequiredSerials || 0} S/N). Vui lòng gán S/N trước khi chuyển sang Đang giao.`
+      );
+      return;
+    }
 
     const normalizedTracking = trackingCode.trim();
     if (!normalizedTracking) {
@@ -790,6 +1178,35 @@ export function StaffOrdersPage() {
     }
   }
 
+  async function handleApprovePaymentProof(approved) {
+    if (!selectedOrder?.id) return;
+    const confirmMsg = approved
+      ? `Xác nhận duyệt biên lai chuyển khoản cho đơn #${selectedOrder.id} và chuyển đơn sang Đang xử lý?`
+      : `Xác nhận từ chối biên lai chuyển khoản của đơn #${selectedOrder.id}?`;
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      setActionLoading(approved ? "approve_payment" : "reject_payment");
+      setErrorMessage("");
+      await approvePaymentProof(selectedOrder.id, {
+        approved,
+        reason: approved ? null : "Biên lai chuyển khoản không hợp lệ hoặc không rõ ràng."
+      });
+      setSuccessMessage(
+        approved
+          ? `Đã duyệt thanh toán đơn #${selectedOrder.id}! Đơn đã chuyển sang Đang xử lý.`
+          : `Đã từ chối biên lai thanh toán của đơn #${selectedOrder.id}.`
+      );
+      const targetFilter = approved ? "PROCESSING" : statusFilter;
+      await Promise.all([loadOrderDetail(selectedOrder.id), loadOrders(targetFilter), loadStatsOrders()]);
+      if (approved) setStatusFilter("PROCESSING");
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error, "Không thể cập nhật trạng thái duyệt biên lai."));
+    } finally {
+      setActionLoading("");
+    }
+  }
+
   async function handleCancelOrder() {
     if (!selectedOrder) return;
 
@@ -822,14 +1239,14 @@ export function StaffOrdersPage() {
   const canMoveToProcessing = selectedOrder?.status === "PENDING";
   const canShip = selectedOrder?.status === "PROCESSING";
   const canMarkDelivered = selectedOrder?.status === "SHIPPED";
-  const canCancel = selectedOrder?.status === "PENDING";
+  const canCancel = selectedOrder?.status === "PENDING" || selectedOrder?.status === "PROCESSING";
   const currentFlowIndex = ORDER_FLOW.indexOf(selectedOrder?.status);
 
   const actionHelp = {
     processing: canMoveToProcessing ? "Xác nhận đơn và chuyển sang bước xử lý." : "Chỉ đơn chờ xử lý mới có thể xác nhận.",
     ship: canShip ? "Nhập mã vận đơn và chuyển đơn sang đang giao." : "Đơn phải ở trạng thái Đang xử lý trước khi giao hàng.",
     delivered: canMarkDelivered ? "Xác nhận đơn vị vận chuyển đã giao hàng. Khách hàng sẽ bấm xác nhận đã nhận hàng để hoàn tất." : "Đơn phải ở trạng thái Đang giao trước khi xác nhận đã giao.",
-    cancel: canCancel ? "Hủy đơn khi đơn vẫn còn ở trạng thái chờ xử lý." : "Chỉ đơn chờ xử lý mới được hủy."
+    cancel: canCancel ? "Hủy đơn trước khi xuất kho và tự động hoàn trả tồn kho." : "Chỉ đơn chờ xử lý hoặc đang xử lý (chưa giao) mới được hủy."
   };
 
   function handleGenerateTracking() {
@@ -1120,7 +1537,23 @@ export function StaffOrdersPage() {
                 <StaffOrderTimeline orderTimeline={orderTimeline} />
                 <StaffCustomerInfo selectedOrder={selectedOrder} customer={customer} selectedStatusMeta={selectedStatusMeta} />
                 <StaffOrderItemsTable selectedOrder={selectedOrder} />
-                <StaffPaymentPanel selectedOrder={selectedOrder} />
+                <StaffSerialNumbersManager
+                  orderSerialsInfo={orderSerialsInfo}
+                  serialsLoading={serialsLoading}
+                  serialsSaving={serialsSaving}
+                  serialsError={serialsError}
+                  serialInputs={serialInputs}
+                  setSerialInputs={setSerialInputs}
+                  handleSaveSerials={handleSaveSerials}
+                  handleAutoGenerateSerials={handleAutoGenerateSerials}
+                  selectedOrder={selectedOrder}
+                />
+                <StaffPaymentPanel
+                  selectedOrder={selectedOrder}
+                  onApprovePaymentProof={handleApprovePaymentProof}
+                  actionLoading={actionLoading}
+                  onZoomProof={setZoomProofUrl}
+                />
                 <StaffShipmentPanel
                   selectedOrder={selectedOrder}
                   shippingCarrier={shippingCarrier}
@@ -1147,7 +1580,7 @@ export function StaffOrdersPage() {
         <div className="staff-modal">
           <div className="staff-modal__panel">
             <h2>Hủy đơn #{selectedOrder?.id}</h2>
-            <p>Nhập lý do hủy đơn. Hành động này chỉ áp dụng cho đơn đang chờ xử lý.</p>
+            <p>Nhập lý do hủy đơn. Tồn kho SKU, lượt dùng voucher và Serial Number đã gán (nếu có) sẽ được tự động hoàn trả.</p>
             <textarea
               className="staff-orders-textarea"
               value={cancelReason}
@@ -1170,6 +1603,43 @@ export function StaffOrdersPage() {
                 Quay lại
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {zoomProofUrl ? (
+        <div
+          className="staff-modal"
+          onClick={() => setZoomProofUrl(null)}
+          style={{ background: "rgba(15, 23, 42, 0.85)", cursor: "zoom-out", zIndex: 100 }}
+        >
+          <div style={{ position: "relative", maxWidth: "90vw", maxHeight: "90vh" }} onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => setZoomProofUrl(null)}
+              style={{
+                position: "absolute",
+                top: -16,
+                right: -16,
+                background: "#ef4444",
+                color: "#fff",
+                border: "none",
+                borderRadius: "50%",
+                width: 36,
+                height: 36,
+                fontSize: 20,
+                fontWeight: 900,
+                cursor: "pointer"
+              }}
+              title="Đóng"
+            >
+              ×
+            </button>
+            <img
+              src={zoomProofUrl}
+              alt="Biên lai phóng to"
+              style={{ maxWidth: "100%", maxHeight: "85vh", borderRadius: 16, objectFit: "contain", background: "#fff" }}
+            />
           </div>
         </div>
       ) : null}

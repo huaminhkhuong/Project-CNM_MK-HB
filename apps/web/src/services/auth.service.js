@@ -1,5 +1,10 @@
 import { httpClient } from "./http";
 
+export async function logout(payload) {
+  const response = await httpClient.post("/auth/logout", payload);
+  return response.data;
+}
+
 export async function login(payload) {
   const response = await httpClient.post("/auth/login", payload);
   return response.data;

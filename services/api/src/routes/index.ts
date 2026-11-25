@@ -17,6 +17,7 @@ import { notificationsRouter } from "../modules/notifications/notifications.rout
 import aiRouter from "../modules/ai/ai.route";
 import productsRouter from "../modules/products/products.route";
 import adminRouter from "../modules/admin/admin.route";
+import adminController from "../modules/admin/admin.controller";
 import staffRouter from "../modules/staff/staff.route";
 import shipmentsRouter from "../modules/shipments/shipments.route";
 import paymentsRouter from "../modules/payments/payments.route";
@@ -29,18 +30,33 @@ export const apiRouter = Router();
 apiRouter.use(generalApiLimiter);
 
 apiRouter.get("/health", async (_req, res) => {
+  const startedAt = Date.now();
   const database = await checkDatabaseConnection();
   const isReady = database.connected;
+  const memory = process.memoryUsage();
 
   res.status(isReady ? 200 : 503).json({
     status: isReady ? "ok" : "degraded",
     service: "api",
+    version: "0.1.0",
+    env: process.env.NODE_ENV || "development",
     timestamp: new Date().toISOString(),
-    database
+    uptimeSeconds: Math.round(process.uptime()),
+    memoryUsageMb: {
+      rss: Math.round(memory.rss / 1024 / 1024),
+      heapUsed: Math.round(memory.heapUsed / 1024 / 1024),
+      heapTotal: Math.round(memory.heapTotal / 1024 / 1024)
+    },
+    database: {
+      ...database,
+      pingLatencyMs: database.latencyMs ?? (Date.now() - startedAt)
+    }
   });
 });
 
-apiRouter.use("/auth", authRouter);
+apiRouter.get("/system/public-info", adminController.getPublicStoreInfo);
+
+apiRouter.use("/auth", authRateLimiter, authRouter);
 apiRouter.use("/users", usersRouter);
 apiRouter.use("/admin", adminRouter);
 apiRouter.use("/staff", staffRouter);

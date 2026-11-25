@@ -4,6 +4,7 @@ import axios from "axios";
 
 import { getCategories, getCompareProducts, getProductDetail, getProducts } from "../../services/catalog.service";
 import { addItemToCart } from "../../services/cart.service";
+import { refreshCart } from "../../store/cartStore";
 import { useAuth } from "../../hooks/useAuth";
 import { getStoredCompareIds, MAX_COMPARE_ITEMS, normalizeCompareIds, storeCompareIds } from "../../utils/compare";
 import { resolveProductImage } from "../../utils/productImage";
@@ -416,15 +417,31 @@ export function CompareProductsPage() {
   async function handleAddToCart(product) {
     const productId = getProductId(product);
     if (!productId) return;
-    if (!isAuthenticated) {
-      navigate("/login");
-      return;
-    }
 
     try {
       setCartLoadingId(productId);
       setActionMessage("");
-      await addItemToCart({ productId, variantId: getPrimarySkuId(product), quantity: 1 });
+      const skuId = getPrimarySkuId(product);
+      await addItemToCart({
+        productId,
+        productVariantId: skuId || productId,
+        variantId: skuId || productId,
+        quantity: 1,
+        unitPrice: getProductPrice(product),
+        product: {
+          id: productId,
+          name: getProductName(product),
+          slug: product?.slug || "",
+          imageUrl: resolveProductImage(product)
+        },
+        variant: {
+          id: skuId || productId,
+          sku: product?.sku || `SKU-${productId}`,
+          price: getProductPrice(product),
+          imageUrl: resolveProductImage(product)
+        }
+      });
+      await refreshCart();
       setActionMessage(`Đã thêm ${getProductName(product)} vào giỏ hàng.`);
     } catch (error) {
       setCompareError(getErrorMessage(error, "Không thể thêm sản phẩm vào giỏ hàng."));

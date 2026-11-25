@@ -129,7 +129,7 @@ npm install --cache .npm-cache --ignore-scripts
 
 ```bash
 # Dùng Docker (khuyến nghị)
-docker compose -f infra/docker/docker-compose.yml up -d
+docker compose up -d
 
 # Hoặc dùng MySQL local: tạo database cnm_mk_hb và import file cnm_ecommerce_new.sql
 ```
@@ -289,12 +289,12 @@ addresses      – địa chỉ giao hàng
 
 | Tầng | Công nghệ |
 |---|---|
-| Frontend | React 18, Vite, React Router v6, Axios |
+| Frontend | React 19, Vite, React Router v7, Axios |
 | Backend | Node.js 20, Express 4, JavaScript + TypeScript |
 | ORM | Prisma (TypeScript) + raw MySQL2 pool (JavaScript) |
 | Database | MySQL 8 |
 | Auth | JWT (Access Token 15m, Refresh Token 7d) |
-| AI | OpenAI GPT API (với Demo Mode fallback) |
+| AI | Unified LLM Adapter (Gemini, Groq, DeepSeek, OpenAI, Ollama) |
 | Payment | VNPay Sandbox |
 | DevOps | Docker, Docker Compose |
 | Package manager | npm workspaces (monorepo) |

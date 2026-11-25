@@ -112,11 +112,13 @@ export function ProfilePage() {
         setProfile(data);
         setOrders(Array.isArray(orderData) ? orderData : []);
         setWarranties(Array.isArray(warrantyData) ? warrantyData : []);
+        const storedDefaultAddr = localStorage.getItem("checkout_addressId") || "";
+        const validStoredDefault = (data?.addresses || []).some((a) => String(a.id) === storedDefaultAddr);
         setProfileForm((prev) => ({
           ...prev,
           fullName: data?.fullName || "",
           phone: data?.phone || "",
-          defaultAddressId: String(data?.addresses?.[0]?.id || "")
+          defaultAddressId: validStoredDefault ? storedDefaultAddr : String(data?.addresses?.[0]?.id || "")
         }));
       } catch (error) {
         setToast({ type: "error", message: getErrorMessage(error, "Không thể tải tài khoản hiện tại.") });
@@ -156,6 +158,9 @@ export function ProfilePage() {
         phone: profileForm.phone
       });
       const data = normalizeProfile(response);
+      if (profileForm.defaultAddressId) {
+        localStorage.setItem("checkout_addressId", String(profileForm.defaultAddressId));
+      }
       setProfile(data);
       await refreshProfile();
       showToast("success", "Thông tin hồ sơ đã được cập nhật.");

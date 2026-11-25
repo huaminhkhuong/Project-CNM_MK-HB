@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 
@@ -9,7 +9,7 @@ import {
   updateAdminCompatibilityRule
 } from "../../services/admin-compatibility.service";
 
-const COMPONENT_OPTIONS = ["CPU", "MAINBOARD", "RAM", "GPU", "STORAGE", "PSU", "CASE"];
+const COMPONENT_OPTIONS = ["CPU", "MAINBOARD", "RAM", "GPU", "SSD", "STORAGE", "PSU", "CASE", "COOLING", "HDD"];
 const RULE_TYPE_OPTIONS = ["ATTRIBUTE_MATCH", "ATTRIBUTE_NOT_MATCH"];
 
 const COMPONENT_LABELS = {
@@ -17,9 +17,12 @@ const COMPONENT_LABELS = {
   MAINBOARD: "Mainboard",
   RAM: "RAM",
   GPU: "GPU",
-  STORAGE: "Storage",
-  PSU: "PSU",
-  CASE: "Case"
+  SSD: "SSD",
+  STORAGE: "Storage (SSD/HDD)",
+  PSU: "PSU (Nguồn)",
+  CASE: "Case (Vỏ máy)",
+  COOLING: "Cooling (Tản nhiệt)",
+  HDD: "HDD"
 };
 
 const RULE_TYPE_LABELS = {
@@ -132,11 +135,28 @@ export function TechCompatibilityPage() {
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [filterComponent, setFilterComponent] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
 
-  const sortedRules = useMemo(
-    () => [...rules].sort((a, b) => Number(b.id || 0) - Number(a.id || 0)),
-    [rules]
-  );
+  const sortedRules = useMemo(() => {
+    const kw = searchKeyword.trim().toLowerCase();
+    return [...rules]
+      .filter((rule) => {
+        if (filterStatus && rule.status !== filterStatus) return false;
+        if (
+          filterComponent &&
+          rule.sourceComponentType !== filterComponent &&
+          rule.targetComponentType !== filterComponent
+        ) {
+          return false;
+        }
+        if (!kw) return true;
+        const haystack = `${rule.id} ${rule.name} ${rule.sourceComponentType} ${rule.targetComponentType} ${rule.sourceAttributeKey} ${rule.targetAttributeKey} ${rule.description}`.toLowerCase();
+        return haystack.includes(kw);
+      })
+      .sort((a, b) => Number(b.id || 0) - Number(a.id || 0));
+  }, [rules, searchKeyword, filterComponent, filterStatus]);
 
   useEffect(() => {
     async function loadRules() {
@@ -332,8 +352,39 @@ export function TechCompatibilityPage() {
 
         <section className="tech-card">
           <div className="tech-section-title">
-            <h3>Danh sách quy tắc ({sortedRules.length})</h3>
+            <h3>Danh sách quy tắc ({sortedRules.length}/{rules.length})</h3>
             <p>Bật hoặc tắt quy tắc để kiểm soát PC Builder ngay lập tức.</p>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 160px 150px", gap: 10, marginBottom: 14 }}>
+            <input
+              type="text"
+              value={searchKeyword}
+              onChange={(event) => setSearchKeyword(event.target.value)}
+              placeholder="Tìm tên quy tắc, thuộc tính (socket, ram_type, psu_wattage)..."
+              style={{ minHeight: 40, padding: "0 12px", borderRadius: 10, border: "1px solid #dcd3ee" }}
+            />
+            <select
+              value={filterComponent}
+              onChange={(event) => setFilterComponent(event.target.value)}
+              style={{ minHeight: 40, padding: "0 10px", borderRadius: 10, border: "1px solid #dcd3ee" }}
+            >
+              <option value="">Tất cả linh kiện</option>
+              {COMPONENT_OPTIONS.map((comp) => (
+                <option key={comp} value={comp}>
+                  {getComponentLabel(comp)}
+                </option>
+              ))}
+            </select>
+            <select
+              value={filterStatus}
+              onChange={(event) => setFilterStatus(event.target.value)}
+              style={{ minHeight: 40, padding: "0 10px", borderRadius: 10, border: "1px solid #dcd3ee" }}
+            >
+              <option value="">Tất cả trạng thái</option>
+              <option value="ACTIVE">Đang bật (ACTIVE)</option>
+              <option value="INACTIVE">Đã tắt (INACTIVE)</option>
+            </select>
           </div>
 
           {loading ? (

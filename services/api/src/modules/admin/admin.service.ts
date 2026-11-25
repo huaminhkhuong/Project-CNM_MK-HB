@@ -1,15 +1,17 @@
-import { getDbPool, query  } from "../../config/database";
-import { env  } from "../../config/env";
-import { createError,
+const { getDbPool, query } = require("../../config/database");
+const { prisma } = require("../../config/prisma");
+const { env } = require("../../config/env");
+const adminTagsService = require("./admin-tags.service");
+const {
+  createError,
   toNonNegativeNumber,
   toPositiveInteger,
   toPositiveNumber
- } from "../../utils/service-helpers";
+} = require("../../utils/service-helpers");
 
 const ROLE_IDENTIFIER_COLUMNS = ["name", "code", "slug"];
 
 let roleIdentifierColumnCache = null;
-let compatibilityRuleNameColumnReady = null;
 
 function slugify(input) {
   return String(input || "")
@@ -20,7 +22,7 @@ function slugify(input) {
     .replace(/-+/g, "-");
 }
 
-function normalizeListParams(params: any = {}, defaultLimit = 20, maxLimit = 100) {
+function normalizeListParams(params = {}, defaultLimit = 20, maxLimit = 100) {
   const page = toPositiveNumber(params.page, 1);
   const limit = Math.min(toPositiveNumber(params.limit, defaultLimit), maxLimit);
 
@@ -48,11 +50,6 @@ function normalizeRuleType(value) {
   }
 
   return normalized;
-}
-
-async function ensureCompatibilityRuleNameColumn() {
-  // CompatibilityRule.name is defined in schema.prisma and managed via migrations
-  return;
 }
 
 function ruleTypeToOperator(ruleType) {
@@ -151,6 +148,7 @@ async function findProductById(productId) {
         p.description,
         p.category_id AS categoryId,
         p.brand_id AS brandId,
+        p.warranty_months AS warrantyMonths,
         p.status,
         p.is_active AS isActive,
         p.created_at AS createdAt,
@@ -178,6 +176,7 @@ async function findProductVariants(productId) {
         price,
         stock AS stock,
         image_url AS imageUrl,
+        warranty_months AS warrantyMonths,
         status,
         is_active AS isActive
       FROM product_skus
@@ -193,6 +192,7 @@ async function findProductVariants(productId) {
     price: Number(row.price || 0),
     stock: Number(row.stock || 0),
     imageUrl: row.imageUrl,
+    warrantyMonths: row.warrantyMonths !== null && row.warrantyMonths !== undefined ? Number(row.warrantyMonths) : null,
     status: row.status || (row.isActive === null ? null : row.isActive ? "ACTIVE" : "INACTIVE") || "ACTIVE"
   }));
 }
@@ -205,12 +205,15 @@ async function getProductDetail(productId) {
   }
 
   const variants = await findProductVariants(productId);
+  const tags = await adminTagsService.getProductTags(product.id);
 
   return {
     id: product.id,
     name: product.name,
     slug: product.slug,
     description: product.description,
+    tags,
+    warrantyMonths: Number(product.warrantyMonths || 24),
     category: {
       id: product.categoryId,
       name: product.categoryName
@@ -226,7 +229,7 @@ async function getProductDetail(productId) {
   };
 }
 
-async function getProducts(params: any = {}) {
+async function getProducts(params = {}) {
   const filters = normalizeListParams(params, 20, 100);
   const safeLimit = Math.max(1, Math.min(Number(filters.limit) || 20, 100));
   const safeOffset = Math.max(0, Number(filters.offset) || 0);
@@ -243,23 +246,6 @@ async function getProducts(params: any = {}) {
     queryParams.push(filters.keyword, filters.keyword, filters.keyword, filters.keyword);
   }
 
-  const catId = Number(params.categoryId || filters.categoryId || 0);
-  if (catId > 0) {
-    whereClauses.push(`p.category_id = ?`);
-    queryParams.push(catId);
-  }
-
-  const bId = Number(params.brandId || filters.brandId || 0);
-  if (bId > 0) {
-    whereClauses.push(`p.brand_id = ?`);
-    queryParams.push(bId);
-  }
-
-  if (params.status || filters.status) {
-    whereClauses.push(`p.status = ?`);
-    queryParams.push(String(params.status || filters.status).trim());
-  }
-
   const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
   const [items, totalRows] = await Promise.all([
@@ -272,6 +258,7 @@ async function getProducts(params: any = {}) {
           p.description,
           p.category_id AS categoryId,
           p.brand_id AS brandId,
+          p.warranty_months AS warrantyMonths,
           p.status,
           p.is_active AS isActive,
           p.created_at AS createdAt,
@@ -286,7 +273,7 @@ async function getProducts(params: any = {}) {
         LEFT JOIN product_skus ps ON ps.product_id = p.id
         ${whereSql}
         GROUP BY p.id
-        ORDER BY FIELD(c.name, 'CPU', 'GPU', 'RAM', 'MAINBOARD', 'SSD', 'PSU', 'CASE', 'COOLING', 'MONITOR', 'KEYBOARD_MOUSE', 'HEADPHONE', 'HDD') ASC, p.id DESC
+        ORDER BY p.id DESC
         LIMIT ${safeLimit} OFFSET ${safeOffset}
       `,
       queryParams
@@ -311,6 +298,7 @@ async function getProducts(params: any = {}) {
       name: row.name,
       slug: row.slug,
       description: row.description,
+      warrantyMonths: Number(row.warrantyMonths || 24),
       category: {
         id: row.categoryId,
         name: row.categoryName
@@ -340,30 +328,31 @@ async function createProduct(payload) {
   const categoryId = toPositiveInteger(payload.categoryId, "categoryId");
   const brandId = toPositiveInteger(payload.brandId, "brandId");
   const description = payload.description !== undefined ? String(payload.description || "").trim() : null;
+  const rawMonths = payload.warrantyMonths ?? payload.warranty_months;
+  const warrantyMonths = rawMonths !== undefined && rawMonths !== null && rawMonths !== "" ? toPositiveInteger(rawMonths, "warrantyMonths") : 24;
 
   await ensureCategoryExists(categoryId);
   await ensureBrandExists(brandId);
   await ensureUniqueProductSlug(slug);
 
-  const [result] = await getDbPool().execute(
-    `
-      INSERT INTO products (
-        name,
-        slug,
-        description,
-        category_id,
-        brand_id,
-        status,
-        is_active,
-        created_at,
-        updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, 'ACTIVE', 1, NOW(), NOW())
-    `,
-    [name, slug, description, categoryId, brandId]
-  );
+  const product = await prisma.product.create({
+    data: {
+      name,
+      slug,
+      description,
+      category_id: categoryId,
+      brand_id: brandId,
+      warranty_months: warrantyMonths,
+      status: "ACTIVE",
+      is_active: true
+    }
+  });
 
-  return getProductDetail((result as any).insertId);
+  if (Array.isArray(payload.tags)) {
+    await adminTagsService.setProductTags(product.id, payload.tags);
+  }
+
+  return getProductDetail(product.id);
 }
 
 async function updateProduct(productId, payload) {
@@ -375,7 +364,7 @@ async function updateProduct(productId, payload) {
   }
 
   const updates = [];
-  const params: any[] = [];
+  const params = [];
 
   if (Object.prototype.hasOwnProperty.call(payload, "name")) {
     updates.push(`name = ?`);
@@ -408,20 +397,35 @@ async function updateProduct(productId, payload) {
     params.push(brandId);
   }
 
-  if (updates.length === 0) {
+  if (Object.prototype.hasOwnProperty.call(payload, "warrantyMonths") || Object.prototype.hasOwnProperty.call(payload, "warranty_months")) {
+    const rawMonths = payload.warrantyMonths ?? payload.warranty_months;
+    const warrantyMonths = toPositiveInteger(rawMonths, "warrantyMonths");
+    updates.push(`warranty_months = ?`);
+    params.push(warrantyMonths);
+  }
+
+  const hasTagsUpdate = Object.prototype.hasOwnProperty.call(payload, "tags");
+
+  if (updates.length === 0 && !hasTagsUpdate) {
     throw createError("No valid product fields provided for update", 400);
   }
 
-  params.push(parsedProductId);
+  if (updates.length > 0) {
+    params.push(parsedProductId);
 
-  await query(
-    `
-      UPDATE products
-      SET ${updates.join(", ")}, updated_at = NOW()
-      WHERE id = ?
-    `,
-    params
-  );
+    await query(
+      `
+        UPDATE products
+        SET ${updates.join(", ")}, updated_at = NOW()
+        WHERE id = ?
+      `,
+      params
+    );
+  }
+
+  if (hasTagsUpdate) {
+    await adminTagsService.setProductTags(parsedProductId, payload.tags);
+  }
 
   return getProductDetail(parsedProductId);
 }
@@ -487,23 +491,17 @@ async function createVariant(productId, payload) {
 
   await ensureUniqueVariantSku(sku);
 
-  await getDbPool().execute(
-    `
-      INSERT INTO product_skus (
-        product_id,
-        sku,
-        price,
-        stock,
-        image_url,
-        status,
-        is_active,
-        created_at,
-        updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, 'ACTIVE', 1, NOW(), NOW())
-    `,
-    [parsedProductId, sku, price, stock, imageUrl]
-  );
+  await prisma.productSku.create({
+    data: {
+      product_id: parsedProductId,
+      sku,
+      price,
+      stock,
+      image_url: imageUrl,
+      status: "ACTIVE",
+      is_active: true
+    }
+  });
 
   return getProductDetail(parsedProductId);
 }
@@ -547,7 +545,7 @@ function formatUser(row) {
   };
 }
 
-async function getUsers(params: any = {}) {
+async function getUsers(params = {}) {
   const roleIdentifierColumn = await getRoleIdentifierColumn();
   const filters = normalizeListParams(params, 20, 100);
   const safeLimit = Math.max(1, Math.min(Number(filters.limit) || 20, 100));
@@ -605,12 +603,16 @@ async function getUsers(params: any = {}) {
   };
 }
 
-async function changeUserStatus(userId, status) {
+async function changeUserStatus(userId, status, actorUserId = null) {
   const parsedUserId = toPositiveInteger(userId, "userId");
   const existingUser = await findUserById(parsedUserId);
 
   if (!existingUser) {
     throw createError("User not found", 404);
+  }
+
+  if (actorUserId && Number(actorUserId) === parsedUserId && String(status || "").toUpperCase() !== "ACTIVE") {
+    throw createError("Không thể tự khóa hoặc vô hiệu hóa tài khoản Quản trị viên đang đăng nhập.", 400);
   }
 
   await query(
@@ -625,18 +627,58 @@ async function changeUserStatus(userId, status) {
   return formatUser(await findUserById(parsedUserId));
 }
 
+async function changeUserRole(userId, role, actorUserId = null) {
+  const parsedUserId = toPositiveInteger(userId, "userId");
+  const normalizedRole = String(role || "").trim().toUpperCase();
+  const allowedRoles = ["CUSTOMER", "SALES_STAFF", "TECH_STAFF", "ADMIN"];
+  if (!allowedRoles.includes(normalizedRole)) {
+    throw createError(`Role must be one of: ${allowedRoles.join(", ")}`, 400);
+  }
+
+  const existingUser = await findUserById(parsedUserId);
+  if (!existingUser) {
+    throw createError("User not found", 404);
+  }
+
+  if (actorUserId && Number(actorUserId) === parsedUserId && normalizedRole !== "ADMIN") {
+    throw createError("Không thể tự hạ quyền tài khoản Quản trị viên đang đăng nhập.", 400);
+  }
+
+  const roleIdentifierColumn = await getRoleIdentifierColumn();
+  const roleRows = await query(
+    `SELECT id FROM roles WHERE UPPER(${roleIdentifierColumn}) = ? LIMIT 1`,
+    [normalizedRole]
+  );
+  if (!roleRows[0]) {
+    throw createError(`Role ${normalizedRole} not found in database`, 404);
+  }
+
+  await query(
+    `UPDATE users SET role_id = ?, updated_at = NOW() WHERE id = ?`,
+    [roleRows[0].id, parsedUserId]
+  );
+
+  return formatUser(await findUserById(parsedUserId));
+}
+
 async function findCategoryByComponentType(componentType) {
+  const normalized = normalizeComponentType(componentType);
+  const candidates =
+    normalized === "STORAGE" || normalized === "SSD"
+      ? ["STORAGE", "SSD"]
+      : normalized === "COOLING"
+        ? ["COOLING", "TẢN NHIỆT"]
+        : [normalized];
+  const placeholders = candidates.map(() => "?").join(", ");
   const rows = await query(
-    `SELECT id, name FROM categories WHERE UPPER(name) = ? LIMIT 1`,
-    [normalizeComponentType(componentType)]
+    `SELECT id, name FROM categories WHERE UPPER(name) IN (${placeholders}) ORDER BY id ASC LIMIT 1`,
+    candidates
   );
 
   return rows[0] || null;
 }
 
 async function findCompatibilityRuleRowById(ruleId) {
-  await ensureCompatibilityRuleNameColumn();
-
   const rows = await query(
     `
       SELECT
@@ -647,6 +689,7 @@ async function findCompatibilityRuleRowById(ruleId) {
         cr.source_attribute_key AS sourceAttributeKey,
         cr.target_attribute_key AS targetAttributeKey,
         cr.operator,
+        cr.is_compatible AS isCompatible,
         cr.description,
         cr.status,
         cr.is_active AS isActive,
@@ -655,8 +698,8 @@ async function findCompatibilityRuleRowById(ruleId) {
         sc.name AS sourceCategoryName,
         tc.name AS targetCategoryName
       FROM compatibility_rules cr
-      INNER JOIN categories sc ON sc.id = cr.source_category_id
-      INNER JOIN categories tc ON tc.id = cr.target_category_id
+      LEFT JOIN categories sc ON sc.id = cr.source_category_id
+      LEFT JOIN categories tc ON tc.id = cr.target_category_id
       WHERE cr.id = ?
       LIMIT 1
     `,
@@ -669,8 +712,8 @@ async function findCompatibilityRuleRowById(ruleId) {
 function formatCompatibilityRule(row) {
   const sourceAttributeKey = normalizeKey(row.sourceAttributeKey);
   const targetAttributeKey = normalizeKey(row.targetAttributeKey);
-  const sourceComponentType = normalizeComponentType(row.sourceCategoryName);
-  const targetComponentType = normalizeComponentType(row.targetCategoryName);
+  const sourceComponentType = normalizeComponentType(row.sourceCategoryName || "CPU");
+  const targetComponentType = normalizeComponentType(row.targetCategoryName || "MAINBOARD");
   const ruleType = operatorToRuleType(row.operator);
   const description = row.description || "";
   const name = row.name || description || `${sourceComponentType} ${sourceAttributeKey} ${ruleType} ${targetComponentType} ${targetAttributeKey}`;
@@ -691,8 +734,6 @@ function formatCompatibilityRule(row) {
 }
 
 async function getCompatibilityRules() {
-  await ensureCompatibilityRuleNameColumn();
-
   const rows = await query(
     `
       SELECT
@@ -703,6 +744,7 @@ async function getCompatibilityRules() {
         cr.source_attribute_key AS sourceAttributeKey,
         cr.target_attribute_key AS targetAttributeKey,
         cr.operator,
+        cr.is_compatible AS isCompatible,
         cr.description,
         cr.status,
         cr.is_active AS isActive,
@@ -711,8 +753,8 @@ async function getCompatibilityRules() {
         sc.name AS sourceCategoryName,
         tc.name AS targetCategoryName
       FROM compatibility_rules cr
-      INNER JOIN categories sc ON sc.id = cr.source_category_id
-      INNER JOIN categories tc ON tc.id = cr.target_category_id
+      LEFT JOIN categories sc ON sc.id = cr.source_category_id
+      LEFT JOIN categories tc ON tc.id = cr.target_category_id
       ORDER BY cr.id DESC
     `
   );
@@ -721,8 +763,6 @@ async function getCompatibilityRules() {
 }
 
 async function createCompatibilityRule(payload) {
-  await ensureCompatibilityRuleNameColumn();
-
   const sourceCategory = await findCategoryByComponentType(payload.sourceComponentType);
   const targetCategory = await findCategoryByComponentType(payload.targetComponentType);
 
@@ -736,42 +776,29 @@ async function createCompatibilityRule(payload) {
 
   const name = String(payload.name || "").trim();
   const description = String(payload.description || "").trim() || null;
-  const operator = ruleTypeToOperator(normalizeRuleType(payload.ruleType));
+  const normalizedRuleType = normalizeRuleType(payload.ruleType);
+  const operator = ruleTypeToOperator(normalizedRuleType);
 
-  const [result] = await getDbPool().execute(
-    `
-      INSERT INTO compatibility_rules (
-        name,
-        source_category_id,
-        target_category_id,
-        source_attribute_key,
-        target_attribute_key,
-        operator,
-        description,
-        status,
-        is_active,
-        created_at,
-        updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 1, NOW(), NOW())
-    `,
-    [
+  const created = await prisma.compatibilityRule.create({
+    data: {
       name,
-      sourceCategory.id,
-      targetCategory.id,
-      normalizeKey(payload.sourceAttributeKey),
-      normalizeKey(payload.targetAttributeKey),
+      source_category_id: sourceCategory.id,
+      target_category_id: targetCategory.id,
+      source_attribute_key: normalizeKey(payload.sourceAttributeKey),
+      target_attribute_key: normalizeKey(payload.targetAttributeKey),
       operator,
-      description
-    ]
-  );
+      is_compatible: normalizedRuleType !== "ATTRIBUTE_NOT_MATCH",
+      description,
+      status: "ACTIVE",
+      is_active: true
+    }
+  });
 
-  return formatCompatibilityRule(await findCompatibilityRuleRowById((result as any).insertId));
+  invalidatePcBuilderRulesCache();
+  return formatCompatibilityRule(await findCompatibilityRuleRowById(created.id));
 }
 
 async function updateCompatibilityRule(ruleId, payload) {
-  await ensureCompatibilityRuleNameColumn();
-
   const parsedRuleId = toPositiveInteger(ruleId, "ruleId");
   const existingRule = await findCompatibilityRuleRowById(parsedRuleId);
 
@@ -780,7 +807,7 @@ async function updateCompatibilityRule(ruleId, payload) {
   }
 
   const updates = [];
-  const params: any[] = [];
+  const params = [];
 
   if (Object.prototype.hasOwnProperty.call(payload, "name")) {
     updates.push(`name = ?`);
@@ -844,6 +871,7 @@ async function updateCompatibilityRule(ruleId, payload) {
     params
   );
 
+  invalidatePcBuilderRulesCache();
   return formatCompatibilityRule(await findCompatibilityRuleRowById(parsedRuleId));
 }
 
@@ -864,19 +892,39 @@ async function changeCompatibilityRuleStatus(ruleId, status) {
     [status, status === "ACTIVE" ? 1 : 0, parsedRuleId]
   );
 
+  invalidatePcBuilderRulesCache();
   return formatCompatibilityRule(await findCompatibilityRuleRowById(parsedRuleId));
 }
 
-function getDashboardSummary() {
+function invalidatePcBuilderRulesCache() {
+  try {
+    const pcBuilderModule = require("../pc-builder/pc-builder.service");
+    const service = pcBuilderModule.pcBuilderService || pcBuilderModule.default;
+    if (service && typeof service.invalidateRulesCache === "function") {
+      service.invalidateRulesCache();
+    }
+  } catch (_err) {
+    // silently ignore if not yet loaded
+  }
+}
+
+async function getDashboardSummary() {
+  const [userRows, productRows, orderRows, pendingOrderRows] = await Promise.all([
+    query("SELECT COUNT(*) AS total FROM users").catch(() => [{ total: 0 }]),
+    query("SELECT COUNT(*) AS total FROM products").catch(() => [{ total: 0 }]),
+    query("SELECT COUNT(*) AS total FROM orders").catch(() => [{ total: 0 }]),
+    query("SELECT COUNT(*) AS total FROM orders WHERE status IN ('PENDING', 'PROCESSING')").catch(() => [{ total: 0 }])
+  ]);
+
   return {
-    totalUsers: 0,
-    totalProducts: 0,
-    totalOrders: 0,
-    pendingOrders: 0
+    totalUsers: Number(userRows[0]?.total || 0),
+    totalProducts: Number(productRows[0]?.total || 0),
+    totalOrders: Number(orderRows[0]?.total || 0),
+    pendingOrders: Number(pendingOrderRows[0]?.total || 0)
   };
 }
 
-export {
+module.exports = {
   getDashboardSummary,
   getProducts,
   createProduct,
@@ -886,21 +934,7 @@ export {
   createVariant,
   getUsers,
   changeUserStatus,
-  getCompatibilityRules,
-  createCompatibilityRule,
-  updateCompatibilityRule,
-  changeCompatibilityRuleStatus
-};
-export default {
-  getDashboardSummary,
-  getProducts,
-  createProduct,
-  updateProduct,
-  changeProductStatus,
-  deleteProduct,
-  createVariant,
-  getUsers,
-  changeUserStatus,
+  changeUserRole,
   getCompatibilityRules,
   createCompatibilityRule,
   updateCompatibilityRule,

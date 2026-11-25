@@ -1,16 +1,21 @@
-import { sendSuccess  } from "../../utils/api-response";
-import { asyncHandler } from "../../utils/async-handler";
-import * as adminService from "./admin.service";
-import * as attributeService from "./admin-attributes.service";
-import * as skuService from "./admin-skus.service";
-import * as adminSystemService from "./admin-system.service";
-import * as adminReportsService from "./admin-reports.service";
-import { recordAuditLog  } from "../../services/audit-log.service";
+const { sendSuccess } = require("../../utils/api-response");
+const { asyncHandler } = require("../../utils/async-handler");
+const adminService = require("./admin.service");
+const attributeService = require("./admin-attributes.service");
+const skuService = require("./admin-skus.service");
+const adminSystemService = require("./admin-system.service");
+const adminReportsService = require("./admin-reports.service");
+const adminTagsService = require("./admin-tags.service");
+const { recordAuditLog } = require("../../services/audit-log.service");
 
-function getDashboardSummary(_req, res) {
-  const result = adminService.getDashboardSummary();
-  return sendSuccess(res, "Admin dashboard fetched successfully", result);
+function getActorUserId(req) {
+  return req.user?.userId ?? req.user?.id ?? null;
 }
+
+const getDashboardSummary = asyncHandler(async (_req, res) => {
+  const result = await adminService.getDashboardSummary();
+  return sendSuccess(res, "Admin dashboard fetched successfully", result);
+});
 
 const getProducts = asyncHandler(async (req, res) => {
   const result = await adminService.getProducts(req.query || {});
@@ -20,7 +25,7 @@ const getProducts = asyncHandler(async (req, res) => {
 const createProduct = asyncHandler(async (req, res) => {
   const result = await adminService.createProduct(req.body || {});
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "PRODUCT_CREATED",
     entityType: "PRODUCT",
@@ -33,7 +38,7 @@ const createProduct = asyncHandler(async (req, res) => {
 const updateProduct = asyncHandler(async (req, res) => {
   const result = await adminService.updateProduct(req.params.productId, req.body || {});
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "PRODUCT_UPDATED",
     entityType: "PRODUCT",
@@ -46,7 +51,7 @@ const updateProduct = asyncHandler(async (req, res) => {
 const changeProductStatus = asyncHandler(async (req, res) => {
   const result = await adminService.changeProductStatus(req.params.productId, req.body.status);
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "PRODUCT_STATUS_UPDATED",
     entityType: "PRODUCT",
@@ -59,7 +64,7 @@ const changeProductStatus = asyncHandler(async (req, res) => {
 const deleteProduct = asyncHandler(async (req, res) => {
   const result = await adminService.deleteProduct(req.params.productId);
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "PRODUCT_DELETED",
     entityType: "PRODUCT",
@@ -72,7 +77,7 @@ const deleteProduct = asyncHandler(async (req, res) => {
 const createVariant = asyncHandler(async (req, res) => {
   const result = await adminService.createVariant(req.params.productId, req.body || {});
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "PRODUCT_VARIANT_CREATED",
     entityType: "PRODUCT",
@@ -88,9 +93,10 @@ const getUsers = asyncHandler(async (req, res) => {
 });
 
 const changeUserStatus = asyncHandler(async (req, res) => {
-  const result = await adminService.changeUserStatus(req.params.userId, req.body.status);
+  const actorUserId = getActorUserId(req);
+  const result = await adminService.changeUserStatus(req.params.userId, req.body.status, actorUserId);
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId,
     actorRole: req.user?.role,
     action: "USER_STATUS_UPDATED",
     entityType: "USER",
@@ -98,6 +104,20 @@ const changeUserStatus = asyncHandler(async (req, res) => {
     description: `Changed user #${req.params.userId} status to ${req.body.status}`
   });
   return sendSuccess(res, "User status updated successfully", result);
+});
+
+const changeUserRole = asyncHandler(async (req, res) => {
+  const actorUserId = getActorUserId(req);
+  const result = await adminService.changeUserRole(req.params.userId, req.body.role, actorUserId);
+  await recordAuditLog({
+    actorUserId,
+    actorRole: req.user?.role,
+    action: "USER_ROLE_UPDATED",
+    entityType: "USER",
+    entityId: req.params.userId,
+    description: `Changed user #${req.params.userId} role to ${req.body.role}`
+  });
+  return sendSuccess(res, "User role updated successfully", result);
 });
 
 const getCompatibilityRules = asyncHandler(async (_req, res) => {
@@ -108,7 +128,7 @@ const getCompatibilityRules = asyncHandler(async (_req, res) => {
 const createCompatibilityRule = asyncHandler(async (req, res) => {
   const result = await adminService.createCompatibilityRule(req.body || {});
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "COMPATIBILITY_RULE_CREATED",
     entityType: "COMPATIBILITY_RULE",
@@ -121,7 +141,7 @@ const createCompatibilityRule = asyncHandler(async (req, res) => {
 const updateCompatibilityRule = asyncHandler(async (req, res) => {
   const result = await adminService.updateCompatibilityRule(req.params.ruleId, req.body || {});
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "COMPATIBILITY_RULE_UPDATED",
     entityType: "COMPATIBILITY_RULE",
@@ -134,7 +154,7 @@ const updateCompatibilityRule = asyncHandler(async (req, res) => {
 const changeCompatibilityRuleStatus = asyncHandler(async (req, res) => {
   const result = await adminService.changeCompatibilityRuleStatus(req.params.ruleId, req.body.status);
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "COMPATIBILITY_RULE_STATUS_UPDATED",
     entityType: "COMPATIBILITY_RULE",
@@ -152,7 +172,7 @@ const getAttributes = asyncHandler(async (_req, res) => {
 const createAttribute = asyncHandler(async (req, res) => {
   const result = await attributeService.createAttribute(req.body || {});
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "ATTRIBUTE_CREATED",
     entityType: "ATTRIBUTE",
@@ -165,7 +185,7 @@ const createAttribute = asyncHandler(async (req, res) => {
 const updateAttribute = asyncHandler(async (req, res) => {
   const result = await attributeService.updateAttribute(req.params.attributeId, req.body || {});
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "ATTRIBUTE_UPDATED",
     entityType: "ATTRIBUTE",
@@ -178,7 +198,7 @@ const updateAttribute = asyncHandler(async (req, res) => {
 const deleteAttribute = asyncHandler(async (req, res) => {
   const result = await attributeService.deleteAttribute(req.params.attributeId);
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "ATTRIBUTE_DELETED",
     entityType: "ATTRIBUTE",
@@ -196,7 +216,7 @@ const getAttributeValues = asyncHandler(async (req, res) => {
 const createAttributeValue = asyncHandler(async (req, res) => {
   const result = await attributeService.createAttributeValue(req.body || {});
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "ATTRIBUTE_VALUE_CREATED",
     entityType: "ATTRIBUTE_VALUE",
@@ -209,7 +229,7 @@ const createAttributeValue = asyncHandler(async (req, res) => {
 const updateAttributeValue = asyncHandler(async (req, res) => {
   const result = await attributeService.updateAttributeValue(req.params.attributeValueId, req.body || {});
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "ATTRIBUTE_VALUE_UPDATED",
     entityType: "ATTRIBUTE_VALUE",
@@ -222,7 +242,7 @@ const updateAttributeValue = asyncHandler(async (req, res) => {
 const deleteAttributeValue = asyncHandler(async (req, res) => {
   const result = await attributeService.deleteAttributeValue(req.params.attributeValueId);
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "ATTRIBUTE_VALUE_DELETED",
     entityType: "ATTRIBUTE_VALUE",
@@ -245,7 +265,7 @@ const getSkuDetail = asyncHandler(async (req, res) => {
 const createSku = asyncHandler(async (req, res) => {
   const result = await skuService.createSku(req.body || {});
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "SKU_CREATED",
     entityType: "SKU",
@@ -258,7 +278,7 @@ const createSku = asyncHandler(async (req, res) => {
 const updateSku = asyncHandler(async (req, res) => {
   const result = await skuService.updateSku(req.params.skuId, req.body || {});
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "SKU_UPDATED",
     entityType: "SKU",
@@ -271,7 +291,7 @@ const updateSku = asyncHandler(async (req, res) => {
 const deleteSku = asyncHandler(async (req, res) => {
   const result = await skuService.deleteSku(req.params.skuId);
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "SKU_DELETED",
     entityType: "SKU",
@@ -284,7 +304,7 @@ const deleteSku = asyncHandler(async (req, res) => {
 const assignSkuAttributes = asyncHandler(async (req, res) => {
   const result = await skuService.assignAttributesToSku(req.params.skuId, req.body.attributeValueIds || []);
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "SKU_ATTRIBUTES_UPDATED",
     entityType: "SKU",
@@ -313,7 +333,7 @@ const getSystemSettings = asyncHandler(async (_req, res) => {
 const updateSystemSettings = asyncHandler(async (req, res) => {
   const result = await adminSystemService.updateSettings(req.body || {});
   await recordAuditLog({
-    actorUserId: req.user?.id,
+    actorUserId: getActorUserId(req),
     actorRole: req.user?.role,
     action: "SYSTEM_SETTINGS_UPDATED",
     entityType: "SYSTEM_SETTINGS",
@@ -322,6 +342,32 @@ const updateSystemSettings = asyncHandler(async (req, res) => {
     metadata: req.body || {}
   });
   return sendSuccess(res, "System settings updated successfully", result);
+});
+
+const getPublicStoreInfo = asyncHandler(async (_req, res) => {
+  const result = await adminSystemService.getPublicStoreInfo();
+  return sendSuccess(res, "Public store info fetched successfully", result);
+});
+
+const getTags = asyncHandler(async (_req, res) => {
+  const result = await adminTagsService.listTags();
+  return sendSuccess(res, "Tags fetched successfully", result);
+});
+
+const createTag = asyncHandler(async (req, res) => {
+  const result = await adminTagsService.createTag(req.body || {});
+  return sendSuccess(res, "Tag created successfully", result, 201);
+});
+
+const deleteTag = asyncHandler(async (req, res) => {
+  const result = await adminTagsService.deleteTag(Number(req.params.tagId));
+  return sendSuccess(res, "Tag deleted successfully", result);
+});
+
+const setProductTags = asyncHandler(async (req, res) => {
+  const productId = Number(req.params.productId);
+  const tags = await adminTagsService.setProductTags(productId, req.body?.tags || []);
+  return sendSuccess(res, "Product tags updated successfully", { productId, tags });
 });
 
 export {
@@ -334,6 +380,7 @@ export {
   createVariant,
   getUsers,
   changeUserStatus,
+  changeUserRole,
   getCompatibilityRules,
   createCompatibilityRule,
   updateCompatibilityRule,
@@ -355,7 +402,12 @@ export {
   getSystemOverview,
   getSalesReport,
   getSystemSettings,
-  updateSystemSettings
+  updateSystemSettings,
+  getPublicStoreInfo,
+  getTags,
+  createTag,
+  deleteTag,
+  setProductTags
 };
 export default {
   getDashboardSummary,
@@ -367,6 +419,7 @@ export default {
   createVariant,
   getUsers,
   changeUserStatus,
+  changeUserRole,
   getCompatibilityRules,
   createCompatibilityRule,
   updateCompatibilityRule,
@@ -388,5 +441,10 @@ export default {
   getSystemOverview,
   getSalesReport,
   getSystemSettings,
-  updateSystemSettings
+  updateSystemSettings,
+  getPublicStoreInfo,
+  getTags,
+  createTag,
+  deleteTag,
+  setProductTags
 };

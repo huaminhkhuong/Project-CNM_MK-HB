@@ -3,6 +3,7 @@ import { Router } from "express";
 import { authenticate } from "../../middlewares/auth.middleware";
 import {
   login,
+  logout,
   me,
   register,
   checkEmail,
@@ -21,6 +22,7 @@ export const authRouter = Router();
 authRouter.post("/register", register);
 authRouter.get("/check-email", checkEmail);
 authRouter.post("/login", login);
+authRouter.post("/logout", logout);
 authRouter.post("/refresh", refresh);
 authRouter.post("/google-mock", googleMock);
 authRouter.get("/me", authenticate, me);

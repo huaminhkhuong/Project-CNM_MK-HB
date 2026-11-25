@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 
 import { OrderStatusBadge } from "../../components/marketplace/OrderStatusBadge";
 import { useAuth } from "../../hooks/useAuth";
+import { addItemToCart } from "../../services/cart.service";
 import { cancelMyOrder, confirmOrderReceived, createVnpayUrl, getMyOrders } from "../../services/order.service";
 import { subscribeToOrderEvents } from "../../services/order-events.service";
 import { routeConfig } from "../../routes/routeConfig";
@@ -24,6 +25,8 @@ function normalizeOrdersResponse(response) {
 function mapOrderItemToUi(item) {
   return {
     id: item.id,
+    productId: item.product_id || item.productId || item.ProductSku?.product_id || item.product?.id || null,
+    productVariantId: item.product_variant_id || item.productVariantId || item.ProductSku?.id || null,
     product_name: item.product_name || item.name_snapshot || item.nameSnapshot || item.productName || item.product?.name || item.ProductSku?.Product?.name || "Sản phẩm",
     name: item.name || item.name_snapshot || item.nameSnapshot || item.productName || item.product?.name || item.ProductSku?.Product?.name || "Sản phẩm",
     sku: item.sku || item.sku_snapshot || item.skuSnapshot || item.ProductSku?.sku,
@@ -136,6 +139,7 @@ const FILTER_TABS = [
   { id: "ALL", label: "Tất cả", icon: "📦" },
   { id: "PENDING", label: "Chờ xác nhận", icon: "⏳" },
   { id: "PROCESSING", label: "Đang xử lý", icon: "⚙️" },
+  { id: "SHIPPED", label: "Đang giao", icon: "🚚" },
   { id: "DELIVERED", label: "Đã giao", icon: "✅" },
   { id: "COMPLETED", label: "Hoàn tất", icon: "✓" },
   { id: "CANCELED", label: "Đã hủy", icon: "✕" }
@@ -206,6 +210,7 @@ function EmptyOrdersState({ hasFilters }) {
 
 export function OrdersPage() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { authState, isAuthenticated } = useAuth();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -267,12 +272,13 @@ export function OrdersPage() {
         acc.total += 1;
         if (status === "PENDING") acc.pending += 1;
         if (status === "PROCESSING" || status === "PAID") acc.processing += 1;
+        if (status === "SHIPPED") acc.shipped += 1;
         if (isDeliveredStatus(status)) acc.delivered += 1;
         if (status === "COMPLETED") acc.completed += 1;
         if (status === "CANCELED") acc.canceled += 1;
         return acc;
       },
-      { total: 0, pending: 0, processing: 0, delivered: 0, completed: 0, canceled: 0 }
+      { total: 0, pending: 0, processing: 0, shipped: 0, delivered: 0, completed: 0, canceled: 0 }
     );
   }, [orders]);
 
@@ -284,6 +290,7 @@ export function OrdersPage() {
       const matchesStatus =
         statusFilter === "ALL" ||
         status === statusFilter ||
+        (statusFilter === "PROCESSING" && (status === "PROCESSING" || status === "PAID")) ||
         (statusFilter === "DELIVERED" && status === "DELIVERED");
       const matchesPayment =
         paymentFilter === "ALL" ||
@@ -299,6 +306,7 @@ export function OrdersPage() {
       ALL: stats.total,
       PENDING: stats.pending,
       PROCESSING: stats.processing,
+      SHIPPED: stats.shipped,
       DELIVERED: stats.delivered,
       COMPLETED: stats.completed,
       CANCELED: stats.canceled
@@ -349,6 +357,40 @@ export function OrdersPage() {
       await loadOrders({ silent: true });
     } catch (error) {
       setErrorMessage(getErrorMessage(error, "Không thể xác nhận nhận hàng"));
+    } finally {
+      setActionOrderId(null);
+    }
+  }
+
+  async function handleReorder(order) {
+    const items = Array.isArray(order?.items) ? order.items : [];
+    const reorderable = items.filter((item) => item.productVariantId || item.productId);
+    if (reorderable.length === 0) {
+      navigate(routeConfig.public.catalog);
+      return;
+    }
+
+    try {
+      setActionOrderId(order.id);
+      setErrorMessage("");
+      let addedCount = 0;
+      for (const item of reorderable) {
+        try {
+          await addItemToCart({
+            ...(item.productId ? { productId: Number(item.productId) } : {}),
+            ...(item.productVariantId ? { productVariantId: Number(item.productVariantId) } : {}),
+            quantity: Math.max(1, Number(item.quantity || 1))
+          });
+          addedCount += 1;
+        } catch {
+          // Skip out-of-stock or inactive items and continue adding remaining items
+        }
+      }
+      if (addedCount > 0) {
+        navigate(routeConfig.public.cart);
+      } else {
+        setErrorMessage("Các sản phẩm trong đơn hàng này hiện đã hết hàng hoặc ngừng kinh doanh.");
+      }
     } finally {
       setActionOrderId(null);
     }
@@ -557,9 +599,9 @@ export function OrdersPage() {
                   <Link to={detailUrl} className="order-action">
                     Theo dõi đơn hàng
                   </Link>
-                  <Link to={routeConfig.public.catalog} className="order-action">
-                    Mua lại
-                  </Link>
+                  <button type="button" className="order-action" disabled={isBusy} onClick={() => handleReorder(order)}>
+                    {isBusy ? "Đang thêm..." : "Mua lại"}
+                  </button>
                   {canCustomerPayOrder(order) ? (
                     <button type="button" className="order-action order-action--pay" disabled={isBusy} onClick={() => handlePayOrder(order)}>
                       {isBusy ? "Đang mở..." : "Thanh toán VNPay"}

@@ -48,6 +48,7 @@ function isBrokenImage(url) {
   if (value.startsWith("data:image/svg+xml")) return false;
   if (value.startsWith("data:image") && value.length < 1000) return true;
   if (value.includes("placehold.co") && /0f172a|111827|black/i.test(value)) return true;
+  if (value.includes("via.placeholder.com") || value.includes("placeholder.com")) return true;
   if (value.includes("null") || value.includes("undefined")) return true;
   return false;
 }
@@ -120,7 +121,7 @@ export function resolveProductImage(product = {}, options = {}) {
     if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("/")) {
       return url;
     }
-    if (url.startsWith("assets/") || url.startsWith("media/")) {
+    if (url.startsWith("assets/") || url.startsWith("media/") || url.startsWith("data/")) {
       return `/${url}`;
     }
     return `/media/${url}`;

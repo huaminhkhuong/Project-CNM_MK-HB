@@ -268,13 +268,13 @@ class RagClientService {
             ]
           },
           {
-            id: "network_connection",
-            label: "Vị trí đặt máy tính của bạn kết nối Internet bằng hình thức nào?",
+            id: "upgrade_priority",
+            label: "Bạn ưu tiên tiêu chí nào hơn cho tản nhiệt và khả năng nâng cấp sau này?",
             type: "single_select",
             options: [
-              { value: "wifi_bt", label: "Bắt sóng Wi-Fi không dây: Gọn gàng, tiện lợi và có sẵn Bluetooth" },
-              { value: "lan_cable", label: "Cắm dây mạng trực tiếp: Ổn định tối đa, tốc độ cao" },
-              { value: "both", label: "Linh hoạt cả hai hình thức" }
+              { value: "silent_247", label: "Êm ái & mát mẻ 24/7: Ưu tiên tản nhiệt tốt, nguồn dư tải bền bỉ" },
+              { value: "future_upgrade", label: "Dễ nâng cấp về sau: Ưu tiên Mainboard nhiều khe RAM/M.2 và nguồn công suất lớn" },
+              { value: "balanced_cost", label: "Tối ưu hiệu năng/giá hiện tại: Đủ dùng ổn định, không cần dư thừa" }
             ]
           },
           {

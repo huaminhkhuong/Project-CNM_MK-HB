@@ -1,80 +1,27 @@
-import { query } from "../../config/database";
-import { createError } from "../../utils/service-helpers";
-import { buildActiveCondition, getTableColumns, pickColumn } from "../../utils/schema-helpers";
+﻿const { prisma } = require("../../config/prisma");
+const { createError } = require("../../utils/service-helpers");
 
-let schemaCache: any = null;
-
-export interface BrandItem {
-  id: number | string;
-  name: string;
-  slug?: string | null;
-  logoUrl?: string | null;
-}
-
-function mapBrand(row: any): BrandItem {
+function mapBrand(row) {
   return {
     id: row.id,
     name: row.name,
-    slug: row.slug,
-    logoUrl: row.logoUrl
+    slug: row.slug || null,
+    logoUrl: row.logo_url || null
   };
 }
 
-async function getSchemaConfig(): Promise<any> {
-  if (schemaCache) {
-    return schemaCache;
-  }
-
-  const columns = await getTableColumns("brands");
-
-  if (columns.length === 0) {
-    schemaCache = null;
-    return null;
-  }
-
-  const config = {
-    table: "brands",
-    id: pickColumn(columns, ["id"]),
-    name: pickColumn(columns, ["name"]),
-    slug: pickColumn(columns, ["slug"], null),
-    logo: pickColumn(columns, ["logo_url", "logo", "image_url"], null),
-    sortOrder: pickColumn(columns, ["sort_order", "display_order"], null),
-    activeCondition: buildActiveCondition("b", columns)
-  };
-
-  if (!config.id || !config.name) {
-    throw createError("Brands table does not have the required columns", 500);
-  }
-
-  schemaCache = config;
-  return config;
-}
-
-export async function getAllBrands(): Promise<BrandItem[]> {
-  const config = await getSchemaConfig();
-
-  if (!config) {
-    return [];
-  }
-
-  const orderParts = [config.sortOrder ? `b.${config.sortOrder} ASC` : null, `b.${config.name} ASC`].filter(Boolean);
-
-  const rows = await query<any[]>(
-    `
-      SELECT
-        b.${config.id} AS id,
-        b.${config.name} AS name,
-        ${config.slug ? `b.${config.slug}` : "NULL"} AS slug,
-        ${config.logo ? `b.${config.logo}` : "NULL"} AS logoUrl
-      FROM ${config.table} b
-      WHERE ${config.activeCondition}
-      ORDER BY ${orderParts.join(", ")}
-    `
-  );
-
+async function getAllBrands() {
+  const rows = await prisma.brand.findMany({
+    where: { is_active: true },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, slug: true, logo_url: true }
+  });
   return rows.map(mapBrand);
 }
 
+export {
+  getAllBrands
+};
 export default {
   getAllBrands
 };

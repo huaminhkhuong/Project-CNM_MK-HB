@@ -96,8 +96,9 @@ export function CategoryGrid({ categories }) {
         }}
       >
         {items.map((category, idx) => {
-          const key = String(category.name || "").toUpperCase();
-          const config = CATEGORY_CONFIG[key] || {
+          const rawKey = String(category.name || "").toUpperCase();
+          const matchedKey = Object.keys(CATEGORY_CONFIG).find((k) => rawKey.includes(k)) || rawKey;
+          const config = CATEGORY_CONFIG[rawKey] || CATEGORY_CONFIG[matchedKey] || {
             icon: "🛍️",
             grad: "linear-gradient(135deg, #475569, #64748b)",
             glow: "rgba(71,85,105,0.4)",

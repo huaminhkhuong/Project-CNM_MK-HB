@@ -21,7 +21,7 @@ function getPoolConfig(): PoolConfig {
         port: Number(parsed.port || 3306),
         user: decodeURIComponent(parsed.username || "root"),
         password: decodeURIComponent(parsed.password || ""),
-        database: parsed.pathname.replace(/^\//, "") || "cnm_ecommerce"
+        database: parsed.pathname.replace(/^\//, "") || "cnm_mk_hb"
       };
     } catch {
       // fallback to env properties if URL parsing fails
@@ -33,7 +33,7 @@ function getPoolConfig(): PoolConfig {
     port: Number(process.env.DB_PORT || env.dbPort || 3306),
     user: process.env.DB_USER || env.dbUser || "root",
     password: process.env.DB_PASSWORD ?? env.dbPassword ?? "",
-    database: process.env.DB_NAME || env.dbName || "cnm_ecommerce"
+    database: process.env.DB_NAME || env.dbName || "cnm_mk_hb"
   };
 }
 
@@ -50,6 +50,14 @@ function createPool(): Pool {
     connectionLimit: 10,
     queueLimit: 0
   });
+
+  const originalEnd = nextPool.end.bind(nextPool);
+  nextPool.end = async function (...args) {
+    if (pool === nextPool) {
+      pool = null;
+    }
+    return originalEnd(...args);
+  };
 
   nextPool.on("connection", (connection) => {
     connection.query("SET time_zone = '+07:00'");

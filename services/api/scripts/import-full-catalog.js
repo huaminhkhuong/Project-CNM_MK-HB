@@ -12,7 +12,13 @@ const fs = require("fs");
 const path = require("path");
 const { query } = require("../src/config/database");
 
-const JSON_FILE_PATH = "T:/Khoa_luan/data/json/pc_components_all.json";
+const candidatePaths = [
+  path.resolve(__dirname, "../../../data/json/pc_components_all.json"),
+  path.resolve(__dirname, "../../data/json/pc_components_all.json"),
+  "C:/Users/ASUS/Downloads/data/data/json/pc_components_all.json",
+  "T:/Khoa_luan/data/json/pc_components_all.json"
+];
+const JSON_FILE_PATH = candidatePaths.find(p => fs.existsSync(p)) || candidatePaths[0];
 
 function slugify(text) {
   return String(text || "")

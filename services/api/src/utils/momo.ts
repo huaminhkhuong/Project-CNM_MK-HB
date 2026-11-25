@@ -41,7 +41,8 @@ export async function generateMomoUrl(
   const { partnerCode, accessKey, secretKey, endpoint } = getMomoConfig();
   const requestId = `MOMO_${orderId}_${Date.now()}`;
   const redirectUrl = `${env.frontendUrl || process.env.FRONTEND_URL || "http://localhost:5173"}/payment/result`;
-  const ipnUrl = `http://localhost:${env.port || 4000}/api/orders/momo/ipn`;
+  const backendBase = (env.backendUrl || process.env.BACKEND_URL || process.env.API_BASE_URL || `http://localhost:${env.port || 4000}`).replace(/\/+$/, "");
+  const ipnUrl = `${backendBase}/api/orders/momo/ipn`;
   const requestType = "captureWallet";
   const extraData = ""; // base64 encoded strings if needed
 

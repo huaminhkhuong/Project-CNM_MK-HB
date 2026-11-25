@@ -51,8 +51,9 @@ export function RequirementWizardModal({
   const [phase, setPhase] = useState("input");
 
   // Input states
+  const [inputMode, setInputMode] = useState("preset"); // "preset" | "custom"
   const [purposeQuery, setPurposeQuery] = useState("");
-  const [selectedPreset, setSelectedPreset] = useState(null);
+  const [selectedPreset, setSelectedPreset] = useState("gaming");
   const [budget, setBudget] = useState(20000000);
 
   // Questionnaire states
@@ -82,20 +83,24 @@ export function RequirementWizardModal({
       setAnalysisStep(1);
 
       if (suggestionForm?.customPrompt) {
+        setInputMode("custom");
         setSelectedPreset(null);
         setPurposeQuery(suggestionForm.customPrompt);
-      } else if (suggestionForm?.purpose && suggestionForm.purpose !== "gaming") {
+      } else if (suggestionForm?.purpose) {
         const found = POPULAR_PRESETS.find((p) => p.id === suggestionForm.purpose || p.query === suggestionForm.purpose);
         if (found) {
+          setInputMode("preset");
           setSelectedPreset(found.id);
           setPurposeQuery(found.query);
         } else {
+          setInputMode("custom");
           setSelectedPreset(null);
           setPurposeQuery(suggestionForm.purpose);
         }
       } else {
-        setSelectedPreset(null);
-        setPurposeQuery("");
+        setInputMode("preset");
+        setSelectedPreset("gaming");
+        setPurposeQuery("Chơi game AAA & Esports");
       }
 
       if (suggestionForm?.budget) {
@@ -107,23 +112,27 @@ export function RequirementWizardModal({
   if (!isOpen) return null;
 
   function handleSelectPreset(preset) {
-    if (selectedPreset === preset.id && purposeQuery.trim() === preset.query) {
-      setSelectedPreset(null);
-      setPurposeQuery("");
-    } else {
-      setSelectedPreset(preset.id);
-      setPurposeQuery(preset.query);
-      if (!budget || budget === 20000000) {
-        setBudget(preset.defaultBudget);
-      }
+    setSelectedPreset(preset.id);
+    setPurposeQuery(preset.query);
+    if (loadingError) setLoadingError("");
+    if (!budget || budget === 20000000) {
+      setBudget(preset.defaultBudget);
     }
   }
 
   // ── PHASE 0 -> PHASE 1: Sinh câu hỏi Step 1 (Khảo sát ban đầu) ──
   async function handleStartQuiz() {
-    const queryText = purposeQuery.trim() || (selectedPreset ? POPULAR_PRESETS.find((p) => p.id === selectedPreset)?.query : "") || "";
+    const queryText =
+      inputMode === "preset"
+        ? (POPULAR_PRESETS.find((p) => p.id === selectedPreset)?.query || "")
+        : purposeQuery.trim();
+
     if (!queryText) {
-      setLoadingError("Vui lòng nhập hoặc chọn mục đích sử dụng máy tính.");
+      setLoadingError(
+        inputMode === "preset"
+          ? "Vui lòng chọn một mục đích sử dụng đề xuất."
+          : "Vui lòng nhập nhu cầu sử dụng máy tính của bạn."
+      );
       return;
     }
 
@@ -339,6 +348,40 @@ export function RequirementWizardModal({
           0%, 100% { opacity: 0.8; transform: scale(0.92); }
           50% { opacity: 1; transform: scale(1.08); }
         }
+        .wizard-budget-slider {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 100%;
+          height: 8px;
+          border-radius: 999px;
+          outline: none;
+          cursor: pointer;
+        }
+        .wizard-budget-slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          background: #2563eb;
+          border: 3px solid #ffffff;
+          box-shadow: 0 2px 8px rgba(37, 99, 235, 0.45);
+          cursor: grab;
+          transition: transform 0.12s ease, box-shadow 0.12s ease;
+        }
+        .wizard-budget-slider::-webkit-slider-thumb:hover {
+          transform: scale(1.12);
+          box-shadow: 0 4px 12px rgba(37, 99, 235, 0.6);
+        }
+        .wizard-budget-slider::-moz-range-thumb {
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          background: #2563eb;
+          border: 3px solid #ffffff;
+          box-shadow: 0 2px 8px rgba(37, 99, 235, 0.45);
+          cursor: grab;
+        }
       `}</style>
       <div
         style={{
@@ -456,119 +499,263 @@ export function RequirementWizardModal({
         {/* ================= MODAL BODY ================= */}
         <div style={{ padding: "24px", overflowY: "auto", flex: 1, minHeight: "440px" }}>
           {/* ── PHASE 0: INPUT & PURPOSE ── */}
-          {phase === "input" && (
+          {phase === "input" && (() => {
+            const minBudget = 6000000;
+            const maxBudget = 80000000;
+            const clampedBudget = Math.min(maxBudget, Math.max(minBudget, Number(budget) || minBudget));
+            const sliderPercent = Math.round(((clampedBudget - minBudget) / (maxBudget - minBudget)) * 100);
+
+            return (
             <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              {/* 1. Chế độ chọn nhu cầu (Tách biệt hoàn toàn: Đề xuất vs Tự nhập) */}
               <div>
-                <label style={{ display: "block", fontSize: "14px", fontWeight: 700, color: "#1e293b", marginBottom: "8px" }}>
-                  1. Mục đích sử dụng hoặc nhu cầu cụ thể của bạn:
-                </label>
-                <input
-                  type="text"
-                  value={purposeQuery}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setPurposeQuery(val);
-                    if (loadingError) setLoadingError("");
-                    const matched = POPULAR_PRESETS.find((p) => p.query.toLowerCase() === val.trim().toLowerCase());
-                    setSelectedPreset(matched ? matched.id : null);
-                  }}
-                  placeholder="Ví dụ: Chơi game GTA V mượt mà, Làm kế toán Excel nặng, Dựng phim 4K..."
-                  style={{
-                    width: "100%",
-                    padding: "12px 16px",
-                    borderRadius: "10px",
-                    border: loadingError ? "2px solid #ef4444" : "2px solid #cbd5e1",
-                    fontSize: "15px",
-                    fontWeight: 600,
-                    outline: "none",
-                    boxSizing: "border-box",
-                    transition: "border-color 0.15s"
-                  }}
-                  onFocus={(e) => (e.target.style.borderColor = loadingError ? "#ef4444" : "#2563eb")}
-                  onBlur={(e) => (e.target.style.borderColor = loadingError ? "#ef4444" : "#cbd5e1")}
-                />
-                <small style={{ color: "#64748b", fontSize: "12px", marginTop: "4px", display: "block" }}>
-                  💡 Bạn có thể nhập tự do bất kỳ tựa game hoặc phần mềm nào, AI sẽ phân tích nhu cầu và tối ưu cấu hình cho bạn.
-                </small>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px", gap: "10px", flexWrap: "wrap" }}>
+                  <label style={{ fontSize: "14px", fontWeight: 700, color: "#1e293b" }}>
+                    1. Nhu cầu sử dụng của bạn:
+                  </label>
+
+                  {/* Segmented Tab Switcher */}
+                  <div
+                    style={{
+                      display: "inline-flex",
+                      background: "#f1f5f9",
+                      padding: "4px",
+                      borderRadius: "10px",
+                      border: "1px solid #e2e8f0"
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInputMode("preset");
+                        if (!selectedPreset) setSelectedPreset("gaming");
+                        if (loadingError) setLoadingError("");
+                      }}
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: "7px",
+                        border: "none",
+                        fontSize: "12px",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        background: inputMode === "preset" ? "#ffffff" : "transparent",
+                        color: inputMode === "preset" ? "#2563eb" : "#64748b",
+                        boxShadow: inputMode === "preset" ? "0 1px 3px rgba(15,23,42,0.12)" : "none",
+                        transition: "all 0.15s"
+                      }}
+                    >
+                      ✨ Chọn theo đề xuất
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInputMode("custom");
+                        if (POPULAR_PRESETS.some((p) => p.query === purposeQuery)) {
+                          setPurposeQuery("");
+                        }
+                        if (loadingError) setLoadingError("");
+                      }}
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: "7px",
+                        border: "none",
+                        fontSize: "12px",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        background: inputMode === "custom" ? "#ffffff" : "transparent",
+                        color: inputMode === "custom" ? "#2563eb" : "#64748b",
+                        boxShadow: inputMode === "custom" ? "0 1px 3px rgba(15,23,42,0.12)" : "none",
+                        transition: "all 0.15s"
+                      }}
+                    >
+                      ✍️ Tự nhập nhu cầu
+                    </button>
+                  </div>
+                </div>
+
+                {/* Chế độ A: Chỉ hiển thị thẻ đề xuất, ẩn ô nhập */}
+                {inputMode === "preset" && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                    {POPULAR_PRESETS.map((preset) => {
+                      const isSelected = selectedPreset === preset.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => handleSelectPreset(preset)}
+                          style={{
+                            padding: "13px 14px",
+                            borderRadius: "12px",
+                            border: isSelected ? "2px solid #2563eb" : "1px solid #e2e8f0",
+                            background: isSelected ? "#eff6ff" : "#f8fafc",
+                            textAlign: "left",
+                            cursor: "pointer",
+                            transition: "all 0.15s",
+                            boxShadow: isSelected ? "0 4px 12px rgba(37, 99, 235, 0.12)" : "none"
+                          }}
+                        >
+                          <strong style={{ display: "block", fontSize: "13px", color: isSelected ? "#1d4ed8" : "#0f172a" }}>
+                            {preset.label}
+                          </strong>
+                          <span style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px", display: "block" }}>
+                            {preset.desc}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Chế độ B: Chỉ hiển thị ô nhập tự do, ẩn thẻ đề xuất */}
+                {inputMode === "custom" && (
+                  <div>
+                    <textarea
+                      rows={3}
+                      value={purposeQuery}
+                      onChange={(e) => {
+                        setPurposeQuery(e.target.value);
+                        if (loadingError) setLoadingError("");
+                      }}
+                      placeholder="Ví dụ: Chơi game Black Myth Wukong mượt ở 2K, hoặc dựng video Premiere 4K, chạy Docker & AI..."
+                      style={{
+                        width: "100%",
+                        padding: "12px 14px",
+                        borderRadius: "12px",
+                        border: loadingError ? "2px solid #ef4444" : "2px solid #cbd5e1",
+                        fontSize: "14px",
+                        fontWeight: 500,
+                        lineHeight: 1.5,
+                        outline: "none",
+                        resize: "vertical",
+                        boxSizing: "border-box",
+                        fontFamily: "inherit",
+                        transition: "border-color 0.15s"
+                      }}
+                      onFocus={(e) => (e.target.style.borderColor = loadingError ? "#ef4444" : "#2563eb")}
+                      onBlur={(e) => (e.target.style.borderColor = loadingError ? "#ef4444" : "#cbd5e1")}
+                    />
+                    <small style={{ color: "#64748b", fontSize: "12px", marginTop: "6px", display: "block" }}>
+                      💡 Hãy mô tả tên game, phần mềm hoặc công việc bạn dùng nhiều nhất để AI phân tích chính xác hơn.
+                    </small>
+                  </div>
+                )}
               </div>
 
-              {/* Preset Buttons */}
-              <div>
-                <label style={{ display: "block", fontSize: "13px", fontWeight: 700, color: "#475569", marginBottom: "8px" }}>
-                  Hoặc chọn nhanh mục đích tiêu chuẩn:
-                </label>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                  {POPULAR_PRESETS.map((preset) => {
-                    const isSelected = selectedPreset === preset.id && purposeQuery.trim().toLowerCase() === preset.query.toLowerCase();
+              {/* 2. Thanh kéo ngân sách thiết kế mới trực quan & dễ chỉnh */}
+              <div
+                style={{
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "14px",
+                  padding: "16px 18px"
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", gap: "10px", flexWrap: "wrap" }}>
+                  <label style={{ fontSize: "14px", fontWeight: 700, color: "#1e293b" }}>
+                    2. Ngân sách dự kiến:
+                  </label>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <button
+                      type="button"
+                      onClick={() => setBudget(Math.max(minBudget, clampedBudget - 1000000))}
+                      style={{
+                        width: "30px",
+                        height: "30px",
+                        borderRadius: "8px",
+                        border: "1px solid #cbd5e1",
+                        background: "#ffffff",
+                        color: "#334155",
+                        fontWeight: 800,
+                        cursor: "pointer"
+                      }}
+                      title="Giảm 1 triệu"
+                    >
+                      −
+                    </button>
+                    <span
+                      style={{
+                        minWidth: "136px",
+                        textAlign: "center",
+                        padding: "5px 12px",
+                        borderRadius: "8px",
+                        background: "#eff6ff",
+                        border: "1px solid #bfdbfe",
+                        fontSize: "15px",
+                        fontWeight: 800,
+                        color: "#1d4ed8"
+                      }}
+                    >
+                      {Number(clampedBudget).toLocaleString("vi-VN")} đ
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setBudget(Math.min(maxBudget, clampedBudget + 1000000))}
+                      style={{
+                        width: "30px",
+                        height: "30px",
+                        borderRadius: "8px",
+                        border: "1px solid #cbd5e1",
+                        background: "#ffffff",
+                        color: "#334155",
+                        fontWeight: 800,
+                        cursor: "pointer"
+                      }}
+                      title="Tăng 1 triệu"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+
+                {/* Custom Slider */}
+                <div style={{ padding: "4px 2px 6px" }}>
+                  <input
+                    type="range"
+                    className="wizard-budget-slider"
+                    min={minBudget}
+                    max={maxBudget}
+                    step={500000}
+                    value={clampedBudget}
+                    onChange={(e) => setBudget(Number(e.target.value))}
+                    style={{
+                      background: `linear-gradient(to right, #2563eb 0%, #2563eb ${sliderPercent}%, #cbd5e1 ${sliderPercent}%, #cbd5e1 100%)`
+                    }}
+                  />
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: 600, color: "#64748b", marginTop: "6px" }}>
+                    <span>6 Triệu</span>
+                    <span>20 Triệu</span>
+                    <span>40 Triệu</span>
+                    <span>60 Triệu</span>
+                    <span>80 Triệu</span>
+                  </div>
+                </div>
+
+                {/* Quick Budget Chips */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "12px" }}>
+                  {BUDGET_PRESETS.map((b) => {
+                    const isActive = clampedBudget === b.value;
                     return (
                       <button
-                        key={preset.id}
+                        key={b.value}
                         type="button"
-                        onClick={() => handleSelectPreset(preset)}
+                        onClick={() => setBudget(b.value)}
                         style={{
-                          padding: "12px 14px",
-                          borderRadius: "10px",
-                          border: isSelected ? "2px solid #2563eb" : "1px solid #e2e8f0",
-                          background: isSelected ? "#eff6ff" : "#f8fafc",
-                          textAlign: "left",
+                          padding: "6px 12px",
+                          borderRadius: "20px",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          border: isActive ? "1px solid #2563eb" : "1px solid #cbd5e1",
+                          background: isActive ? "#2563eb" : "#ffffff",
+                          color: isActive ? "#ffffff" : "#475569",
                           cursor: "pointer",
-                          transition: "all 0.15s"
+                          transition: "all 0.12s"
                         }}
                       >
-                        <strong style={{ display: "block", fontSize: "13px", color: isSelected ? "#1d4ed8" : "#0f172a" }}>
-                          {preset.label}
-                        </strong>
-                        <span style={{ fontSize: "11px", color: "#64748b", marginTop: "2px", display: "block" }}>
-                          {preset.desc}
-                        </span>
+                        {b.label}
                       </button>
                     );
                   })}
                 </div>
-              </div>
-
-              {/* Budget Input & Presets */}
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                  <label style={{ fontSize: "14px", fontWeight: 700, color: "#1e293b" }}>
-                    2. Ngân sách dự kiến của bạn:
-                  </label>
-                  <span style={{ fontSize: "16px", fontWeight: 800, color: "#2563eb" }}>
-                    {Number(budget).toLocaleString("vi-VN")} đ
-                  </span>
-                </div>
-
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "12px" }}>
-                  {BUDGET_PRESETS.map((b) => (
-                    <button
-                      key={b.value}
-                      type="button"
-                      onClick={() => setBudget(b.value)}
-                      style={{
-                        padding: "6px 12px",
-                        borderRadius: "20px",
-                        fontSize: "12px",
-                        fontWeight: 700,
-                        border: budget === b.value ? "1px solid #2563eb" : "1px solid #cbd5e1",
-                        background: budget === b.value ? "#2563eb" : "#ffffff",
-                        color: budget === b.value ? "#ffffff" : "#475569",
-                        cursor: "pointer"
-                      }}
-                    >
-                      {b.label}
-                    </button>
-                  ))}
-                </div>
-
-                <input
-                  type="range"
-                  min="6000000"
-                  max="80000000"
-                  step="1000000"
-                  value={budget}
-                  onChange={(e) => setBudget(Number(e.target.value))}
-                  style={{ width: "100%", accentColor: "#2563eb" }}
-                />
               </div>
 
               {loadingError && (
@@ -588,7 +775,8 @@ export function RequirementWizardModal({
                 </div>
               )}
             </div>
-          )}
+            );
+          })()}
 
           {/* ── PHASE 1 LOADING: GENERATING STEP 1 QUESTIONS ── */}
           {phase === "loading_step1" && (

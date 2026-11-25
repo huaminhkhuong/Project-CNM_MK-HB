@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import {
@@ -24,7 +24,7 @@ import {
 } from "../../services/admin-compatibility.service";
 import { getAdminErrorMessage, normalizeAdminList } from "../../utils/adminUi";
 
-const COMPONENT_OPTIONS = ["CPU", "MAINBOARD", "RAM", "GPU", "STORAGE", "PSU", "CASE"];
+const COMPONENT_OPTIONS = ["CPU", "MAINBOARD", "RAM", "GPU", "STORAGE", "SSD", "HDD", "PSU", "CASE", "COOLING"];
 const RULE_TYPE_OPTIONS = ["ATTRIBUTE_MATCH", "ATTRIBUTE_NOT_MATCH"];
 
 function createInitialFormState() {
@@ -70,12 +70,33 @@ export function AdminCompatibilityRulesPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [statusLoadingId, setStatusLoadingId] = useState(null);
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
   useAdminToast(successMessage, () => setSuccessMessage(""));
 
-  const sortedRules = useMemo(() => [...rules].sort((a, b) => Number(b.id || 0) - Number(a.id || 0)), [rules]);
+  const sortedRules = useMemo(() => {
+    const q = searchKeyword.trim().toLowerCase();
+    return [...rules]
+      .filter((r) => {
+        if (statusFilter !== "ALL" && r.status !== statusFilter) return false;
+        if (!q) return true;
+        return [
+          r.name,
+          r.sourceComponentType,
+          r.targetComponentType,
+          r.sourceAttributeKey,
+          r.targetAttributeKey,
+          r.description
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
+      })
+      .sort((a, b) => Number(b.id || 0) - Number(a.id || 0));
+  }, [rules, searchKeyword, statusFilter]);
 
   useEffect(() => {
     async function loadRules() {
@@ -245,9 +266,30 @@ export function AdminCompatibilityRulesPage() {
         </AdminCard>
 
         <AdminCard>
-          <div className="admin-section-title">
-            <h3>Danh sách ({sortedRules.length})</h3>
-            <p>Bật/tắt rule để kiểm soát PC Builder ngay lập tức.</p>
+          <div className="admin-panel-head" style={{ marginBottom: 14 }}>
+            <div className="admin-section-title">
+              <h3>Danh sách ({sortedRules.length})</h3>
+              <p>Bật/tắt rule để kiểm soát PC Builder ngay lập tức.</p>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <input
+                className="admin-input"
+                placeholder="Tìm tên rule, linh kiện, key..."
+                value={searchKeyword}
+                onChange={(e) => setSearchKeyword(e.target.value)}
+                style={{ minWidth: 200 }}
+              />
+              <select
+                className="admin-input"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                style={{ width: 130 }}
+              >
+                <option value="ALL">Tất cả</option>
+                <option value="ACTIVE">Đang bật</option>
+                <option value="INACTIVE">Đang tắt</option>
+              </select>
+            </div>
           </div>
           {loading ? (
             <AdminEmpty>Đang tải…</AdminEmpty>

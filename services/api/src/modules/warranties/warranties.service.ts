@@ -1,6 +1,6 @@
-﻿import { query  } from "../../config/database";
-import { createError, toPositiveInteger  } from "../../utils/service-helpers";
-import { getTableColumns, pickColumn  } from "../../utils/schema-helpers";
+const { query } = require("../../config/database");
+const { createError, toPositiveInteger } = require("../../utils/service-helpers");
+const { getTableColumns, pickColumn } = require("../../utils/schema-helpers");
 
 let schemaCache = null;
 
@@ -142,7 +142,7 @@ async function getEligibleOrderItems(userId) {
   }));
 }
 
-async function getMyWarranties(userId, params: any = {}) {
+async function getMyWarranties(userId, params = {}) {
   const schema = await getSchema();
   const keyword = String(params.keyword || "").trim();
   const clauses = [`w.${schema.warranties.userId} = ?`];
@@ -182,7 +182,7 @@ async function getMyWarranties(userId, params: any = {}) {
   return rows.map(mapWarrantyRow);
 }
 
-async function activateWarranty(userId, payload: any = {}) {
+async function activateWarranty(userId, payload = {}) {
   const schema = await getSchema();
   const orderItemId = toPositiveInteger(payload.orderItemId || payload.order_item_id, "orderItemId");
   const note = String(payload.note || "").trim() || null;
@@ -210,10 +210,18 @@ async function activateWarranty(userId, payload: any = {}) {
     params.push(orderItemId);
   }
 
-  if (schema.warranties.skuId && targetItem.skuId) {
+  let finalSkuId = targetItem.skuId;
+  if (!finalSkuId && targetItem.sku) {
+    const skuRows = await query("SELECT id FROM product_skus WHERE sku = ? LIMIT 1", [targetItem.sku]);
+    if (skuRows && skuRows[0]) {
+      finalSkuId = skuRows[0].id;
+    }
+  }
+
+  if (schema.warranties.skuId && finalSkuId) {
     fields.push(schema.warranties.skuId);
     values.push("?");
-    params.push(targetItem.skuId);
+    params.push(finalSkuId);
   }
 
   if (schema.warranties.status) {
@@ -233,9 +241,36 @@ async function activateWarranty(userId, payload: any = {}) {
     values.push("NOW()");
   }
 
+  // Resolve warranty months from SKU / Product master data
+  let warrantyMonths = 24;
+  try {
+    const masterRows = await query(
+      `
+        SELECT
+          s.warranty_months AS skuWarrantyMonths,
+          p.warranty_months AS productWarrantyMonths,
+          c.name AS categoryName,
+          p.name AS productName
+        FROM order_items oi
+        LEFT JOIN product_skus s ON s.id = oi.product_variant_id
+        LEFT JOIN products p ON p.id = COALESCE(s.product_id, oi.product_id)
+        LEFT JOIN categories c ON c.id = p.category_id
+        WHERE oi.id = ?
+        LIMIT 1
+      `,
+      [orderItemId]
+    );
+    if (masterRows && masterRows[0]) {
+      const { getWarrantyMonthsFromItem } = require("./warranty-sync.service");
+      warrantyMonths = getWarrantyMonthsFromItem(masterRows[0]);
+    }
+  } catch (_e) {
+    warrantyMonths = 24;
+  }
+
   if (schema.warranties.expiresAt) {
     fields.push(schema.warranties.expiresAt);
-    values.push("DATE_ADD(NOW(), INTERVAL 365 DAY)");
+    values.push(`DATE_ADD(NOW(), INTERVAL ${Number(warrantyMonths) || 24} MONTH)`);
   }
 
   if (schema.warranties.createdAt) {
@@ -249,7 +284,7 @@ async function activateWarranty(userId, payload: any = {}) {
   );
 
   const warranties = await getMyWarranties(userId, { keyword: warrantyCode });
-  const createdWarranty = warranties.find((item) => item.id === (result as any).insertId) || warranties[0] || null;
+  const createdWarranty = warranties.find((item) => item.id === result.insertId) || warranties[0] || null;
 
   if (!createdWarranty) {
     throw createError("Warranty activated but could not be fetched", 500);
@@ -258,12 +293,7 @@ async function activateWarranty(userId, payload: any = {}) {
   return createdWarranty;
 }
 
-export {
-  getEligibleOrderItems,
-  getMyWarranties,
-  activateWarranty
-};
-export default {
+module.exports = {
   getEligibleOrderItems,
   getMyWarranties,
   activateWarranty

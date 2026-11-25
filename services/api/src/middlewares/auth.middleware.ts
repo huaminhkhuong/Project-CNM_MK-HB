@@ -5,8 +5,9 @@ import { env } from "../config/env";
 import { AppError } from "../errors/app-error";
 import type { AuthTokenPayload } from "../types/auth";
 import { ROLES, type Role } from "../constants/roles";
+import { isTokenBlacklisted } from "../services/token-blacklist.service";
 
-export function authenticate(req: Request, _res: Response, next: NextFunction) {
+export async function authenticate(req: Request, _res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -17,10 +18,15 @@ export function authenticate(req: Request, _res: Response, next: NextFunction) {
 
   try {
     const payload = jwt.verify(token, env.jwtAccessSecret) as AuthTokenPayload;
-    if (!payload.id && payload.userId) {
-      payload.id = payload.userId;
+    const revoked = await isTokenBlacklisted(token);
+    if (revoked) {
+      return next(new AppError("Token has been revoked", 401));
     }
-    req.user = payload;
+    req.user = {
+      ...payload,
+      userId: Number(payload.userId) || payload.userId,
+      id: Number(payload.userId) || payload.userId
+    } as any;
     return next();
   } catch (_error) {
     return next(new AppError("Invalid or expired token", 401));
@@ -68,10 +74,11 @@ export function optionalAuthenticate(req: Request, _res: Response, next: NextFun
   const token = authHeader.split(" ")[1];
   try {
     const payload = jwt.verify(token, env.jwtAccessSecret) as AuthTokenPayload;
-    if (!payload.id && payload.userId) {
-      payload.id = payload.userId;
-    }
-    req.user = payload;
+    req.user = {
+      ...payload,
+      userId: Number(payload.userId) || payload.userId,
+      id: Number(payload.userId) || payload.userId
+    } as any;
   } catch (_error) {
     // Non-blocking: continue as guest if token is invalid or expired
   }
@@ -125,4 +132,3 @@ export function requirePermission(permission: Permission | string) {
 }
 
 export { ROLES };
-export { normalizeRole, expandRole, roleMatches, hasAnyRole } from "../constants/roles";

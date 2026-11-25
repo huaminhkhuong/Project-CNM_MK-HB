@@ -5,6 +5,7 @@ import { PerformanceScoreWidget } from "../../components/pc-builder/PerformanceS
 import { XAIExplanationDrawer } from "../../components/pc-builder/XAIExplanationDrawer";
 import { useAuth } from "../../hooks/useAuth";
 import { routeConfig } from "../../routes/routeConfig";
+import { usePageSeo } from "../../hooks/usePageSeo";
 
 const formatCurrency = (val) => Number(val || 0).toLocaleString("vi-VN");
 
@@ -16,8 +17,17 @@ export function SharedBuildPage() {
   const [build, setBuild] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [cloning, setCloning] = useState(false);
   const [isXaiDrawerOpen, setIsXaiDrawerOpen] = useState(false);
+
+  usePageSeo({
+    title: build?.name ? `Cấu Hình: ${build.name}` : "Cấu Hình PC Được Chia Sẻ",
+    description: build?.name
+      ? `Xem chi tiết cấu hình máy tính ${build.name} gồm ${build.items?.length || 0} linh kiện với tổng giá trị ${formatCurrency(build.totalPrice)}đ trên PC Mall.`
+      : "Chi tiết cấu hình PC tự ráp được chia sẻ trên hệ thống PC Mall.",
+    type: "article"
+  });
 
   useEffect(() => {
     async function fetchSharedBuild() {
@@ -39,18 +49,44 @@ export function SharedBuildPage() {
     }
   }, [shareToken]);
 
+  function buildLoadPayload() {
+    const rawItems = build?.items || [];
+    return {
+      loadBuild: {
+        components: rawItems.map((item) => ({
+          componentType: item.componentType,
+          id: item.product?.id,
+          productId: item.product?.id,
+          name: item.product?.name,
+          productName: item.product?.name,
+          slug: item.product?.slug,
+          price: item.unitPrice,
+          skuId: item.variant?.id,
+          sku: item.variant?.sku,
+          imageUrl: item.variant?.imageUrl,
+          quantity: item.quantity || 1
+        }))
+      }
+    };
+  }
+
+  function handleLoadIntoWorkspace() {
+    navigate(routeConfig.public.pcBuilder, { state: buildLoadPayload() });
+  }
+
   async function handleCloneBuild() {
     if (!isAuthenticated) {
-      navigate(routeConfig.public.login);
+      navigate(`${routeConfig.public.login}?redirect=/pc-builder/shared/${shareToken}`);
       return;
     }
 
     try {
       setCloning(true);
+      setActionError("");
       await httpClient.post(`/pc-builder/${build.id}/clone`);
-      navigate(routeConfig.public.pcBuilder);
+      navigate(routeConfig.public.pcBuilder, { state: buildLoadPayload() });
     } catch (err) {
-      alert(err.response?.data?.message || "Không thể sao chép cấu hình.");
+      setActionError(err.response?.data?.message || "Không thể sao chép cấu hình.");
     } finally {
       setCloning(false);
     }
@@ -94,11 +130,20 @@ export function SharedBuildPage() {
             <span>Tổng giá trị</span>
             <strong>{formatCurrency(build.totalPrice)}đ</strong>
           </div>
-          <button style={styles.cloneBtn} onClick={handleCloneBuild} disabled={cloning}>
+          <button style={styles.btnPrimary} type="button" onClick={handleLoadIntoWorkspace}>
+            ⚙️ Nạp Vào Không Gian Lắp Ráp
+          </button>
+          <button style={styles.cloneBtn} type="button" onClick={handleCloneBuild} disabled={cloning}>
             {cloning ? "Đang sao chép..." : "📋 Clone về Tài Khoản của Tôi"}
           </button>
         </div>
       </div>
+
+      {actionError && (
+        <div style={{ backgroundColor: "#fef2f2", border: "1px solid #fecdd3", color: "#be123c", padding: "12px 16px", borderRadius: "12px", marginBottom: "16px", fontWeight: 600, fontSize: "13px" }}>
+          ⛔ {actionError}
+        </div>
+      )}
 
       {/* PERFORMANCE WIDGET */}
       {xaiReport?.performanceEstimate && (
@@ -126,9 +171,14 @@ export function SharedBuildPage() {
                 <td style={styles.tdCategory}>{String(item.componentType).toUpperCase()}</td>
                 <td style={styles.tdName}>
                   <strong>{item.product?.name || "Linh kiện"}</strong>
+                  {item.quantity > 1 && (
+                    <span style={{ marginLeft: 8, padding: "2px 6px", borderRadius: 4, background: "#dbeafe", color: "#1d4ed8", fontSize: 11, fontWeight: 800 }}>
+                      x{item.quantity}
+                    </span>
+                  )}
                 </td>
                 <td style={styles.tdSku}>{item.variant?.sku || "—"}</td>
-                <td style={styles.tdPrice}>{formatCurrency(item.unitPrice)}đ</td>
+                <td style={styles.tdPrice}>{formatCurrency(item.lineTotal || item.unitPrice * (item.quantity || 1))}đ</td>
               </tr>
             ))}
           </tbody>

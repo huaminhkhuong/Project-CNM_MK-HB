@@ -56,6 +56,48 @@ export function AiChatWidget() {
   const [isLoading, setIsLoading] = useState(false);
   const chatBottomRef = useRef(null);
 
+  /* Tooltip Visibility & Auto-collapse on Scroll / Dismiss / Timeout [UX-001] */
+  const [isScrolled, setIsScrolled] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const [tooltipDismissed, setTooltipDismissed] = useState(() => {
+    try {
+      return sessionStorage.getItem("cnm_ai_tooltip_dismissed") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    let timeoutId;
+    function handleScroll() {
+      const scrolled = window.scrollY > 80;
+      setIsScrolled(scrolled);
+    }
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    handleScroll();
+
+    // Auto-collapse tooltip after 8s if user hasn't interacted
+    timeoutId = setTimeout(() => {
+      setIsScrolled(true);
+    }, 8000);
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, []);
+
+  function handleDismissTooltip(e) {
+    e.stopPropagation();
+    setTooltipDismissed(true);
+    try {
+      sessionStorage.setItem("cnm_ai_tooltip_dismissed", "true");
+    } catch {
+      // ignore
+    }
+  }
+
   useEffect(() => {
     if (activeTab === "chat" && chatBottomRef.current) {
       chatBottomRef.current.scrollIntoView({ behavior: "smooth" });
@@ -86,7 +128,8 @@ export function AiChatWidget() {
       budget: Number(budget),
       resolution,
       ownedList,
-      ownedNotes
+      ownedNotes,
+      isFormSubmit: true
     });
   }
 
@@ -119,7 +162,6 @@ export function AiChatWidget() {
 
     const activeCriteria = extraCriteria || {
       purpose,
-      budget: Number(budget),
       resolution,
       ownedList: [
         ...(ownedRam ? ["RAM"] : []),
@@ -127,7 +169,8 @@ export function AiChatWidget() {
         ...(ownedGpu ? ["GPU/Card màn hình"] : []),
         ...(ownedCase ? ["Vỏ Case"] : [])
       ],
-      ownedNotes
+      ownedNotes,
+      isFormSubmit: false
     };
 
     try {
@@ -187,17 +230,42 @@ export function AiChatWidget() {
     <div className="ai-chat-widget-root">
       {/* ── 3D MASCOT ULTRA VIP ANIMATED FLOATING ACTION BUTTON ───────── */}
       {!isOpen && (
-        <div className="ai-mascot-fab-wrap">
+        <div
+          className="ai-mascot-fab-wrap"
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseLeave={() => setIsHovered(false)}
+        >
           {/* Floating Tooltip Speech Bubble */}
-          <div className="ai-mascot-tooltip" onClick={() => setIsOpen(true)}>
+          <div
+            className={`ai-mascot-tooltip ${isScrolled ? "is-scrolled" : ""} ${tooltipDismissed ? "is-dismissed" : ""}`}
+            data-testid="ai-mascot-tooltip"
+            onClick={() => setIsOpen(true)}
+            style={{
+              opacity: !tooltipDismissed && (!isScrolled || isHovered) ? 1 : 0,
+              pointerEvents: !tooltipDismissed && (!isScrolled || isHovered) ? "auto" : "none",
+              transform: !tooltipDismissed && (!isScrolled || isHovered) ? "translateY(0) scale(1)" : "translateY(6px) scale(0.95)",
+              transition: "all 0.25s cubic-bezier(0.16, 1, 0.3, 1)"
+            }}
+          >
             <span className="tooltip-dot" />
             <span className="tooltip-text">👋 Tư vấn PC 24/7 với AI</span>
+            <button
+              type="button"
+              className="tooltip-dismiss-btn"
+              data-testid="ai-mascot-tooltip-close"
+              title="Đóng thông báo"
+              onClick={handleDismissTooltip}
+              aria-label="Đóng gợi ý tư vấn AI"
+            >
+              ✕
+            </button>
           </div>
 
           {/* 3D Mascot Circular Button */}
           <button
             type="button"
             className="ai-mascot-fab"
+            data-testid="ai-mascot-fab"
             onClick={() => setIsOpen(true)}
             title="Mở AI Assistant Tư Vấn Cấu Hình PC"
             aria-label="Mở AI Assistant"
@@ -496,6 +564,26 @@ export function AiChatWidget() {
           {activeTab === "chat" && (
             <div className="ai-chat-footer">
               <div className="ai-prompt-chips">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsOpen(false);
+                    navigate("/ai-chat?mode=human");
+                  }}
+                  style={{ background: "#ecfdf5", borderColor: "#6ee7b7", color: "#047857", fontWeight: 700 }}
+                >
+                  🎧 Gặp Nhân Viên Sale
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsOpen(false);
+                    navigate("/tickets/new");
+                  }}
+                  style={{ background: "#eff6ff", borderColor: "#93c5fd", color: "#1d4ed8", fontWeight: 700 }}
+                >
+                  🛠️ Hỗ Trợ Kỹ Thuật
+                </button>
                 <button
                   type="button"
                   onClick={() => sendUserMessage("RAM 3200 cắm mainboard 2666 có cháy không bạn?")}

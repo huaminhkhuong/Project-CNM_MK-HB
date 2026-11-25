@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 const QUICK_SUGGESTIONS = [
   { label: "CPU Intel Core i9", icon: "🧠" },
@@ -11,13 +11,21 @@ const QUICK_SUGGESTIONS = [
 ];
 
 export function SearchBar() {
-  const navigate   = useNavigate();
+  const navigate       = useNavigate();
+  const [searchParams] = useSearchParams();
+  const urlSearch      = searchParams.get("search") || searchParams.get("q") || searchParams.get("keyword") || "";
+
   const inputRef   = useRef(null);
   const wrapRef    = useRef(null);
-  const [query, setQuery]         = useState("");
+  const [query, setQuery]         = useState(urlSearch);
   const [focused, setFocused]     = useState(false);
   const [hovered, setHovered]     = useState(false);
   const showDrop = focused && query.length === 0;
+
+  /* Keep input synced if search parameter in URL changes */
+  useEffect(() => {
+    setQuery(urlSearch);
+  }, [urlSearch]);
 
   /* Close on outside click */
   useEffect(() => {
@@ -33,7 +41,17 @@ export function SearchBar() {
     const q = query.trim();
     if (q) {
       navigate(`/products?search=${encodeURIComponent(q)}`);
-      setFocused(false);
+    } else {
+      navigate("/products");
+    }
+    setFocused(false);
+  };
+
+  const handleClear = () => {
+    setQuery("");
+    inputRef.current?.focus();
+    if (urlSearch) {
+      navigate("/products");
     }
   };
 
@@ -49,6 +67,8 @@ export function SearchBar() {
     <div ref={wrapRef} style={{ position: "relative", width: "100%" }}>
       {/* ── Search Form ── */}
       <form
+        id="header-search-form"
+        data-testid="header-search-form"
         onSubmit={handleSubmit}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -88,6 +108,8 @@ export function SearchBar() {
 
         {/* Input */}
         <input
+          id="header-search-input"
+          data-testid="header-search-input"
           ref={inputRef}
           type="text"
           placeholder="Tìm linh kiện PC..."
@@ -113,8 +135,10 @@ export function SearchBar() {
         {/* Clear button */}
         {query && (
           <button
+            id="header-search-clear"
+            data-testid="header-search-clear"
             type="button"
-            onClick={() => { setQuery(""); inputRef.current?.focus(); }}
+            onClick={handleClear}
             style={{
               background: "rgba(255,255,255,0.08)",
               border: "none",
@@ -140,6 +164,8 @@ export function SearchBar() {
 
         {/* Submit button */}
         <button
+          id="header-search-submit"
+          data-testid="header-search-submit"
           type="submit"
           title="Tìm kiếm"
           style={{
@@ -214,6 +240,7 @@ export function SearchBar() {
           {QUICK_SUGGESTIONS.map((s, i) => (
             <button
               key={i}
+              data-testid={`search-suggestion-${i}`}
               type="button"
               onClick={() => handleSuggestion(s.label)}
               style={{

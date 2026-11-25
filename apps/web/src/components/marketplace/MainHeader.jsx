@@ -3,12 +3,28 @@ import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { SearchBar } from "./SearchBar";
 import { ThemeToggle } from "../common/ThemeToggle";
+import { useCart } from "../../hooks/useCart";
+import { NotificationBell } from "../notifications/NotificationBell";
 
 export function MainHeader() {
   const { authState } = useAuth();
   const location = useLocation();
   const normalizedRole = String(authState?.user?.role || "").trim().toUpperCase();
   const [scrolled, setScrolled] = useState(false);
+  const [bump, setBump] = useState(false);
+  const { totalCount: cartCount, reloadCart } = useCart();
+
+  useEffect(() => {
+    reloadCart();
+  }, [authState?.accessToken, location.pathname, reloadCart]);
+
+  useEffect(() => {
+    if (cartCount > 0) {
+      setBump(true);
+      const timer = setTimeout(() => setBump(false), 300);
+      return () => clearTimeout(timer);
+    }
+  }, [cartCount]);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 10);
@@ -214,11 +230,18 @@ export function MainHeader() {
             </Link>
           )}
 
+          {/* In-app Notifications */}
+          <NotificationBell />
+
           {/* Cart */}
           <Link
+            id="header-cart-link"
+            data-testid="header-cart-link"
             to="/cart"
             title="Giỏ hàng"
+            aria-label="Giỏ hàng"
             style={{
+              position: "relative",
               width: 38,
               height: 38,
               display: "flex",
@@ -250,6 +273,34 @@ export function MainHeader() {
               <line x1="3" y1="6" x2="21" y2="6" />
               <path d="M16 10a4 4 0 0 1-8 0" />
             </svg>
+            {cartCount > 0 && (
+              <span
+                id="header-cart-badge"
+                data-testid="header-cart-badge"
+                className="header-cart-badge"
+                style={{
+                  position: "absolute",
+                  top: -4,
+                  right: -4,
+                  background: "#ef4444",
+                  color: "#ffffff",
+                  fontSize: "10px",
+                  fontWeight: 700,
+                  minWidth: 18,
+                  height: 18,
+                  lineHeight: "18px",
+                  borderRadius: 9,
+                  textAlign: "center",
+                  padding: "0 4px",
+                  boxShadow: "0 2px 6px rgba(239, 68, 68, 0.5)",
+                  pointerEvents: "none",
+                  transform: bump ? "scale(1.3)" : "scale(1)",
+                  transition: "transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)",
+                }}
+              >
+                {cartCount > 99 ? "99+" : cartCount}
+              </span>
+            )}
           </Link>
         </div>
       </div>

@@ -5,6 +5,7 @@
  * Usage: <RealtimeToast /> in RootApp.jsx
  */
 import { useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { useSocket } from "../hooks/useSocket";
 import { useAuth } from "../hooks/useAuth";
 
@@ -21,7 +22,7 @@ const ICONS = {
 
 let toastId = 0;
 
-function Toast({ toast, onDismiss }) {
+function Toast({ toast, onDismiss, onNavigate }) {
   useEffect(() => {
     const timer = setTimeout(() => onDismiss(toast.id), TOAST_DURATION);
     return () => clearTimeout(timer);
@@ -33,7 +34,11 @@ function Toast({ toast, onDismiss }) {
       data-type={toast.type || "info"}
       role="alert"
       aria-live="polite"
-      onClick={() => onDismiss(toast.id)}
+      onClick={() => {
+        onDismiss(toast.id);
+        if (toast.link && onNavigate) onNavigate(toast.link);
+      }}
+      style={{ cursor: toast.link ? "pointer" : "default" }}
     >
       <span className="rt-toast-icon">{ICONS[toast.type] || ICONS.info}</span>
       <div className="rt-toast-body">
@@ -56,6 +61,7 @@ export function RealtimeToast() {
   const [toasts, setToasts] = useState([]);
   const { authState } = useAuth();
   const { joinRoom, on } = useSocket();
+  const navigate = useNavigate();
 
   const addToast = useCallback((toast) => {
     setToasts((prev) => [
@@ -69,59 +75,105 @@ export function RealtimeToast() {
   }, []);
 
   const role = authState?.user?.role?.toUpperCase();
+  const currentUserId = authState?.user?.id || authState?.user?.userId;
+  const currentStaffName = authState?.user?.fullName || authState?.user?.email || "Nhân viên bán hàng";
 
   useEffect(() => {
-    if (!role) return;
+    const cleanups = [];
 
-    // Nhân viên bán hàng: nhận thông báo chat mới
-    if (role === "SALES_STAFF" || role === "ADMIN") {
-      joinRoom("join_staff_queue");
+    // 🔔 Nhận thông báo in-app realtime cho tất cả người dùng đăng nhập
+    if (currentUserId) {
+      joinRoom("join_user", currentUserId);
 
-      on("queue:new_session", (data) => {
-        addToast({
-          type: "chat",
-          title: "Yêu cầu tư vấn mới!",
-          message: `Khách hàng ${data?.customerName || "mới"} đang chờ hỗ trợ.`
-        });
-      });
-    }
-
-    // Kỹ thuật viên: nhận thông báo ticket mới
-    if (role === "TECH_STAFF" || role === "ADMIN") {
-      joinRoom("join_tech_queue");
-
-      on("tickets:new_ticket", (data) => {
-        addToast({
-          type: "ticket",
-          title: "Ticket mới!",
-          message: data?.title ? `"${data.title}"` : "Có ticket hỗ trợ mới cần xử lý."
-        });
-      });
-
-      on("tickets:queue_updated", (data) => {
-        if (data?.status === "RESOLVED" || data?.status === "CLOSED") {
+      cleanups.push(
+        on("notification:new", (data) => {
+          const typeMap = {
+            ORDER: "info",
+            WARRANTY: "success",
+            TICKET: "ticket",
+            SYSTEM: "info"
+          };
           addToast({
-            type: "success",
-            title: "Ticket đã xử lý",
-            message: `Ticket #${data.ticketId} đã được đóng.`
+            type: typeMap[data?.type] || "info",
+            title: data?.title || "Thông báo mới",
+            message: data?.message || "Bạn vừa nhận được một thông báo mới.",
+            link: data?.link
           });
-        }
-      });
+        })
+      );
     }
 
-    // Khách hàng: nhận thông báo khi có phản hồi
-    if (role === "CUSTOMER") {
-      on("chat:new_message", (data) => {
-        if (data?.sender === "staff") {
-          addToast({
-            type: "chat",
-            title: "Nhân viên vừa phản hồi!",
-            message: data?.text?.slice(0, 80) || "Bạn có tin nhắn mới."
-          });
-        }
-      });
+    if (role) {
+      // Nhân viên bán hàng: nhận thông báo chat mới & duy trì kết nối hàng đợi trực tuyến
+      if (role === "SALES_STAFF" || role === "SALES" || role === "ADMIN") {
+        joinRoom("join_staff_queue", {
+          staffId: currentUserId,
+          staffName: currentStaffName,
+          role
+        });
+
+        cleanups.push(
+          on("queue:new_session", (data) => {
+            addToast({
+              type: "chat",
+              title: "Yêu cầu tư vấn mới!",
+              message: `Khách hàng ${data?.customerName || "mới"} đang chờ hỗ trợ.`,
+              link: "/staff/chat"
+            });
+          })
+        );
+      }
+
+      // Kỹ thuật viên: nhận thông báo ticket mới
+      if (role === "TECH_STAFF" || role === "TECHNICIAN" || role === "ADMIN") {
+        joinRoom("join_tech_queue");
+
+        cleanups.push(
+          on("tickets:new_ticket", (data) => {
+            addToast({
+              type: "ticket",
+              title: "Ticket mới!",
+              message: data?.title ? `"${data.title}"` : "Có ticket hỗ trợ mới cần xử lý.",
+              link: "/tech/tickets"
+            });
+          })
+        );
+
+        cleanups.push(
+          on("tickets:queue_updated", (data) => {
+            if (data?.status === "RESOLVED" || data?.status === "CLOSED") {
+              addToast({
+                type: "success",
+                title: "Ticket đã xử lý",
+                message: `Ticket #${data.ticketId} đã được đóng.`,
+                link: "/tech/tickets"
+              });
+            }
+          })
+        );
+      }
+
+      // Khách hàng: nhận thông báo khi có phản hồi
+      if (role === "CUSTOMER") {
+        cleanups.push(
+          on("chat:new_message", (data) => {
+            if (data?.sender === "staff") {
+              addToast({
+                type: "chat",
+                title: "Nhân viên vừa phản hồi!",
+                message: data?.text?.slice(0, 80) || "Bạn có tin nhắn mới.",
+                link: "/ai-chat?mode=human"
+              });
+            }
+          })
+        );
+      }
     }
-  }, [role, joinRoom, on, addToast]);
+
+    return () => {
+      cleanups.forEach((fn) => typeof fn === "function" && fn());
+    };
+  }, [role, currentUserId, currentStaffName, joinRoom, on, addToast]);
 
   if (toasts.length === 0) return null;
 
@@ -254,7 +306,7 @@ export function RealtimeToast() {
       `}</style>
       <div className="rt-container" role="region" aria-label="Thông báo real-time">
         {toasts.map((toast) => (
-          <Toast key={toast.id} toast={toast} onDismiss={dismissToast} />
+          <Toast key={toast.id} toast={toast} onDismiss={dismissToast} onNavigate={navigate} />
         ))}
       </div>
     </>

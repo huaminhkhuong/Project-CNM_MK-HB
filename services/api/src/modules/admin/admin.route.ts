@@ -38,6 +38,8 @@ function requirePermission(_permission) {
 
 const router = express.Router();
 
+router.get("/public-store-info", controller.getPublicStoreInfo);
+
 router.get(
   "/dashboard",
   verifyToken,
@@ -267,6 +269,14 @@ router.patch(
   controller.changeUserStatus
 );
 
+router.patch(
+  "/users/:userId/role",
+  verifyToken,
+  requireRole(ROLES.ADMIN),
+  requirePermission(PERMISSIONS.MANAGE_USERS),
+  controller.changeUserRole
+);
+
 router.get(
   "/compatibility-rules",
   verifyToken,
@@ -300,6 +310,38 @@ router.patch(
   requirePermission(PERMISSIONS.MANAGE_COMPATIBILITY_RULES),
   validateChangeCompatibilityRuleStatus,
   controller.changeCompatibilityRuleStatus
+);
+
+router.get(
+  "/tags",
+  verifyToken,
+  requireRole(ROLES.ADMIN),
+  requirePermission(PERMISSIONS.MANAGE_PRODUCTS),
+  controller.getTags
+);
+
+router.post(
+  "/tags",
+  verifyToken,
+  requireRole(ROLES.ADMIN),
+  requirePermission(PERMISSIONS.MANAGE_PRODUCTS),
+  controller.createTag
+);
+
+router.delete(
+  "/tags/:tagId",
+  verifyToken,
+  requireRole(ROLES.ADMIN),
+  requirePermission(PERMISSIONS.MANAGE_PRODUCTS),
+  controller.deleteTag
+);
+
+router.put(
+  "/products/:productId/tags",
+  verifyToken,
+  requireRole(ROLES.ADMIN),
+  requirePermission(PERMISSIONS.MANAGE_PRODUCTS),
+  controller.setProductTags
 );
 
 export default router;

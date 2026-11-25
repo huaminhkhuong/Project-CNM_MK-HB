@@ -2,6 +2,9 @@ import { prisma } from "../../config/prisma";
 
 export async function getOrCreateCartByUserId(userId: string | number) {
   const finalUserId = typeof userId === "string" ? parseInt(userId, 10) : Number(userId);
+  if (!finalUserId || Number.isNaN(finalUserId)) {
+    throw new Error("Invalid userId provided to getOrCreateCartByUserId");
+  }
   let cart = await prisma.cart.findFirst({ where: { user_id: finalUserId } });
 
   if (!cart) {

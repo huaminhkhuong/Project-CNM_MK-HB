@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
+import { AnnouncementBar } from "./AnnouncementBar";
 
 const ACCOUNT_LINKS = [
   { to: "/profile",           label: "Hồ sơ cá nhân",   icon: "👤", color: "#3b82f6" },
@@ -10,12 +11,7 @@ const ACCOUNT_LINKS = [
   { to: "/tickets",           label: "Ticket hỗ trợ",    icon: "🎫", color: "#06b6d4" },
 ];
 
-const INFO_ITEMS = [
-  { icon: "🚀", text: "Giao hàng 2h nội thành" },
-  { icon: "🔧", text: "Lắp ráp miễn phí" },
-  { icon: "🛡️", text: "Bảo hành 12 tháng" },
-  { icon: "💬", text: "Hỗ trợ 24/7" },
-];
+
 
 function getUserDisplayName(user) {
   return user?.fullName || user?.name || user?.email || "khách hàng";
@@ -23,52 +19,6 @@ function getUserDisplayName(user) {
 
 function getAvatarInitial(user) {
   return (getUserDisplayName(user).trim().charAt(0) || "U").toUpperCase();
-}
-
-/* Animated scrolling ticker for info strip */
-function InfoTicker() {
-  return (
-    <div style={{
-      display: "flex",
-      alignItems: "center",
-      gap: 0,
-      overflow: "hidden",
-      maxWidth: 420,
-      mask: "linear-gradient(90deg, transparent 0%, black 8%, black 92%, transparent 100%)",
-      WebkitMask: "linear-gradient(90deg, transparent 0%, black 8%, black 92%, transparent 100%)",
-    }}>
-      <div style={{
-        display: "flex",
-        gap: 32,
-        animation: "v2-ticker 22s linear infinite",
-        whiteSpace: "nowrap",
-        alignItems: "center",
-      }}>
-        {[...INFO_ITEMS, ...INFO_ITEMS].map((item, i) => (
-          <span key={i} style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 5,
-            fontSize: 12,
-            color: "rgba(203, 213, 225, 0.8)",
-            fontWeight: 500,
-          }}>
-            <span style={{ fontSize: 13 }}>{item.icon}</span>
-            {item.text}
-            {i < INFO_ITEMS.length * 2 - 1 && (
-              <span style={{ color: "rgba(100,116,139,0.6)", marginLeft: 32 }}>·</span>
-            )}
-          </span>
-        ))}
-      </div>
-      <style>{`
-        @keyframes v2-ticker {
-          from { transform: translateX(0); }
-          to   { transform: translateX(-50%); }
-        }
-      `}</style>
-    </div>
-  );
 }
 
 export function TopBar() {
@@ -123,8 +73,8 @@ export function TopBar() {
         gap: 16,
       }}>
 
-        {/* ── Left: Animated Info Ticker ── */}
-        <InfoTicker />
+        {/* ── Left: Announcement Bar (Promotions & Warranties) [UX-003] ── */}
+        <AnnouncementBar />
 
         {/* ── Right: Links & Account ── */}
         <div style={{
@@ -135,69 +85,75 @@ export function TopBar() {
         }}>
 
           {/* Workspace quick links (staff/admin) */}
-          {workspaceLinks.map((item) => (
-            <Link
-              key={item.href}
-              to={item.href}
-              style={{
-                padding: "3px 10px",
-                fontSize: 11,
-                fontWeight: 700,
-                color: item.color,
-                background: `${item.color}18`,
-                border: `1px solid ${item.color}35`,
-                borderRadius: 9999,
-                textDecoration: "none",
-                letterSpacing: "0.04em",
-                textTransform: "uppercase",
-                transition: "all 0.18s ease",
-                whiteSpace: "nowrap",
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.background = `${item.color}30`;
-                e.currentTarget.style.boxShadow = `0 0 10px ${item.color}30`;
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.background = `${item.color}18`;
-                e.currentTarget.style.boxShadow = "none";
-              }}
-            >
-              {item.label}
-            </Link>
-          ))}
+          {workspaceLinks.length > 0 && (
+            <div className="topbar-workspace-links" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              {workspaceLinks.map((item) => (
+                <Link
+                  key={item.href}
+                  to={item.href}
+                  style={{
+                    padding: "3px 10px",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: item.color,
+                    background: `${item.color}18`,
+                    border: `1px solid ${item.color}35`,
+                    borderRadius: 9999,
+                    textDecoration: "none",
+                    letterSpacing: "0.04em",
+                    textTransform: "uppercase",
+                    transition: "all 0.18s ease",
+                    whiteSpace: "nowrap",
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.background = `${item.color}30`;
+                    e.currentTarget.style.boxShadow = `0 0 10px ${item.color}30`;
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.background = `${item.color}18`;
+                    e.currentTarget.style.boxShadow = "none";
+                  }}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+          )}
 
           {/* Divider */}
           {workspaceLinks.length > 0 && (
-            <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
+            <span className="topbar-divider" style={{ width: 1, height: 16, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
           )}
 
           {/* Quick links */}
-          {[
-            { to: "/tickets", label: "Hỗ trợ" },
-            { to: "/orders",  label: "Đơn hàng" },
-          ].map((item) => (
-            <Link
-              key={item.to}
-              to={item.to}
-              style={{
-                fontSize: 12,
-                fontWeight: 500,
-                color: "rgba(148, 163, 184, 0.85)",
-                textDecoration: "none",
-                padding: "3px 8px",
-                borderRadius: 6,
-                transition: "all 0.15s ease",
-                whiteSpace: "nowrap",
-              }}
-              onMouseEnter={e => { e.currentTarget.style.color = "#ffffff"; e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
-              onMouseLeave={e => { e.currentTarget.style.color = "rgba(148,163,184,0.85)"; e.currentTarget.style.background = "transparent"; }}
-            >
-              {item.label}
-            </Link>
-          ))}
+          <div className="topbar-quick-links" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            {[
+              { to: "/tickets", label: "Hỗ trợ" },
+              { to: "/orders",  label: "Đơn hàng" },
+            ].map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                style={{
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: "rgba(148, 163, 184, 0.85)",
+                  textDecoration: "none",
+                  padding: "3px 8px",
+                  borderRadius: 6,
+                  transition: "all 0.15s ease",
+                  whiteSpace: "nowrap",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.color = "#ffffff"; e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+                onMouseLeave={e => { e.currentTarget.style.color = "rgba(148,163,184,0.85)"; e.currentTarget.style.background = "transparent"; }}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </div>
 
           {/* Divider */}
-          <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
+          <span className="topbar-divider" style={{ width: 1, height: 16, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
 
           {/* Account section */}
           {isAuthenticated ? (
@@ -258,7 +214,7 @@ export function TopBar() {
                 }}>
                   {avatarInitial}
                 </span>
-                <span style={{
+                <span className="topbar-account-name" style={{
                   maxWidth: 120,
                   overflow: "hidden",
                   textOverflow: "ellipsis",

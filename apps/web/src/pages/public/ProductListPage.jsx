@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import axios from "axios";
 
 import { ProductCard } from "../../components/common/ProductCard";
 import { getProductFilterOptions, getProducts } from "../../services/catalog.service";
+import { resolveProductImage } from "../../utils/productImage";
 
 /* ── Helpers ─────────────────────────────────────────────────── */
 function normalizeProductResponse(data) {
@@ -32,11 +33,27 @@ function parseAttributeIdsFromUrl(searchParams) {
 }
 
 const SORT_OPTIONS = [
+  { value: "featured",   label: "🌟 Nổi bật nhất" },
   { value: "newest",     label: "🆕 Mới nhất" },
   { value: "price_asc",  label: "💰 Giá tăng dần" },
   { value: "price_desc", label: "💰 Giá giảm dần" },
   { value: "name_asc",   label: "🔤 Tên A-Z" },
 ];
+
+function getFacetIcon(facetName) {
+  const n = String(facetName || "").toLowerCase();
+  if (n.includes("vram") || n.includes("vga")) return "🎮";
+  if (n.includes("ram") || n.includes("bộ nhớ")) return "💾";
+  if (n.includes("bus") || n.includes("tốc độ")) return "⚡";
+  if (n.includes("socket") || n.includes("cpu") || n.includes("nhân")) return "🧠";
+  if (n.includes("chipset")) return "🧩";
+  if (n.includes("form factor") || n.includes("kích thước")) return "📐";
+  if (n.includes("ổ cứng") || n.includes("ssd") || n.includes("kết nối")) return "🗄️";
+  if (n.includes("nguồn") || n.includes("công suất") || n.includes("psu") || n.includes("dây")) return "🔌";
+  if (n.includes("tản") || n.includes("radiator") || n.includes("quạt") || n.includes("nhiệt")) return "❄️";
+  if (n.includes("led")) return "✨";
+  return "⚙️";
+}
 
 /* ── FilterSection — accordion item ─────────────────────────── */
 function FilterSection({ title, icon, defaultOpen = true, children }) {
@@ -177,7 +194,7 @@ function PriceRangeInputs({ minPrice, maxPrice, onChange }) {
 /* ── Main Component ──────────────────────────────────────────── */
 export function ProductListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialSearch = searchParams.get("search") || "";
+  const initialSearch = searchParams.get("search") || searchParams.get("q") || searchParams.get("keyword") || "";
 
   const [filters, setFilters] = useState({
     search: initialSearch,
@@ -186,7 +203,7 @@ export function ProductListPage() {
     min_price: searchParams.get("min_price") || "",
     max_price: searchParams.get("max_price") || "",
     attribute_value_ids: parseAttributeIdsFromUrl(searchParams),
-    sort: searchParams.get("sort") || "newest",
+    sort: searchParams.get("sort") || "featured",
     page: Number(searchParams.get("page") || 1),
     limit: 12
   });
@@ -194,7 +211,6 @@ export function ProductListPage() {
   const [products,    setProducts]    = useState([]);
   const [categories,  setCategories]  = useState([]);
   const [brands,      setBrands]      = useState([]);
-  const [brandSearch, setBrandSearch] = useState("");
   const [attributes,  setAttributes]  = useState([]);
   const [pagination,  setPagination]  = useState({ page: 1, limit: 12, totalItems: 0, totalPages: 0 });
   const [loading,     setLoading]     = useState(true);
@@ -218,7 +234,7 @@ export function ProductListPage() {
     min_price: filters.min_price || undefined,
     max_price: filters.max_price || undefined,
     attribute_value_ids: filters.attribute_value_ids.length > 0 ? filters.attribute_value_ids.join(",") : undefined,
-    sort: filters.sort !== "newest" ? filters.sort : undefined,
+    sort: filters.sort !== "featured" ? filters.sort : "featured",
     page: filters.page,
     limit: filters.limit
   }), [filters]);
@@ -231,7 +247,7 @@ export function ProductListPage() {
     if (nextFilters.min_price)            params.set("min_price", nextFilters.min_price);
     if (nextFilters.max_price)            params.set("max_price", nextFilters.max_price);
     if (nextFilters.attribute_value_ids?.length) params.set("attribute_value_ids", nextFilters.attribute_value_ids.join(","));
-    if (nextFilters.sort && nextFilters.sort !== "newest") params.set("sort", nextFilters.sort);
+    if (nextFilters.sort && nextFilters.sort !== "featured") params.set("sort", nextFilters.sort);
     if (nextFilters.page > 1)             params.set("page", String(nextFilters.page));
     setSearchParams(params);
   }
@@ -239,26 +255,31 @@ export function ProductListPage() {
   useEffect(() => {
     async function loadFilterData() {
       try {
-        const response = await getProductFilterOptions();
+        const response = await getProductFilterOptions({ category_id: filters.category_id });
         const normalized = normalizeFilterOptions(response);
         setCategories(normalized.categories);
         setBrands(normalized.brands);
         setAttributes(normalized.attributes);
-      } catch { setCategories([]); setBrands([]); setAttributes([]); }
+      } catch {
+        setCategories([]);
+        setBrands([]);
+        setAttributes([]);
+      }
     }
     loadFilterData();
-  }, []);
+  }, [filters.category_id]);
 
   useEffect(() => {
+    const currentSearch = searchParams.get("search") || searchParams.get("q") || searchParams.get("keyword") || "";
     setFilters(prev => ({
       ...prev,
-      search: searchParams.get("search") || "",
+      search: currentSearch,
       category_id: searchParams.get("category_id") || "",
       brand_id: searchParams.get("brand_id") || "",
       min_price: searchParams.get("min_price") || "",
       max_price: searchParams.get("max_price") || "",
       attribute_value_ids: parseAttributeIdsFromUrl(searchParams),
-      sort: searchParams.get("sort") || "newest",
+      sort: searchParams.get("sort") || "featured",
       page: Number(searchParams.get("page") || 1)
     }));
   }, [searchParams]);
@@ -286,7 +307,11 @@ export function ProductListPage() {
     if (eventOrE2) {
       const { name: n1, value: v1 } = eventOrE1.target;
       const { name: n2, value: v2 } = eventOrE2.target;
-      setFilters(prev => ({ ...prev, [n1]: v1, [n2]: v2, page: 1 }));
+      setFilters(prev => {
+        const next = { ...prev, [n1]: v1, [n2]: v2, page: 1 };
+        syncFiltersToUrl(next);
+        return next;
+      });
     } else {
       const { name, value } = eventOrE1.target;
       setFilters(prev => ({ ...prev, [name]: value, page: 1 }));
@@ -332,8 +357,26 @@ export function ProductListPage() {
     });
   }
 
+  /* Active attribute labels map */
+  const activeAttributeLabels = useMemo(() => {
+    const result = [];
+    for (const attr of attributes) {
+      for (const val of attr.values || []) {
+        if (filters.attribute_value_ids.includes(Number(val.id))) {
+          result.push({
+            id: Number(val.id),
+            attributeName: attr.name,
+            value: val.value
+          });
+        }
+      }
+    }
+    return result;
+  }, [attributes, filters.attribute_value_ids]);
+
   /* Active filter count */
   const activeFilterCount = [
+    filters.search,
     filters.category_id, filters.brand_id,
     filters.min_price, filters.max_price,
   ].filter(Boolean).length + filters.attribute_value_ids.length;
@@ -366,16 +409,29 @@ export function ProductListPage() {
         <div style={{ position: "absolute", bottom: -40, right: "30%", width: 200, height: 200, borderRadius: "50%", background: "radial-gradient(circle, rgba(245,166,35,0.08) 0%, transparent 70%)", pointerEvents: "none" }} />
 
         <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: "#60a5fa", position: "relative" }}>
-          🛍️ Danh mục cửa hàng
+          {filters.search ? "🔍 KẾT QUẢ TÌM KIẾM" : "🛍️ DANH MỤC CỬA HÀNG"}
         </div>
         <h1 style={{ margin: 0, fontSize: "clamp(28px, 4vw, 42px)", lineHeight: 1.1, letterSpacing: "-0.03em", maxWidth: 680, position: "relative", fontFamily: "'Be Vietnam Pro', sans-serif" }}>
-          Khám phá thế giới{" "}
-          <span style={{ background: "linear-gradient(135deg, #60a5fa, #f5a623)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>
-            công nghệ đỉnh cao
-          </span>
+          {filters.search ? (
+            <>
+              Kết quả cho:{" "}
+              <span style={{ background: "linear-gradient(135deg, #60a5fa, #f5a623)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>
+                "{filters.search}"
+              </span>
+            </>
+          ) : (
+            <>
+              Khám phá thế giới{" "}
+              <span style={{ background: "linear-gradient(135deg, #60a5fa, #f5a623)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>
+                công nghệ đỉnh cao
+              </span>
+            </>
+          )}
         </h1>
         <p style={{ margin: 0, color: "rgba(148,163,184,0.85)", fontSize: 15, maxWidth: 640, lineHeight: 1.65, position: "relative" }}>
-          Tìm nhanh linh kiện, máy tính và phụ kiện chính hãng — lọc chuyên sâu theo thông số kỹ thuật chi tiết.
+          {filters.search
+            ? `Hiển thị danh sách sản phẩm và linh kiện phù hợp với từ khóa "${filters.search}".`
+            : "Tìm nhanh linh kiện, máy tính và phụ kiện chính hãng — lọc chuyên sâu theo thông số kỹ thuật chi tiết."}
         </p>
       </section>
 
@@ -422,9 +478,11 @@ export function ProductListPage() {
             </div>
             {activeFilterCount > 0 && (
               <button
+                id="sidebar-clear-all-btn"
+                data-testid="sidebar-clear-all-btn"
                 type="button"
                 onClick={() => {
-                  const next = { ...filters, category_id: "", brand_id: "", min_price: "", max_price: "", attribute_value_ids: [], page: 1 };
+                  const next = { ...filters, search: "", category_id: "", brand_id: "", min_price: "", max_price: "", attribute_value_ids: [], page: 1 };
                   setFilters(next);
                   syncFiltersToUrl(next);
                 }}
@@ -436,12 +494,14 @@ export function ProductListPage() {
           </div>
 
           {/* Sidebar Body */}
-          <form onSubmit={handleSearchSubmit} style={{ display: "grid", gap: 6, padding: "12px 12px 16px" }}>
+          <form id="sidebar-filter-form" data-testid="sidebar-filter-form" onSubmit={handleSearchSubmit} style={{ display: "grid", gap: 6, padding: "12px 12px 16px" }}>
 
             {/* Search */}
             <FilterSection title="Từ khóa" icon="🔍" defaultOpen={true}>
               <div style={{ position: "relative" }}>
                 <input
+                  id="sidebar-search-input"
+                  data-testid="sidebar-search-input"
                   name="search"
                   value={filters.search}
                   onChange={handleFilterChange}
@@ -470,7 +530,19 @@ export function ProductListPage() {
                     <button
                       key={c.id}
                       type="button"
-                      onClick={() => { setFilters(p => ({ ...p, category_id: String(c.id), page: 1 })); }}
+                      onClick={() => {
+                        setFilters(p => {
+                          const isSameCat = String(p.category_id) === String(c.id);
+                          const next = {
+                            ...p,
+                            category_id: String(c.id),
+                            attribute_value_ids: isSameCat ? p.attribute_value_ids : [],
+                            page: 1
+                          };
+                          syncFiltersToUrl(next);
+                          return next;
+                        });
+                      }}
                       style={{
                         display: "flex", alignItems: "center", gap: 8,
                         padding: "7px 10px", borderRadius: 9,
@@ -495,58 +567,35 @@ export function ProductListPage() {
             {/* Brand */}
             {brands.length > 0 && (
               <FilterSection title="Thương hiệu" icon="🏷️" defaultOpen={false}>
-                <div style={{ marginBottom: 8 }}>
-                  <input
-                    type="text"
-                    value={brandSearch}
-                    onChange={(e) => setBrandSearch(e.target.value)}
-                    placeholder="🔍 Lọc thương hiệu..."
-                    style={{
-                      width: "100%",
-                      padding: "6px 10px",
-                      borderRadius: 6,
-                      border: "1px solid var(--market-border, #cbd5e1)",
-                      fontSize: 12,
-                      background: "var(--market-surface, #ffffff)",
-                      color: "var(--market-text, #1e293b)"
-                    }}
-                  />
-                </div>
-                <div style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: 6,
-                  maxHeight: 200,
-                  overflowY: "auto",
-                  paddingRight: 4,
-                  scrollbarWidth: "thin"
-                }}>
-                  {brands
-                    .filter((b) => b.name.toLowerCase().includes(brandSearch.trim().toLowerCase()))
-                    .map((b) => {
-                      const isActive = String(filters.brand_id) === String(b.id);
-                      return (
-                        <button
-                          key={b.id}
-                          type="button"
-                          onClick={() => setFilters(p => ({ ...p, brand_id: isActive ? "" : String(b.id), page: 1 }))}
-                          style={{
-                            padding: "5px 12px",
-                            borderRadius: 99,
-                            border: `1px solid ${isActive ? "rgba(37,99,235,0.4)" : "var(--market-border, #e2e8f0)"}`,
-                            background: isActive ? "rgba(37,99,235,0.1)" : "var(--market-surface-soft, #f8fafc)",
-                            color: isActive ? "#1d4ed8" : "var(--market-text, #475569)",
-                            fontSize: 12,
-                            fontWeight: isActive ? 700 : 500,
-                            cursor: "pointer",
-                            transition: "all 0.18s cubic-bezier(0.34,1.56,0.64,1)",
-                            transform: isActive ? "scale(1.04)" : "scale(1)",
-                          }}
-                        >
-                          {b.name}
-                        </button>
-                      );
-                    })}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {brands.map((b) => {
+                    const isActive = String(filters.brand_id) === String(b.id);
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => {
+                          setFilters(p => {
+                            const next = { ...p, brand_id: isActive ? "" : String(b.id), page: 1 };
+                            syncFiltersToUrl(next);
+                            return next;
+                          });
+                        }}
+                        style={{
+                          padding: "5px 12px", borderRadius: 99,
+                          border: `1px solid ${isActive ? "rgba(37,99,235,0.4)" : "var(--market-border, #e2e8f0)"}`,
+                          background: isActive ? "rgba(37,99,235,0.1)" : "var(--market-surface-soft, #f8fafc)",
+                          color: isActive ? "#1d4ed8" : "var(--market-text, #475569)",
+                          fontSize: 12, fontWeight: isActive ? 700 : 500,
+                          cursor: "pointer",
+                          transition: "all 0.18s cubic-bezier(0.34,1.56,0.64,1)",
+                          transform: isActive ? "scale(1.04)" : "scale(1)",
+                        }}
+                      >
+                        {b.name}
+                      </button>
+                    );
+                  })}
                 </div>
               </FilterSection>
             )}
@@ -560,54 +609,64 @@ export function ProductListPage() {
               />
             </FilterSection>
 
-            {/* Attributes */}
-            {attributes.length > 0 && (
-              <FilterSection
-                title="Thông số kỹ thuật"
-                icon="⚙️"
-                defaultOpen={false}
-              >
-                <div style={{ display: "grid", gap: 14 }}>
-                  {filters.attribute_value_ids.length > 0 && (
-                    <button type="button" onClick={clearAttributeFilters}
-                      style={{ background: "none", border: "none", color: "#ef4444", fontSize: 11, fontWeight: 700, cursor: "pointer", textAlign: "left", padding: 0 }}>
-                      ✕ Xóa bộ lọc thông số
-                    </button>
-                  )}
-                  {attributes.map((attr) => (
-                    <div key={attr.id}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--market-muted, #64748b)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                        {attr.name}
-                      </div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                        {(attr.values || []).map((val) => {
-                          const valueId = Number(val.id);
-                          const isChecked = filters.attribute_value_ids.includes(valueId);
-                          return (
-                            <button
-                              key={val.id}
-                              type="button"
-                              onClick={() => handleAttributeToggle(valueId)}
-                              style={{
-                                padding: "4px 10px", borderRadius: 8,
-                                fontSize: 11, cursor: "pointer",
-                                border: isChecked ? "1px solid rgba(37,99,235,0.4)" : "1px solid var(--market-border, #e2e8f0)",
-                                background: isChecked ? "rgba(37,99,235,0.1)" : "var(--market-surface-soft, #f8fafc)",
-                                color: isChecked ? "#1d4ed8" : "var(--market-text, #475569)",
-                                fontWeight: isChecked ? 700 : 500,
-                                transition: "all 0.18s ease",
-                              }}
-                            >
-                              {val.value}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </FilterSection>
-            )}
+            {/* Dynamic Category Faceted Attributes */}
+            {attributes.map((attr, idx) => {
+              const icon = getFacetIcon(attr.name);
+              const activeCountInAttr = (attr.values || []).filter(v => filters.attribute_value_ids.includes(Number(v.id))).length;
+              return (
+                <FilterSection
+                  key={attr.id || attr.name}
+                  title={`${attr.name}${activeCountInAttr > 0 ? ` (${activeCountInAttr})` : ""}`}
+                  icon={icon}
+                  defaultOpen={idx < 4 || activeCountInAttr > 0}
+                >
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {(attr.values || []).map((val) => {
+                      const valueId = Number(val.id);
+                      const isChecked = filters.attribute_value_ids.includes(valueId);
+                      return (
+                        <button
+                          key={val.id}
+                          type="button"
+                          onClick={() => handleAttributeToggle(valueId)}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 5,
+                            padding: "5px 10px",
+                            borderRadius: 8,
+                            fontSize: 11.5,
+                            cursor: "pointer",
+                            border: isChecked ? "1.5px solid #2563eb" : "1px solid var(--market-border, #e2e8f0)",
+                            background: isChecked ? "rgba(37,99,235,0.12)" : "var(--market-surface-soft, #f8fafc)",
+                            color: isChecked ? "#1d4ed8" : "var(--market-text, #334155)",
+                            fontWeight: isChecked ? 800 : 500,
+                            boxShadow: isChecked ? "0 2px 8px rgba(37,99,235,0.18)" : "none",
+                            transition: "all 0.18s cubic-bezier(0.34,1.56,0.64,1)",
+                            transform: isChecked ? "scale(1.02)" : "scale(1)",
+                          }}
+                        >
+                          {isChecked && <span style={{ color: "#2563eb", fontWeight: 900 }}>✓</span>}
+                          <span>{val.value}</span>
+                          {val.productCount !== undefined && (
+                            <span style={{
+                              fontSize: 10,
+                              opacity: 0.75,
+                              background: isChecked ? "rgba(37,99,235,0.22)" : "rgba(0,0,0,0.06)",
+                              padding: "1px 5px",
+                              borderRadius: 99,
+                              fontWeight: 700
+                            }}>
+                              {val.productCount}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </FilterSection>
+              );
+            })}
 
             {/* Apply Button */}
             <button
@@ -671,6 +730,8 @@ export function ProductListPage() {
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: "var(--market-muted, #64748b)", whiteSpace: "nowrap" }}>Sắp xếp:</span>
                 <select
+                  id="product-sort-select"
+                  data-testid="product-sort-select"
                   name="sort"
                   value={filters.sort}
                   onChange={(e) => {
@@ -733,6 +794,145 @@ export function ProductListPage() {
             </div>
           </div>
 
+          {/* ── Active Facet Filter Chips Bar ── */}
+          {(Boolean(filters.search) || Boolean(filters.category_id) || Boolean(filters.brand_id) || Boolean(filters.min_price || filters.max_price) || activeAttributeLabels.length > 0) && (
+            <div style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: 8,
+              padding: "10px 16px",
+              background: "var(--market-surface, #fff)",
+              borderRadius: 14,
+              border: "1px solid var(--market-border, #e2e8f0)",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.03)",
+            }}>
+              <span style={{ fontSize: 12, fontWeight: 800, color: "var(--market-muted, #64748b)", display: "flex", alignItems: "center", gap: 5 }}>
+                🔍 Đang lọc:
+              </span>
+
+              {/* Search keyword chip */}
+              {filters.search && (
+                <span
+                  id="filter-chip-search"
+                  data-testid="filter-chip-search"
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: 6,
+                    padding: "4px 10px", borderRadius: 8,
+                    background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.35)",
+                    color: "#1d4ed8", fontSize: 12, fontWeight: 700
+                  }}
+                >
+                  🔍 Từ khóa: <strong>"{filters.search}"</strong>
+                  <button
+                    id="clear-search-chip"
+                    data-testid="clear-search-chip"
+                    type="button"
+                    onClick={() => {
+                      const next = { ...filters, search: "", page: 1 };
+                      setFilters(next);
+                      syncFiltersToUrl(next);
+                    }}
+                    style={{ background: "none", border: "none", color: "#2563eb", fontWeight: 800, cursor: "pointer", padding: "0 2px", lineHeight: 1 }}
+                  >
+                    ✕
+                  </button>
+                </span>
+              )}
+
+              {/* Category chip */}
+              {filters.category_id && (
+                <span style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  padding: "4px 10px", borderRadius: 8,
+                  background: "rgba(37,99,235,0.08)", border: "1px solid rgba(37,99,235,0.25)",
+                  color: "#1d4ed8", fontSize: 12, fontWeight: 600
+                }}>
+                  📂 {categories.find(c => String(c.id) === String(filters.category_id))?.name || "Danh mục"}
+                  <button type="button" onClick={() => {
+                    const next = { ...filters, category_id: "", attribute_value_ids: [], page: 1 };
+                    setFilters(next);
+                    syncFiltersToUrl(next);
+                  }} style={{ background: "none", border: "none", color: "#2563eb", fontWeight: 800, cursor: "pointer", padding: "0 2px", lineHeight: 1 }}>✕</button>
+                </span>
+              )}
+
+              {/* Brand chip */}
+              {filters.brand_id && (
+                <span style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  padding: "4px 10px", borderRadius: 8,
+                  background: "rgba(37,99,235,0.08)", border: "1px solid rgba(37,99,235,0.25)",
+                  color: "#1d4ed8", fontSize: 12, fontWeight: 600
+                }}>
+                  🏷️ {brands.find(b => String(b.id) === String(filters.brand_id))?.name || "Thương hiệu"}
+                  <button type="button" onClick={() => {
+                    const next = { ...filters, brand_id: "", page: 1 };
+                    setFilters(next);
+                    syncFiltersToUrl(next);
+                  }} style={{ background: "none", border: "none", color: "#2563eb", fontWeight: 800, cursor: "pointer", padding: "0 2px", lineHeight: 1 }}>✕</button>
+                </span>
+              )}
+
+              {/* Price range chip */}
+              {(filters.min_price || filters.max_price) && (
+                <span style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  padding: "4px 10px", borderRadius: 8,
+                  background: "rgba(37,99,235,0.08)", border: "1px solid rgba(37,99,235,0.25)",
+                  color: "#1d4ed8", fontSize: 12, fontWeight: 600
+                }}>
+                  💰 {filters.min_price ? `${Number(filters.min_price).toLocaleString("vi-VN")}đ` : "0đ"} - {filters.max_price ? `${Number(filters.max_price).toLocaleString("vi-VN")}đ` : "Tối đa"}
+                  <button type="button" onClick={() => {
+                    const next = { ...filters, min_price: "", max_price: "", page: 1 };
+                    setFilters(next);
+                    syncFiltersToUrl(next);
+                  }} style={{ background: "none", border: "none", color: "#2563eb", fontWeight: 800, cursor: "pointer", padding: "0 2px", lineHeight: 1 }}>✕</button>
+                </span>
+              )}
+
+              {/* Technical Attribute chips */}
+              {activeAttributeLabels.map(item => (
+                <span key={item.id} style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  padding: "4px 10px", borderRadius: 8,
+                  background: "#eff6ff", border: "1px solid #93c5fd",
+                  color: "#1d4ed8", fontSize: 12, fontWeight: 600
+                }}>
+                  {item.attributeName}: <strong>{item.value}</strong>
+                  <button type="button" onClick={() => handleAttributeToggle(item.id)} style={{ background: "none", border: "none", color: "#2563eb", fontWeight: 800, cursor: "pointer", padding: "0 2px", lineHeight: 1 }}>✕</button>
+                </span>
+              ))}
+
+              {/* Clear all button */}
+              <button
+                id="clear-all-filters-btn"
+                data-testid="clear-all-filters-btn"
+                type="button"
+                onClick={() => {
+                  const next = { ...filters, search: "", category_id: "", brand_id: "", min_price: "", max_price: "", attribute_value_ids: [], page: 1 };
+                  setFilters(next);
+                  syncFiltersToUrl(next);
+                }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "#dc2626",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                  padding: "4px 8px",
+                  marginLeft: "auto",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4
+                }}
+              >
+                ✕ Xóa tất cả bộ lọc
+              </button>
+            </div>
+          )}
+
           {/* ── Loading State ── */}
           {loading && (
             <div style={{
@@ -794,23 +994,27 @@ export function ProductListPage() {
                   >
                     {viewMode === "list" ? (
                       /* List View Card */
-                      <div style={{
-                        display: "grid",
-                        gridTemplateColumns: "100px 1fr auto",
-                        gap: 16,
-                        padding: 16,
-                        background: "var(--market-surface, #fff)",
-                        border: "1px solid var(--market-border, #e2e8f0)",
-                        borderRadius: 16,
-                        alignItems: "center",
-                        transition: "all 0.22s ease",
-                        cursor: "pointer",
-                      }}
+                      <Link
+                        to={`/products/${product.slug || product.product_id || product.id}`}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "100px 1fr auto",
+                          gap: 16,
+                          padding: 16,
+                          background: "var(--market-surface, #fff)",
+                          border: "1px solid var(--market-border, #e2e8f0)",
+                          borderRadius: 16,
+                          alignItems: "center",
+                          transition: "all 0.22s ease",
+                          cursor: "pointer",
+                          textDecoration: "none",
+                          color: "inherit",
+                        }}
                         onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 6px 20px rgba(37,99,235,0.12)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.3)"; }}
                         onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.borderColor = "var(--market-border, #e2e8f0)"; }}
                       >
                         <img
-                          src={product.imageUrl || product.image_url || ""}
+                          src={resolveProductImage(product)}
                           alt={product.product_name || product.name || ""}
                           style={{ width: 90, height: 90, objectFit: "contain", borderRadius: 10, background: "#f8fafc" }}
                           onError={e => { e.target.style.display = "none"; }}
@@ -820,7 +1024,7 @@ export function ProductListPage() {
                             {product.product_name || product.name}
                           </div>
                           <div style={{ fontSize: 11, color: "var(--market-muted, #64748b)" }}>
-                            {product.brand_name || ""} · {product.category_name || ""}
+                            {product.brand_name || product.brand?.name || ""} · {product.category_name || product.category?.name || ""}
                           </div>
                         </div>
                         <div style={{ textAlign: "right" }}>
@@ -830,11 +1034,24 @@ export function ProductListPage() {
                             WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text",
                             marginBottom: 4,
                           }}>
-                            {Number(product.price || 0).toLocaleString("vi-VN")}đ
+                            {Number(product.price || product.primaryVariant?.price || 0).toLocaleString("vi-VN")}đ
                           </div>
-                          <div style={{ fontSize: 11, color: "#10b981", fontWeight: 700 }}>Còn hàng</div>
+                          {(() => {
+                            const inStock = Number(
+                              product?.primaryVariant?.stock_quantity ??
+                              product?.primaryVariant?.stock ??
+                              product?.stock_quantity ??
+                              product?.stock ??
+                              1
+                            ) > 0;
+                            return (
+                              <div style={{ fontSize: 11, color: inStock ? "#10b981" : "#ef4444", fontWeight: 700 }}>
+                                {inStock ? "Còn hàng" : "Hết hàng"}
+                              </div>
+                            );
+                          })()}
                         </div>
-                      </div>
+                      </Link>
                     ) : (
                       <ProductCard product={product} />
                     )}

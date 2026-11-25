@@ -98,10 +98,13 @@ function getTimelineNote(request, statusKey) {
 }
 
 function getAttachmentUrl(attachment) {
-  const raw = attachment?.fileUrl || attachment?.url || "";
+  const raw = String(attachment?.fileUrl || attachment?.url || "").trim();
   if (!raw) return "";
+  if (raw.startsWith("/uploads/")) {
+    return typeof window !== "undefined" ? `${window.location.origin}${raw}` : raw;
+  }
   if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
-  return `http://localhost:4000${raw.startsWith("/") ? raw : `/${raw}`}`;
+  return `/${raw.replace(/^\/+/, "")}`;
 }
 
 function getFileLabel(attachment) {

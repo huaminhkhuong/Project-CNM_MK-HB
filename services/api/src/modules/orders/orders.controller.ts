@@ -6,7 +6,6 @@ import { AppError } from "../../errors/app-error";
 import { asyncHandler } from "../../utils/async-handler";
 import {
   completeDeliveredOrder,
-  ensurePaymentProofColumn,
   getOrderById,
   getOrdersByUser,
   listOrders,
@@ -18,7 +17,6 @@ import {
 } from "./orders.repository";
 import { checkoutSchema, updateOrderStatusSchema } from "./orders.validator";
 import { generateVnpayUrl, verifyVnpayReturn } from "../../utils/vnpay";
-import { validateCoupon } from "../coupons/coupons.service";
 import { generateMomoUrl, verifyMomoSignature } from "../../utils/momo";
 import { env } from "../../config/env";
 import jwt from "jsonwebtoken";
@@ -28,6 +26,8 @@ import { buildPaymentResultEmail } from "../../templates/email-payment-result";
 
 import { createWarrantyRecordsForDeliveredOrder } from "../warranties/warranty-sync.service";
 import { publishOrderEvent, subscribeOrderEvents } from "../../services/order-events";
+import { validateAndCalculateCoupon } from "../coupons/coupons.service";
+import { sendOrderStatusNotification } from "../notifications/notifications.service";
 
 type UploadedPaymentProofFile = {
   filename: string;
@@ -61,8 +61,20 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
 
       const variants = await tx.productSku.findMany({
         where: { id: { in: variantIds } },
-        include: {
-          Product: true
+        select: {
+          id: true,
+          product_id: true,
+          sku: true,
+          price: true,
+          stock: true,
+          is_active: true,
+          Product: {
+            select: {
+              id: true,
+              name: true,
+              category_id: true
+            }
+          }
         }
       });
 
@@ -91,6 +103,7 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
         return {
           product_variant_id: variant.id,
           product_id: variant.product_id,
+          category_id: variant.Product?.category_id,
           sku_snapshot: variant.sku,
           name_snapshot: variant.Product?.name || variant.sku,
           unitPrice: Number(variant.price),
@@ -112,8 +125,20 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
           CartItem: {
             include: {
               ProductSku: {
-                include: {
-                  Product: true
+                select: {
+                  id: true,
+                  product_id: true,
+                  sku: true,
+                  price: true,
+                  stock: true,
+                  is_active: true,
+                  Product: {
+                    select: {
+                      id: true,
+                      name: true,
+                      category_id: true
+                    }
+                  }
                 }
               }
             }
@@ -128,6 +153,7 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
       orderSourceItems = cartWithItems.CartItem.map((item: any) => ({
         product_variant_id: item.product_variant_id,
         product_id: item.ProductSku.product_id,
+        category_id: item.ProductSku.Product?.category_id,
         sku_snapshot: item.ProductSku.sku,
         name_snapshot: item.ProductSku.Product?.name || item.ProductSku.sku,
         unitPrice: Number(item.ProductSku.price),
@@ -154,25 +180,31 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
     }
 
     const shippingFee = Number(payload.shippingFee || 0);
+
     let discountAmount = 0;
-    let appliedCouponCode: string | null = null;
+    let appliedCoupon: any = null;
 
     if (payload.couponCode) {
-      const couponResult = await validateCoupon(payload.couponCode, total);
-      discountAmount = Number(couponResult.discountAmount || 0);
-      appliedCouponCode = couponResult.code;
+      const couponResult = await validateAndCalculateCoupon({
+        code: payload.couponCode,
+        userId: Number(currentUser.userId),
+        items: orderSourceItems.map((item) => ({
+          productId: item.product_id,
+          categoryId: (item as any).category_id,
+          unitPrice: item.unitPrice,
+          quantity: item.quantity,
+          lineTotal: item.unitPrice * item.quantity
+        })),
+        totalAmount: total,
+        shippingFee
+      });
 
-      // Tăng lượt sử dụng coupon một cách an toàn
-      await tx.$executeRawUnsafe(
-        `UPDATE coupons SET used_count = used_count + 1 WHERE code = ?`,
-        couponResult.code
-      );
+      discountAmount = couponResult.discountAmount;
+      appliedCoupon = couponResult.coupon;
     }
 
     const finalAmount = Math.max(0, total - discountAmount + shippingFee);
-    const orderNote = appliedCouponCode 
-      ? `[Mã giảm giá: ${appliedCouponCode} - Giảm ${discountAmount.toLocaleString("vi-VN")}đ] ${payload.note || ""}`.trim()
-      : payload.note;
+
     
     const order = await tx.order.create({
       data: {
@@ -181,16 +213,37 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
         total_price: total, // Just backward compat
         total_amount: total,
         shipping_fee: shippingFee,
+        discount_amount: discountAmount,
+        coupon_id: appliedCoupon ? appliedCoupon.id : null,
+        coupon_code: appliedCoupon ? appliedCoupon.code : null,
         final_amount: finalAmount,
         payment_method: payload.paymentMethod,
         shipping_address: payload.shippingAddress,
         payment_status: payload.paymentMethod === "COD" ? "UNPAID" : "PENDING_GATEWAY",
         status: "PENDING",
-        note: orderNote,
+        note: payload.note || null,
         created_at: new Date(),
         updated_at: new Date()
       }
     });
+
+    if (appliedCoupon && discountAmount > 0) {
+      await tx.couponUsage.create({
+        data: {
+          coupon_id: appliedCoupon.id,
+          user_id: Number(currentUser.userId),
+          order_id: order.id,
+          discount_amount: discountAmount
+        }
+      });
+
+      await tx.coupon.update({
+        where: { id: appliedCoupon.id },
+        data: {
+          used_count: { increment: 1 }
+        }
+      });
+    }
 
     for (const item of orderSourceItems) {
       const unitPrice = Number(item.unitPrice);
@@ -243,6 +296,14 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
   });
 
   const normalizedOrder = await normalizeOrderRecord(result);
+
+  if (result?.id && currentUser.userId) {
+    sendOrderStatusNotification({
+      userId: Number(currentUser.userId),
+      orderId: result.id,
+      status: "PENDING"
+    }).catch((err: Error) => console.warn("[Notification] Order created notification failed:", err.message));
+  }
 
   // 📧 Email: Gửi xác nhận đặt hàng cho khách (bất đồng bộ - không block response)
   try {
@@ -353,8 +414,9 @@ export const getAllOrders = asyncHandler(async (_req: Request, res: Response) =>
 
 export const patchOrderStatus = asyncHandler(async (req: Request, res: Response) => {
   const payload = updateOrderStatusSchema.parse(req.body);
+  const orderId = Number(req.params.id);
 
-  const current = await getOrderById(req.params.id);
+  const current = await getOrderById(orderId);
   if (!current) {
     throw new AppError("Order not found", 404);
   }
@@ -365,20 +427,79 @@ export const patchOrderStatus = asyncHandler(async (req: Request, res: Response)
       // Shipment tracking can be managed via Shipment model instead
     }
 
+    // Atomically restore inventory when transitioning to CANCELED from an active status
+    if (payload.status === "CANCELED") {
+      const orderToCancel = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { OrderItem: true }
+      });
+
+      if (orderToCancel && orderToCancel.status !== "CANCELED") {
+        for (const item of orderToCancel.OrderItem || []) {
+          const variantId = item.product_variant_id;
+          const quantity = Number(item.quantity || 0);
+          if (variantId && quantity > 0) {
+            await tx.productSku.update({
+              where: { id: variantId },
+              data: {
+                stock: {
+                  increment: quantity
+                }
+              }
+            });
+          }
+        }
+
+        await tx.shipment.updateMany({
+          where: { order_id: orderId },
+          data: { status: "CANCELED" }
+        });
+
+        await tx.orderItemSerial.deleteMany({
+          where: { order_id: orderId }
+        }).catch(() => {});
+
+        await tx.orderItem.updateMany({
+          where: { order_id: orderId },
+          data: { serial_numbers: null }
+        }).catch(() => {});
+
+        if (orderToCancel.coupon_id) {
+          await tx.coupon.update({
+            where: { id: orderToCancel.coupon_id },
+            data: { used_count: { decrement: 1 } }
+          }).catch(() => {});
+          await tx.couponUsage.deleteMany({
+            where: { order_id: orderId }
+          }).catch(() => {});
+        }
+      }
+    }
+
     return await tx.order.update({
-      where: { id: Number(req.params.id) },
-        data: { status: payload.status, updated_at: new Date() }
+      where: { id: orderId },
+      data: { status: payload.status, updated_at: new Date() }
     });
   });
 
   // Return full order to show new trackingCode or details
-  const finalOrder = await getOrderById(req.params.id);
+  if (payload.status === "DELIVERED" || payload.status === "COMPLETED") {
+    await createWarrantyRecordsForDeliveredOrder(orderId).catch((err: Error) =>
+      console.warn("[WarrantySync] Failed to sync warranties on patchOrderStatus:", err.message)
+    );
+  }
+  const finalOrder = await getOrderById(orderId);
   if (finalOrder?.user_id) {
     publishOrderEvent(finalOrder.user_id, {
       orderId: finalOrder.id,
       status: finalOrder.status,
       paymentStatus: finalOrder.payment_status
     });
+    sendOrderStatusNotification({
+      userId: Number(finalOrder.user_id),
+      orderId: finalOrder.id,
+      status: String(finalOrder.status || payload.status)
+    }).catch((err: Error) => console.warn("[Notification] Order status notification failed:", err.message));
   }
 
   res.status(200).json({
@@ -413,6 +534,11 @@ export const confirmOrderReceived = asyncHandler(async (req: Request, res: Respo
     status: updatedOrder?.status || "COMPLETED",
     paymentStatus: updatedOrder?.payment_status
   });
+  sendOrderStatusNotification({
+    userId: Number(req.user.userId),
+    orderId: updatedOrder?.id || req.params.id,
+    status: "COMPLETED"
+  }).catch((err: Error) => console.warn("[Notification] Confirm received notification failed:", err.message));
 
   res.status(200).json({
     success: true,
@@ -512,6 +638,11 @@ export const confirmMockPayment = asyncHandler(async (req: Request, res: Respons
   }
 
   await markOrderPaid(req.params.id);
+  sendOrderStatusNotification({
+    userId: Number(order.user_id),
+    orderId: order.id,
+    status: "PROCESSING"
+  }).catch(() => {});
 
   res.status(200).json({
     success: true,
@@ -593,8 +724,6 @@ export const approvePaymentProof = asyncHandler(async (req: Request, res: Respon
     throw new AppError("Payment approval is only available for QR Banking orders", 400);
   }
 
-  await ensurePaymentProofColumn();
-
   const approved = Boolean(req.body?.approved);
   if (approved) {
     await prisma.$executeRawUnsafe(
@@ -627,6 +756,12 @@ export const approvePaymentProof = asyncHandler(async (req: Request, res: Respon
       status: updatedOrder.status,
       paymentStatus: updatedOrder.payment_status
     });
+    sendOrderStatusNotification({
+      userId: Number(updatedOrder.user_id),
+      orderId: updatedOrder.id,
+      status: approved ? "PROCESSING" : "PENDING",
+      reason: !approved ? (req.body?.reason || req.body?.rejectionReason || "Ảnh minh chứng chuyển khoản không hợp lệ") : undefined
+    }).catch((err: Error) => console.warn("[Notification] Payment approval notification failed:", err.message));
   }
 
   // 📧 Email: Thông báo kết quả duyệt thanh toán
@@ -664,11 +799,12 @@ export const vnpayReturn = asyncHandler(async (req: Request, res: Response) => {
   const vnp_Params = req.query;
   const isSecure = verifyVnpayReturn(vnp_Params);
 
+  const frontendBase = (env.frontendUrl || process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, "");
   if (isSecure) {
     const responseCode = vnp_Params["vnp_ResponseCode"];
-    res.redirect(`${process.env.FRONTEND_URL || "http://localhost:5173"}/payment/result?success=${responseCode === "00"}&orderId=${vnp_Params["vnp_TxnRef"]}`);
+    res.redirect(`${frontendBase}/payment/result?success=${responseCode === "00"}&orderId=${vnp_Params["vnp_TxnRef"]}`);
   } else {
-    res.redirect(`${process.env.FRONTEND_URL || "http://localhost:5173"}/payment/result?success=false&reason=invalid_signature`);
+    res.redirect(`${frontendBase}/payment/result?success=false&reason=invalid_signature`);
   }
 });
 
@@ -831,18 +967,37 @@ export const cancelMyOrder = asyncHandler(async (req: Request, res: Response) =>
     // Update order status
     const updatedOrder = await tx.order.update({
       where: { id: order.id },
-      data: { status: "CANCELED" }
+      data: { status: "CANCELED", updated_at: new Date() }
     });
 
     // Restore stock
     for (const item of order.OrderItem) {
-      await tx.productSku.update({
-        where: { id: item.product_variant_id },
-        data: {
-          stock: {
-            increment: item.quantity
+      const variantId = item.product_variant_id;
+      const quantity = Number(item.quantity || 0);
+      if (variantId && quantity > 0) {
+        await tx.productSku.update({
+          where: { id: variantId },
+          data: {
+            stock: {
+              increment: quantity
+            }
           }
-        }
+        });
+      }
+    }
+
+    await tx.shipment.updateMany({
+      where: { order_id: order.id },
+      data: { status: "CANCELED" }
+    });
+
+    if (order.coupon_id) {
+      await tx.coupon.update({
+        where: { id: order.coupon_id },
+        data: { used_count: { decrement: 1 } }
+      }).catch(() => {});
+      await tx.couponUsage.deleteMany({
+        where: { order_id: order.id }
       });
     }
 
@@ -860,4 +1015,21 @@ export const cancelMyOrder = asyncHandler(async (req: Request, res: Response) =>
     status: "CANCELED",
     paymentStatus: result.payment_status
   });
+  sendOrderStatusNotification({
+    userId: Number(userId),
+    orderId,
+    status: "CANCELED"
+  }).catch(() => {});
 });
+
+export const cleanupExpiredOrders = asyncHandler(async (req: Request, res: Response) => {
+  const timeoutMinutes = req.query.timeoutMinutes ? Number(req.query.timeoutMinutes) : undefined;
+  const { processPaymentTimeouts } = await import("../../workers/payment-timeout.worker");
+  const result = await processPaymentTimeouts(timeoutMinutes);
+  res.status(200).json({
+    success: true,
+    message: "Expired orders cleanup completed",
+    data: result
+  });
+});
+
