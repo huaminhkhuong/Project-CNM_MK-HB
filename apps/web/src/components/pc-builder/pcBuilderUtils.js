@@ -203,8 +203,10 @@ export function getProductRamType(product) {
 export function getPsuWattageValue(product) {
   const spec = findSpec(product, SPEC_ALIASES.psuWattage);
   if (spec) {
+    const specWattMatch = String(spec).match(/(\d{3,4})\s*W/i);
+    if (specWattMatch) return Number(specWattMatch[1]);
     const parsed = parseNumber(spec, 0);
-    if (parsed > 0) return parsed;
+    if (parsed >= 200) return parsed;
   }
   const name = getProductName(product);
   const match = name.match(/(\d{3,4})\s*W/i) || name.match(/\b(\d{3,4})B\b/i);

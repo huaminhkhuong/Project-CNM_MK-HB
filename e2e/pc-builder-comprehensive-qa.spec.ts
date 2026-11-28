@@ -20,7 +20,7 @@ test.describe("Senior QA Comprehensive Test Suite — PC Builder Feature", () =>
   // TC-01: UI/UX Smoke & Component Section Navigation
   test("TC-01: Verify Page Load, Header, 8 Hardware Sections, and Cost Ticker", async ({ page }) => {
     // 1. Topbar and branding
-    await expect(page.locator(".builder-topbar")).toBeVisible();
+    await expect(page.locator(".builder-topbar-clean, .builder-topbar").first()).toBeVisible();
     
     // 2. Cost Ticker
     await expect(page.locator(".v2-cost-ticker")).toBeVisible();
@@ -48,12 +48,13 @@ test.describe("Senior QA Comprehensive Test Suite — PC Builder Feature", () =>
       const secName = sections[i];
       const stepItem = page.locator(".step-item").filter({ hasText: secName }).first();
       await stepItem.click();
-      await page.waitForTimeout(600);
+      await expect(stepItem).toHaveClass(/is-active/, { timeout: 10000 });
 
       const selectBtn = page.locator(".product-card .btn-select").first();
       await expect(selectBtn).toBeVisible({ timeout: 10000 });
+      await expect(selectBtn).toBeEnabled({ timeout: 10000 });
       await selectBtn.click();
-      await page.waitForTimeout(600);
+      await expect(stepItem).toHaveClass(/is-done/, { timeout: 10000 });
     }
 
     // Verify 8 components selected
@@ -110,15 +111,38 @@ test.describe("Senior QA Comprehensive Test Suite — PC Builder Feature", () =>
 
   // TC-04: AI Auto-Build Preset and Candidate Builds
   test("TC-04: AI Preset Trigger, 3 Candidate Builds, and Batch Application", async ({ page }) => {
-    // Click Gaming preset chip
-    const gamingChip = page.locator("button").filter({ hasText: "Gaming" }).first();
-    await expect(gamingChip).toBeVisible();
-    await gamingChip.click();
-    await page.waitForTimeout(2500);
+    // Click first quick-select preset button ("⚡ Chọn Nhanh Bộ Này" on Gaming AAA card)
+    const presetBtn = page.locator("button").filter({ hasText: "Chọn Nhanh Bộ Này" }).first();
+    await expect(presetBtn).toBeVisible({ timeout: 10000 });
+    await presetBtn.click();
+
+    // Wait for proposal dialog or candidate builds panel to render
+    const candidatePanel = page.locator(".candidate-builds-panel");
+    await Promise.race([
+      page.locator('[role="dialog"]').waitFor({ state: "visible", timeout: 15000 }).catch(() => {}),
+      candidatePanel.waitFor({ state: "visible", timeout: 15000 }).catch(() => {})
+    ]);
+    await page.waitForTimeout(1000);
+
+    // Close modal overlays in z-index order: [role="dialog"] (z=99999) FIRST, then .tradeoff-modal-overlay (z=10000)
+    for (let m = 0; m < 4; m++) {
+      const dialogClose = page.locator('[role="dialog"] button:has-text("✕")').first();
+      if (await dialogClose.isVisible().catch(() => false)) {
+        await dialogClose.click();
+        await page.waitForTimeout(400);
+        continue;
+      }
+      const tradeoffClose = page.locator('.tradeoff-modal-overlay button:has-text("✕")').first();
+      if (await tradeoffClose.isVisible().catch(() => false)) {
+        await tradeoffClose.click();
+        await page.waitForTimeout(400);
+        continue;
+      }
+      break;
+    }
 
     // Check candidate builds panel
-    const candidatePanel = page.locator(".candidate-builds-panel");
-    await expect(candidatePanel).toBeVisible({ timeout: 10000 });
+    await expect(candidatePanel).toBeVisible({ timeout: 15000 });
     
     const tabs = page.locator(".candidate-tab-card");
     const tabCount = await tabs.count();
@@ -138,7 +162,7 @@ test.describe("Senior QA Comprehensive Test Suite — PC Builder Feature", () =>
   // TC-05: XAI Explanation Drawer Inspection
   test("TC-05: Inspect XAI Explanation Drawer checks and diagnostics", async ({ page }) => {
     // Open XAI Drawer
-    const xaiBtn = page.locator("header.builder-topbar button").filter({ hasText: "XAI" }).first();
+    const xaiBtn = page.locator("header.builder-topbar-clean button, header.builder-topbar button").filter({ hasText: "XAI" }).first();
     await expect(xaiBtn).toBeVisible();
     await xaiBtn.click({ force: true });
     await page.waitForTimeout(1200);
@@ -215,15 +239,36 @@ test.describe("Senior QA Comprehensive Test Suite — PC Builder Feature", () =>
   // TC-09: One-Click Purchase & Final Review Modal
   test("TC-09: Buy Whole Build button triggers Final Review Modal", async ({ page }) => {
     // Apply Gaming preset first so we have a full build
-    const gamingChip = page.locator("button").filter({ hasText: "Gaming" }).first();
-    await gamingChip.click();
-    await page.waitForTimeout(2000);
+    const presetBtn = page.locator("button").filter({ hasText: "Chọn Nhanh Bộ Này" }).first();
+    await expect(presetBtn).toBeVisible({ timeout: 10000 });
+    await presetBtn.click();
+
+    await Promise.race([
+      page.locator('[role="dialog"]').waitFor({ state: "visible", timeout: 15000 }).catch(() => {}),
+      page.locator(".candidate-builds-panel").waitFor({ state: "visible", timeout: 15000 }).catch(() => {})
+    ]);
+    await page.waitForTimeout(1000);
+
+    // Apply build from modal if visible, otherwise close overlays and apply candidate
+    const applyModalBtn = page.locator('[role="dialog"] button').filter({ hasText: /Áp Dụng Cấu Hình|Nạp Cấu Hình/i }).first();
+    if (await applyModalBtn.isVisible().catch(() => false)) {
+      await applyModalBtn.click();
+      await page.waitForTimeout(1000);
+    }
+    for (let m = 0; m < 3; m++) {
+      const overlayClose = page.locator('.tradeoff-modal-overlay button:has-text("✕"), [role="dialog"] button:has-text("✕")').first();
+      if (await overlayClose.isVisible().catch(() => false)) {
+        await overlayClose.click();
+        await page.waitForTimeout(400);
+      }
+    }
 
     const buyBtn = page.locator(".v2-btn-order");
     await expect(buyBtn).toBeVisible();
 
     const isBlocked = (await buyBtn.innerText()).includes("Bị Chặn");
     if (!isBlocked) {
+      await expect(buyBtn).toBeEnabled({ timeout: 10000 });
       await buyBtn.click();
       await page.waitForTimeout(1000);
 

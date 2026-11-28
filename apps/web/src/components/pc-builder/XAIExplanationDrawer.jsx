@@ -347,7 +347,7 @@ export function XAIExplanationDrawer({
                     ? { label: "⏳ CHỜ CHỌN", bg: isDark ? "#1e293b" : "#f1f5f9", color: isDark ? "#94a3b8" : "#64748b" }
                     : { label: "✅ TƯƠNG THÍCH", bg: "#10b981", color: "#ffffff" };
 
-                  const clashData = !isPending ? extractClashData(item, selectedItems) : null;
+                  const clashData = !isPending && !item.ok ? extractClashData(item, selectedItems) : null;
                   const cleanTitle = getCleanTitle(item);
 
                   return (

@@ -1,5 +1,3 @@
-import { env } from "../../config/env";
-
 export interface LlmRequestOptions {
   systemPrompt?: string;
   userPrompt: string;
@@ -18,12 +16,13 @@ export interface LlmResponse {
 }
 
 /**
- * Unified AI LLM Provider Gateway
- * Manages multi-provider cascading execution (Gemini -> Groq -> OpenAI -> Domain Fallback)
- * with centralized timeout, abort controller, error resilience, and structured JSON parsing.
+ * Unified AI LLM Provider Gateway Adapter
+ * Delegates all LLM completions to the single canonical UnifiedLlmService gateway
+ * so every call shares the same per-provider Circuit Breaker, AbortController timeouts,
+ * Admin UI configuration, and real model list (eliminating dual LLM gateways).
  */
 export class AiLlmProvider {
-  private static readonly DEFAULT_TIMEOUT_MS = 25000;
+  private static readonly DEFAULT_TIMEOUT_MS = 18000;
 
   /**
    * Main entrypoint for unified LLM completion
@@ -38,270 +37,46 @@ export class AiLlmProvider {
       timeoutMs = this.DEFAULT_TIMEOUT_MS
     } = options;
 
-    const geminiKey = process.env.GEMINI_API_KEY || (env as any).geminiApiKey;
-    const groqKey = process.env.GROQ_API_KEY || (env as any).groqApiKey;
-    const openaiKey = process.env.OPENAI_API_KEY || (env as any).openaiApiKey;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { unifiedLlmService } = require("./unified-llm.service");
+      const effectiveSystem = jsonMode
+        ? `${systemPrompt}\n\nIMPORTANT: Return ONLY valid JSON without markdown explanation.`
+        : systemPrompt;
 
-    // 1. Try Google Gemini
-    if (geminiKey && geminiKey.trim()) {
-      try {
-        const geminiRes = await this.callGemini({
-          apiKey: geminiKey.trim(),
-          systemPrompt,
-          userPrompt,
-          temperature,
-          maxTokens,
-          jsonMode,
-          timeoutMs
-        });
-        if (geminiRes) return geminiRes;
-      } catch (err: any) {
-        console.warn("[AiLlmProvider] Gemini attempt failed, falling back:", err?.message || err);
-      }
-    }
+      const res = await unifiedLlmService.generateText({
+        prompt: userPrompt,
+        systemInstruction: effectiveSystem,
+        temperature,
+        maxTokens: Math.max(Number(maxTokens || 1000), 1024),
+        timeoutMs,
+        skipGuardrail: true
+      });
 
-    // 2. Try Groq
-    if (groqKey && groqKey.trim()) {
-      try {
-        const groqRes = await this.callGroq({
-          apiKey: groqKey.trim(),
-          systemPrompt,
-          userPrompt,
-          temperature,
-          maxTokens,
-          jsonMode,
-          timeoutMs
-        });
-        if (groqRes) return groqRes;
-      } catch (err: any) {
-        console.warn("[AiLlmProvider] Groq attempt failed, falling back:", err?.message || err);
-      }
-    }
-
-    // 3. Try OpenAI
-    if (openaiKey && openaiKey.trim()) {
-      try {
-        const openaiRes = await this.callOpenAi({
-          apiKey: openaiKey.trim(),
-          systemPrompt,
-          userPrompt,
-          temperature,
-          maxTokens,
-          jsonMode,
-          timeoutMs
-        });
-        if (openaiRes) return openaiRes;
-      } catch (err: any) {
-        console.warn("[AiLlmProvider] OpenAI attempt failed, falling back:", err?.message || err);
-      }
-    }
-
-    // 4. Graceful Domain Fallback
-    return this.generateSmartFallback(userPrompt, jsonMode);
-  }
-
-  /**
-   * Google Gemini Provider Implementation
-   */
-  private static async callGemini(args: {
-    apiKey: string;
-    systemPrompt: string;
-    userPrompt: string;
-    temperature: number;
-    maxTokens: number;
-    jsonMode: boolean;
-    timeoutMs: number;
-  }): Promise<LlmResponse | null> {
-    const primaryModel = process.env.GEMINI_MODEL || process.env.LLM_MODEL || "gemini-3-flash-preview";
-    const candidateModels = Array.from(new Set([
-      "gemini-3-flash-preview",
-      primaryModel,
-      "gemini-flash-lite-latest",
-      "gemini-3.5-flash-lite",
-      "gemini-3.5-flash",
-      "gemini-flash-latest"
-    ]));
-
-    for (const model of candidateModels) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), args.timeoutMs);
-
-      try {
-        const generationConfig: any = {
-          temperature: args.temperature,
-          maxOutputTokens: Math.max(Number(args.maxTokens || 2048), 4096),
-          ...(args.jsonMode ? { responseMimeType: "application/json" } : {})
-        };
-        if (/^gemini-3-flash/i.test(model)) {
-          generationConfig.thinkingConfig = { thinkingBudget: 0 };
-        }
-        const bodyPayload: any = {
-          contents: [{ role: "user", parts: [{ text: args.userPrompt }] }],
-          generationConfig
-        };
-
-        if (args.systemPrompt && args.systemPrompt.trim()) {
-          bodyPayload.system_instruction = {
-            parts: [{ text: args.systemPrompt.trim() }]
+      if (res && !res.isOfflineFallback && typeof res.text === "string" && res.text.trim()) {
+        const rawText = res.text.trim();
+        const rawProvider = String(res.provider || "").toLowerCase();
+        const provider: LlmResponse["provider"] =
+          rawProvider === "gemini" || rawProvider === "groq" || rawProvider === "openai"
+            ? (rawProvider as LlmResponse["provider"])
+            : "gemini";
+        const parsedJson = jsonMode ? this.safeParseJson(rawText) : undefined;
+        if (!jsonMode || parsedJson !== null) {
+          return {
+            text: rawText,
+            parsedJson,
+            provider,
+            model: String(res.model || "gemini-2.5-flash"),
+            success: true
           };
         }
-
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${args.apiKey}`;
-        const response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify(bodyPayload)
-        });
-
-        if (!response.ok) {
-          const errText = await response.text().catch(() => "");
-          console.warn(`[AiLlmProvider] Gemini model ${model} failed (${response.status}): ${errText}`);
-          continue; // try next candidate model
-        }
-
-        const data: any = await response.json();
-        const parts = data?.candidates?.[0]?.content?.parts || [];
-        const rawText = parts
-          .filter((p: any) => !p?.thought && typeof p?.text === "string")
-          .map((p: any) => p.text)
-          .join("")
-          .trim();
-
-        if (!rawText) continue;
-
-        const parsedJson = args.jsonMode ? this.safeParseJson(rawText) : undefined;
-        return {
-          text: rawText,
-          parsedJson,
-          provider: "gemini",
-          model,
-          success: true
-        };
-      } catch (err: any) {
-        console.warn(`[AiLlmProvider] Gemini model ${model} threw error:`, err?.message || err);
-      } finally {
-        clearTimeout(timer);
       }
+    } catch (err: any) {
+      console.warn("[AiLlmProvider] Unified gateway failed, using domain fallback:", err?.message || err);
     }
 
-    return null;
-  }
-
-  /**
-   * Groq Provider Implementation
-   */
-  private static async callGroq(args: {
-    apiKey: string;
-    systemPrompt: string;
-    userPrompt: string;
-    temperature: number;
-    maxTokens: number;
-    jsonMode: boolean;
-    timeoutMs: number;
-  }): Promise<LlmResponse | null> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), args.timeoutMs);
-    const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
-
-    try {
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${args.apiKey}`
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: args.systemPrompt },
-            { role: "user", content: args.userPrompt }
-          ],
-          temperature: args.temperature,
-          max_tokens: args.maxTokens,
-          ...(args.jsonMode ? { response_format: { type: "json_object" } } : {})
-        })
-      });
-
-      if (!response.ok) {
-        const errText = await response.text().catch(() => "");
-        throw new Error(`Groq status ${response.status}: ${errText}`);
-      }
-
-      const data: any = await response.json();
-      const rawText = data?.choices?.[0]?.message?.content?.trim() || "";
-      if (!rawText) return null;
-
-      const parsedJson = args.jsonMode ? this.safeParseJson(rawText) : undefined;
-      return {
-        text: rawText,
-        parsedJson,
-        provider: "groq",
-        model,
-        success: true
-      };
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  /**
-   * OpenAI Provider Implementation
-   */
-  private static async callOpenAi(args: {
-    apiKey: string;
-    systemPrompt: string;
-    userPrompt: string;
-    temperature: number;
-    maxTokens: number;
-    jsonMode: boolean;
-    timeoutMs: number;
-  }): Promise<LlmResponse | null> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), args.timeoutMs);
-    const model = process.env.OPENAI_MODEL || (env as any).openaiModel || "gpt-4o-mini";
-
-    try {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${args.apiKey}`
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: args.systemPrompt },
-            { role: "user", content: args.userPrompt }
-          ],
-          temperature: args.temperature,
-          max_tokens: args.maxTokens,
-          ...(args.jsonMode ? { response_format: { type: "json_object" } } : {})
-        })
-      });
-
-      if (!response.ok) {
-        const errText = await response.text().catch(() => "");
-        throw new Error(`OpenAI status ${response.status}: ${errText}`);
-      }
-
-      const data: any = await response.json();
-      const rawText = data?.choices?.[0]?.message?.content?.trim() || "";
-      if (!rawText) return null;
-
-      const parsedJson = args.jsonMode ? this.safeParseJson(rawText) : undefined;
-      return {
-        text: rawText,
-        parsedJson,
-        provider: "openai",
-        model,
-        success: true
-      };
-    } finally {
-      clearTimeout(timer);
-    }
+    // Graceful Domain Fallback when all external LLM providers are unavailable or circuit-open
+    return this.generateSmartFallback(userPrompt, jsonMode);
   }
 
   /**

@@ -11,18 +11,37 @@ test.describe("Smart PC Builder — End-to-End User Journeys (P10-04)", () => {
 
   test("Journey 1: Requirement Wizard -> Gaming 25M -> AI Build -> XAI Drawer -> Purchase Review", async ({ page }) => {
     // 1. Verify Topbar Header & AI Build controls
-    await expect(page.locator(".builder-topbar")).toBeVisible();
+    await expect(page.locator(".builder-topbar-clean, .builder-topbar").first()).toBeVisible();
 
-    // 2. Select Gaming Preset chip (which auto-triggers AI Auto-Build)
-    const gamingPresetBtn = page.locator("button").filter({ hasText: "Gaming" }).first();
-    await expect(gamingPresetBtn).toBeVisible();
+    // 2. Select Gaming Preset button ("⚡ Chọn Nhanh Bộ Này", which auto-triggers AI Auto-Build)
+    const gamingPresetBtn = page.locator("button").filter({ hasText: "Chọn Nhanh Bộ Này" }).first();
+    await expect(gamingPresetBtn).toBeVisible({ timeout: 10000 });
     await gamingPresetBtn.click();
 
-    // Wait for recommendation to settle
-    await page.waitForTimeout(2000);
+    // Wait for proposal dialog or candidate panel to settle, then close modal overlays
+    await Promise.race([
+      page.locator('[role="dialog"]').waitFor({ state: "visible", timeout: 15000 }).catch(() => {}),
+      page.locator(".candidate-builds-panel").waitFor({ state: "visible", timeout: 15000 }).catch(() => {})
+    ]);
+    await page.waitForTimeout(1000);
+    for (let m = 0; m < 4; m++) {
+      const dialogClose = page.locator('[role="dialog"] button:has-text("✕")').first();
+      if (await dialogClose.isVisible().catch(() => false)) {
+        await dialogClose.click();
+        await page.waitForTimeout(400);
+        continue;
+      }
+      const tradeoffClose = page.locator('.tradeoff-modal-overlay button:has-text("✕")').first();
+      if (await tradeoffClose.isVisible().catch(() => false)) {
+        await tradeoffClose.click();
+        await page.waitForTimeout(400);
+        continue;
+      }
+      break;
+    }
 
     // 3. Open XAI Drawer ("🧠 XAI" in topbar)
-    const xaiBtn = page.locator("header.builder-topbar button").filter({ hasText: "XAI" }).first();
+    const xaiBtn = page.locator("header.builder-topbar-clean button, header.builder-topbar button").filter({ hasText: "XAI" }).first();
     await expect(xaiBtn).toBeVisible();
     await xaiBtn.click({ force: true });
     await page.waitForTimeout(1000);
@@ -69,7 +88,7 @@ test.describe("Smart PC Builder — End-to-End User Journeys (P10-04)", () => {
     }
 
     // 3. Open XAI Drawer from Topbar to inspect compatibility
-    const xaiBtn = page.locator("header.builder-topbar button").filter({ hasText: "XAI" }).first();
+    const xaiBtn = page.locator("header.builder-topbar-clean button, header.builder-topbar button").filter({ hasText: "XAI" }).first();
     await expect(xaiBtn).toBeVisible();
     await xaiBtn.click({ force: true });
     await page.waitForTimeout(1000);

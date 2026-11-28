@@ -1,6 +1,7 @@
 import { Router } from "express";
 
 import { authenticate } from "../../middlewares/auth.middleware";
+import { authRateLimiter } from "../../middlewares/rate-limiter.middleware";
 import {
   login,
   logout,
@@ -19,12 +20,12 @@ import {
 
 export const authRouter = Router();
 
-authRouter.post("/register", register);
+authRouter.post("/register", authRateLimiter, register);
 authRouter.get("/check-email", checkEmail);
-authRouter.post("/login", login);
+authRouter.post("/login", authRateLimiter, login);
 authRouter.post("/logout", logout);
 authRouter.post("/refresh", refresh);
-authRouter.post("/google-mock", googleMock);
+authRouter.post("/google-mock", authRateLimiter, googleMock);
 authRouter.get("/me", authenticate, me);
 authRouter.patch("/me", authenticate, updateCurrentProfile);
 authRouter.patch("/me/password", authenticate, changePassword);

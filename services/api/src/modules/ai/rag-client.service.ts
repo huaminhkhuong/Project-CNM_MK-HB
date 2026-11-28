@@ -10,41 +10,77 @@
 
 class RagClientService {
   private baseUrl: string;
+  private consecutiveFailures = 0;
+  private circuitOpenUntil = 0;
+  private readonly failureThreshold = 3;
+  private readonly circuitCooldownMs = 30_000;
 
   constructor() {
     this.baseUrl = process.env.AI_SERVICE_URL || "http://127.0.0.1:5001";
   }
 
+  private getInternalHeaders(extra: Record<string, string> = {}): Record<string, string> {
+    const headers: Record<string, string> = { ...extra };
+    const key = String(process.env.AI_SERVICE_INTERNAL_KEY || "").trim();
+    if (key) {
+      headers["X-Internal-Key"] = key;
+    }
+    return headers;
+  }
+
+  private isCircuitOpen(): boolean {
+    if (this.circuitOpenUntil <= 0) return false;
+    if (Date.now() >= this.circuitOpenUntil) {
+      // Half-open probe allowed
+      this.circuitOpenUntil = 0;
+      return false;
+    }
+    return true;
+  }
+
+  private recordSuccess(): void {
+    this.consecutiveFailures = 0;
+    this.circuitOpenUntil = 0;
+  }
+
+  private recordFailure(): void {
+    this.consecutiveFailures += 1;
+    if (this.consecutiveFailures >= this.failureThreshold) {
+      this.circuitOpenUntil = Date.now() + this.circuitCooldownMs;
+    }
+  }
+
   /**
    * Truy vấn ngữ cảnh thực tế từ AI Service (Linh kiện, Quy tắc tương thích, Chính sách)
-   * @param {string} query Câu hỏi người dùng
-   * @param {number} topK Số lượng tài liệu tối đa
-   * @param {string|null} docType Bộ lọc loại tài liệu ('product', 'compatibility_rule', 'store_policy', 'custom_document')
-   * @returns {Promise<{ query: string, grounded_system_prompt: string, documents: Array<any> } | null>}
+   * Có Circuit Breaker chống treo (fail-fast 0ms khi AI Service không phản hồi)
    */
-  async retrieve(query: string, topK = 4, docType: string | null = null): Promise<any | null> {
+  async retrieve(query: string, topK = 4, docType: string | null = null, targetService: string | null = null): Promise<any | null> {
     const cleanQuery = String(query || "").trim();
-    if (!cleanQuery) return null;
+    if (!cleanQuery || this.isCircuitOpen()) return null;
 
     try {
       const response = await fetch(`${this.baseUrl}/v1/rag/retrieve`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: this.getInternalHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           query: cleanQuery,
           top_k: topK,
-          doc_type: docType || undefined
+          doc_type: docType || undefined,
+          target_service: targetService || undefined
         }),
         signal: AbortSignal.timeout(4000)
       });
 
       if (!response.ok) {
+        this.recordFailure();
         return null;
       }
 
       const data = await response.json();
+      this.recordSuccess();
       return data;
-    } catch (err: any) {
+    } catch (_err: any) {
+      this.recordFailure();
       return null;
     }
   }
@@ -54,7 +90,11 @@ class RagClientService {
       const response = await fetch(`${this.baseUrl}/health`, {
         signal: AbortSignal.timeout(2000)
       });
-      return response.ok;
+      if (response.ok) {
+        this.recordSuccess();
+        return true;
+      }
+      return false;
     } catch {
       return false;
     }
@@ -65,6 +105,7 @@ class RagClientService {
   async listDocuments(): Promise<any> {
     const response = await fetch(`${this.baseUrl}/v1/rag/documents`, {
       method: "GET",
+      headers: this.getInternalHeaders(),
       signal: AbortSignal.timeout(5000)
     });
     if (!response.ok) {
@@ -81,6 +122,7 @@ class RagClientService {
 
     const response = await fetch(`${this.baseUrl}/v1/rag/documents/upload`, {
       method: "POST",
+      headers: this.getInternalHeaders(),
       body: formData,
       signal: AbortSignal.timeout(120000) // Cho phép 120s nếu file PDF nhiều trang cần tiền xử lý
     });
@@ -96,6 +138,7 @@ class RagClientService {
   async deleteDocument(filename: string): Promise<any> {
     const response = await fetch(`${this.baseUrl}/v1/rag/documents/${encodeURIComponent(filename)}`, {
       method: "DELETE",
+      headers: this.getInternalHeaders(),
       signal: AbortSignal.timeout(15000)
     });
 
@@ -110,6 +153,7 @@ class RagClientService {
   async previewChunks(filename: string): Promise<any> {
     const response = await fetch(`${this.baseUrl}/v1/rag/documents/${encodeURIComponent(filename)}/chunks`, {
       method: "GET",
+      headers: this.getInternalHeaders(),
       signal: AbortSignal.timeout(30000)
     });
 
@@ -124,6 +168,7 @@ class RagClientService {
   async triggerReindex(): Promise<any> {
     const response = await fetch(`${this.baseUrl}/v1/rag/reindex`, {
       method: "POST",
+      headers: this.getInternalHeaders(),
       signal: AbortSignal.timeout(60000)
     });
 
@@ -137,6 +182,7 @@ class RagClientService {
   async getReindexStatus(): Promise<any> {
     const response = await fetch(`${this.baseUrl}/v1/rag/reindex/status`, {
       method: "GET",
+      headers: this.getInternalHeaders(),
       signal: AbortSignal.timeout(5000)
     });
 
@@ -150,6 +196,7 @@ class RagClientService {
   async getEmbeddingModels(): Promise<any> {
     const response = await fetch(`${this.baseUrl}/v1/rag/models`, {
       method: "GET",
+      headers: this.getInternalHeaders(),
       signal: AbortSignal.timeout(3000)
     });
 
@@ -166,7 +213,7 @@ class RagClientService {
     try {
       const response = await fetch(`${this.baseUrl}/v1/rag/pc-builder/questions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: this.getInternalHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           purpose,
           step,
@@ -180,6 +227,7 @@ class RagClientService {
         // Fallback sang GET nếu POST không được hỗ trợ
         const getRes = await fetch(`${this.baseUrl}/v1/rag/pc-builder/questions?purpose=${encodeURIComponent(purpose)}&step=${step}&budget=${budget}`, {
           method: "GET",
+          headers: this.getInternalHeaders(),
           signal: AbortSignal.timeout(15000)
         });
         if (!getRes.ok) {
@@ -270,13 +318,13 @@ class RagClientService {
             ]
           },
           {
-            id: "network_connection",
-            label: "Vị trí đặt máy tính của bạn kết nối Internet bằng hình thức nào?",
+            id: "upgrade_priority",
+            label: "Bạn ưu tiên tiêu chí nào hơn cho tản nhiệt và khả năng nâng cấp sau này?",
             type: "single_select",
             options: [
-              { value: "wifi_bt", label: "Bắt sóng Wi-Fi không dây: Gọn gàng, tiện lợi và có sẵn Bluetooth" },
-              { value: "lan_cable", label: "Cắm dây mạng trực tiếp: Ổn định tối đa, tốc độ cao" },
-              { value: "both", label: "Linh hoạt cả hai hình thức" }
+              { value: "silent_247", label: "Êm ái & mát mẻ 24/7: Ưu tiên tản nhiệt tốt, nguồn dư tải bền bỉ" },
+              { value: "future_upgrade", label: "Dễ nâng cấp về sau: Ưu tiên Mainboard nhiều khe RAM/M.2 và nguồn công suất lớn" },
+              { value: "balanced_cost", label: "Tối ưu hiệu năng/giá hiện tại: Đủ dùng ổn định, không cần dư thừa" }
             ]
           },
           {

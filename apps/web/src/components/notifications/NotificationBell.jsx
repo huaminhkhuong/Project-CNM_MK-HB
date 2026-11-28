@@ -100,6 +100,7 @@ export function NotificationBell() {
   useEffect(() => {
     if (!isAuthenticated || !userId) return;
 
+    let animTimer = null;
     // Join personal user room in Socket.io
     joinRoom("join_user", userId);
 
@@ -109,13 +110,18 @@ export function NotificationBell() {
 
       // Hiệu ứng rung chuông
       setAnimatingBell(true);
-      setTimeout(() => setAnimatingBell(false), 1200);
+      if (animTimer) window.clearTimeout(animTimer);
+      animTimer = window.setTimeout(() => setAnimatingBell(false), 1200);
 
       // Thêm vào đầu danh sách
       setNotifications((prev) => [newNotif, ...prev]);
     };
 
-    on("notification:new", handleNewNotification);
+    const unsubscribe = on("notification:new", handleNewNotification);
+    return () => {
+      if (typeof unsubscribe === "function") unsubscribe();
+      if (animTimer) window.clearTimeout(animTimer);
+    };
   }, [isAuthenticated, userId, joinRoom, on]);
 
   // Load danh sách thông báo khi mở dropdown hoặc đổi tab

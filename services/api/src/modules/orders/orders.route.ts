@@ -24,11 +24,19 @@ import {
   uploadPaymentProof,
   approvePaymentProof,
   confirmOrderReceived,
+  createOrderEventsTicket,
   streamOrderEvents,
   cleanupExpiredOrders
 } from "./orders.controller";
 
 export const ordersRouter = Router();
+
+const PAYMENT_PROOF_MIME_TO_EXT: Record<string, string> = {
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/gif": ".gif",
+  "image/webp": ".webp"
+};
 
 const paymentProofStorage = multer.diskStorage({
   destination: (_req: Request, _file: { originalname: string }, cb: (error: Error | null, destination: string) => void) => {
@@ -38,9 +46,10 @@ const paymentProofStorage = multer.diskStorage({
     }
     cb(null, uploadsDir);
   },
-  filename: (_req: Request, file: { originalname: string }, cb: (error: Error | null, filename: string) => void) => {
+  filename: (_req: Request, file: { mimetype?: string; originalname: string }, cb: (error: Error | null, filename: string) => void) => {
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    cb(null, `paymentProof-${uniqueSuffix}${path.extname(file.originalname)}`);
+    const safeExt = PAYMENT_PROOF_MIME_TO_EXT[String(file.mimetype || "").toLowerCase()] || ".jpg";
+    cb(null, `paymentProof-${uniqueSuffix}${safeExt}`);
   }
 });
 
@@ -48,12 +57,12 @@ const uploadPaymentProofFile = multer({
   storage: paymentProofStorage,
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req: Request, file: { mimetype: string }, cb: (error: Error | null, acceptFile?: boolean) => void) => {
-    const allowedMimeTypes = ["image/jpeg", "image/png", "image/gif"];
-    if (allowedMimeTypes.includes(file.mimetype)) {
+    const mime = String(file.mimetype || "").toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(PAYMENT_PROOF_MIME_TO_EXT, mime)) {
       cb(null, true);
       return;
     }
-    cb(new AppError("Only JPG, PNG, and GIF files are allowed", 400));
+    cb(new AppError("Only JPG, PNG, GIF, and WEBP files are allowed", 400));
   }
 });
 
@@ -67,6 +76,7 @@ ordersRouter.get("/events", streamOrderEvents);
 
 ordersRouter.use(authenticate);
 
+ordersRouter.post("/events/ticket", createOrderEventsTicket);
 ordersRouter.post("/checkout", checkout);
 ordersRouter.get("/my", getMyOrders);
 ordersRouter.get("/:id", getOrderDetail);

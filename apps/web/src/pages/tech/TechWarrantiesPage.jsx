@@ -194,10 +194,6 @@ export function TechWarrantiesPage() {
           if (normalizedRequests.length === 0) return null;
           return normalizedRequests.some((item) => item.id === current) ? current : normalizedRequests[0].id;
         });
-
-        if (silent) {
-          setMessage({ type: "success", text: `Đã làm mới ${normalizedRequests.length} yêu cầu bảo hành.` });
-        }
       } catch (error) {
         setMessage({ type: "error", text: getErrorMessage(error, "Không thể tải danh sách yêu cầu bảo hành.") });
       } finally {
@@ -238,7 +234,7 @@ export function TechWarrantiesPage() {
       media: []
     });
     if (fileInputRef.current) fileInputRef.current.value = "";
-  }, [selectedRequest]);
+  }, [selectedRequest?.id, selectedRequest?.status]);
 
   const stats = useMemo(() => {
     const openStatuses = ["RECEIVED", "INSPECTING", "REPAIRING", "WAITING_PARTS", "REPLACEMENT"];

@@ -94,6 +94,8 @@ async function getProductSchema() {
       brandId: pickColumn(productColumns, ["brand_id"], null),
       warrantyMonths: pickColumn(productColumns, ["warranty_months"], null),
       slug: pickColumn(productColumns, ["slug"], null),
+      isActive: pickColumn(productColumns, ["is_active"], null),
+      status: pickColumn(productColumns, ["status"], null),
       createdAt: pickColumn(productColumns, ["created_at"], null)
     },
     categories: {
@@ -148,6 +150,15 @@ async function getProductSchema() {
 async function createListConditions(filters, config) {
   const clauses = [];
   const params = [];
+
+  if (!filters.includeInactive) {
+    if (config.products.isActive) {
+      clauses.push(`(p.${config.products.isActive} IS NULL OR p.${config.products.isActive} = 1)`);
+    }
+    if (config.products.status) {
+      clauses.push(`(p.${config.products.status} IS NULL OR UPPER(p.${config.products.status}) = 'ACTIVE')`);
+    }
+  }
 
   if (filters.categoryId !== null) {
     clauses.push(`p.${config.products.categoryId} = ?`);
@@ -488,6 +499,7 @@ async function getProducts(params = {}) {
     const brandSelect = config.brands ? "b.name AS brand_name," : "NULL AS brand_name,";
     const skuJoin = config.skus ? `LEFT JOIN ${config.skus.table} s ON s.${config.skus.productId} = p.${config.products.id}` : "";
     const priceExpr = config.skus ? `COALESCE(MIN(s.${config.skus.price}), p.${config.products.price || "price"})` : `p.${config.products.price}`;
+    const primarySkuExpr = config.skus ? `MIN(s.${config.skus.id}) AS primary_sku_id,` : "NULL AS primary_sku_id,";
     const imageExpr = config.skus?.imageUrl ? `MIN(s.${config.skus.imageUrl})` : "NULL";
     const orderBySql = resolveSortClause(filters.sort, config);
     const shouldInterleave =
@@ -513,6 +525,7 @@ async function getProducts(params = {}) {
               ${config.products.warrantyMonths ? `p.${config.products.warrantyMonths}` : "24"} AS warranty_months,
               c.${config.categories.name} AS category_name,
               ${brandSelect}
+              ${primarySkuExpr}
               ${priceExpr} AS price,
               ${imageExpr} AS image_url,
               ${config.skus && config.skus.stock ? `COALESCE(SUM(s.${config.skus.stock}), 0)` : "0"} AS stock_quantity
@@ -534,6 +547,7 @@ async function getProducts(params = {}) {
             ${config.products.warrantyMonths ? `p.${config.products.warrantyMonths}` : "24"} AS warranty_months,
             c.${config.categories.name} AS category_name,
             ${brandSelect}
+            ${primarySkuExpr}
             ${priceExpr} AS price,
             ${imageExpr} AS image_url,
             ${config.skus && config.skus.stock ? `COALESCE(SUM(s.${config.skus.stock}), 0)` : "0"} AS stock_quantity
@@ -609,7 +623,7 @@ async function getProducts(params = {}) {
 
       const normalizedItems = items.map((item) => ({
         ...item,
-        sku_id: skuMap.get(item.product_id) || item.product_id,
+        sku_id: skuMap.get(item.product_id) || item.primary_sku_id || null,
         specs: specsMap.get(item.product_id) || [],
         image_url: normalizeProductImageUrl(item.image_url, item.category_name, item.product_name)
       }));

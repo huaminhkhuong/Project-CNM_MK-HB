@@ -169,7 +169,9 @@ export function calculateBuilderInsights(selectedItems = {}, selectedCount = 0, 
   const boardSocket = findSpec(mainboard, SPEC_ALIASES.socket);
   const ramType    = findSpec(ram, SPEC_ALIASES.ramType);
   const boardRam   = findSpec(mainboard, SPEC_ALIASES.ramType);
-  const psuWatt    = parseNumber(findSpec(psu, SPEC_ALIASES.psuWattage) || getProductName(psu), 0);
+  const rawPsuText = String(findSpec(psu, SPEC_ALIASES.psuWattage) || getProductName(psu) || "");
+  const psuWattMatch = rawPsuText.match(/(\d{3,4})\s*W/i) || rawPsuText.match(/\b(\d{3,4})B\b/i);
+  const psuWatt    = psuWattMatch ? Number(psuWattMatch[1]) : parseNumber(rawPsuText, 0);
 
   const actualCpuTdp = parseNumber(findSpec(cpu, SPEC_ALIASES.tdp), 0);
   const actualGpuTdp = parseNumber(findSpec(gpu, SPEC_ALIASES.tdp), 0);
@@ -186,7 +188,17 @@ export function calculateBuilderInsights(selectedItems = {}, selectedCount = 0, 
 
   const recommendedPsuWatt = Math.round(power * 1.25);
   const psuMarginPercent = psuWatt > 0 ? Math.round(((psuWatt - power) / psuWatt) * 100) : 0;
-  const isPsuMarginWarning = s.psu && psuWatt > 0 && psuMarginPercent < 20;
+  const isPsuMarginWarning = Boolean(s.psu && psuWatt > 0 && psuWatt >= power && psuMarginPercent < 20);
+
+  const normalizeSocket = (raw) => {
+    const str = String(raw || "").toUpperCase().replace(/[-\s]/g, "");
+    if (str.includes("AM5")) return "AM5";
+    if (str.includes("AM4")) return "AM4";
+    if (str.includes("1851")) return "LGA1851";
+    if (str.includes("1700")) return "LGA1700";
+    if (str.includes("1200")) return "LGA1200";
+    return normalizeText(raw);
+  };
 
   const coolingSelected = Boolean(s.cooling);
   const coolingDiag = getCoolingDiagnostics(cpu, cooling, caseProduct, coolingSelected);
@@ -207,23 +219,27 @@ export function calculateBuilderInsights(selectedItems = {}, selectedCount = 0, 
     const b = normalizeText(bForm);
     const c = normalizeText(cForm);
     if (!b || !c) return true;
-    if (c.includes("atx") && !c.includes("matx") && !c.includes("micro")) return true;
-    if (c.includes("matx") || c.includes("micro")) return !b.includes("atx") || b.includes("matx") || b.includes("micro");
+    if (c.includes("eatx") || c.includes("e-atx")) return true;
+    if (c.replace(/micro[\s-]?atx|m[\s-]?atx|e[\s-]?atx/g, "").includes("atx")) return true;
+    if (c.includes("matx") || c.includes("m-atx") || c.includes("micro")) {
+      const boardIsFullAtx = b.replace(/micro[\s-]?atx|m[\s-]?atx|e[\s-]?atx/g, "").includes("atx") || b.includes("eatx") || b.includes("e-atx");
+      return !boardIsFullAtx;
+    }
     if (c.includes("itx")) return b.includes("itx");
     return true;
   };
 
   const gpuLength      = parseNumber(findSpec(gpu, SPEC_ALIASES.gpuLength), 0);
   let rawCaseClearance  = parseNumber(findSpec(caseProduct, SPEC_ALIASES.caseGpuClearance), 0);
-  // Failsafe: If extracted clearance is < 250mm, it's likely a CPU Cooler height clearance value (e.g., 160mm), not GPU length. Standard ATX cases accommodate 340-400mm GPUs.
-  const caseClearance  = rawCaseClearance > 250 ? rawCaseClearance : caseProduct ? 360 : 0;
+  // Failsafe: Ignore unrealistically tiny values (<150mm) that could not fit any discrete GPU.
+  const caseClearance  = rawCaseClearance >= 150 ? rawCaseClearance : caseProduct ? 360 : 0;
 
   const temp  = Math.min(88, Math.round(48 + power / 18 - (coolingSelected ? (coolingFitOk ? 10 : 5) : 0)));
 
   const checks = [
     {
       label: "Socket CPU ↔ Mainboard [COMP-001]", icon: "🔌",
-      ok: !cpuSocket || !boardSocket || normalizeText(cpuSocket) === normalizeText(boardSocket),
+      ok: !cpuSocket || !boardSocket || normalizeSocket(cpuSocket) === normalizeSocket(boardSocket),
       detail: cpuSocket && boardSocket ? `${cpuSocket} / ${boardSocket}` : "Cần dữ liệu socket từ sản phẩm."
     },
     {

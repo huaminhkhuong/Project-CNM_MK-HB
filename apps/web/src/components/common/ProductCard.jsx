@@ -125,10 +125,14 @@ export function ProductCard({ product, eager = false }) {
   const brandName      = getBrandName(product);
   const categoryName   = getProductCategory(product);
   const price          = getProductPrice(product);
-  const oldPrice       = Number(product?.oldPrice || Math.round(price * 1.14));
-  const discountPercent= Number(product?.discountPercent || 12);
-  const rating         = Number(product?.rating || 4.8).toFixed(1);
-  const soldCount      = Number(product?.soldCount || 120);
+  const rawOldPrice    = Number(product?.oldPrice || product?.original_price || 0);
+  const rawDiscount    = Number(product?.discountPercent || product?.discount_percent || 0);
+  const hasDiscount    = rawDiscount > 0 && rawOldPrice > price;
+  const oldPrice       = hasDiscount ? rawOldPrice : 0;
+  const discountPercent= hasDiscount ? rawDiscount : 0;
+  const rawRating      = Number(product?.rating || product?.averageRating || 0);
+  const rating         = rawRating > 0 ? rawRating.toFixed(1) : null;
+  const soldCount      = Number(product?.soldCount || product?.sold_count || 0);
   const stock          = getProductStock(product);
   const stockMeta      = getStockMeta(stock);
   const isMall         = Boolean(product?.isMall);
@@ -238,15 +242,19 @@ export function ProductCard({ product, eager = false }) {
               onError={handleImageError}
             />
 
-            {/* Badges: Discount */}
-            <div className="market-product-card__badges">
-              <span className="market-product-card__discount">
-                -{discountPercent}%
-              </span>
-              {coolingType && (
-                <span className="market-product-card__type">{coolingType}</span>
-              )}
-            </div>
+            {/* Badges: Discount (real promo only) */}
+            {(hasDiscount || coolingType) && (
+              <div className="market-product-card__badges">
+                {hasDiscount && (
+                  <span className="market-product-card__discount">
+                    -{discountPercent}%
+                  </span>
+                )}
+                {coolingType && (
+                  <span className="market-product-card__type">{coolingType}</span>
+                )}
+              </div>
+            )}
 
             {/* Badges: Mall + Stock */}
             <div className="market-product-card__flags">
@@ -278,20 +286,30 @@ export function ProductCard({ product, eager = false }) {
               <span className="market-product-card__price-current">
                 {price.toLocaleString("vi-VN")}đ
               </span>
-              <span className="market-product-card__price-old">
-                {oldPrice.toLocaleString("vi-VN")}đ
-              </span>
+              {hasDiscount && (
+                <span className="market-product-card__price-old">
+                  {oldPrice.toLocaleString("vi-VN")}đ
+                </span>
+              )}
             </div>
 
-            {/* Rating + Sold */}
+            {/* Rating + Sold (real data only) */}
             <div className="market-product-card__meta">
-              <span className="market-product-card__rating">
-                <span className="market-product-card__stars">{STAR_TEXT}</span>
-                <span style={{ fontWeight: 600 }}>{rating}</span>
-              </span>
-              <span style={{ color: "var(--market-muted)", fontSize: 11 }}>
-                Đã bán {soldCount}
-              </span>
+              {rating ? (
+                <span className="market-product-card__rating">
+                  <span className="market-product-card__stars">{STAR_TEXT}</span>
+                  <span style={{ fontWeight: 600 }}>{rating}</span>
+                </span>
+              ) : (
+                <span style={{ color: "var(--market-muted)", fontSize: 11, fontWeight: 600 }}>
+                  🛡️ Chính hãng · Bảo hành ĐT
+                </span>
+              )}
+              {soldCount > 0 && (
+                <span style={{ color: "var(--market-muted)", fontSize: 11 }}>
+                  Đã bán {soldCount}
+                </span>
+              )}
             </div>
 
             {/* Tags */}

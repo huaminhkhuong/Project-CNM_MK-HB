@@ -648,11 +648,18 @@ export function TechTicketsPage() {
       let response;
 
       if (type === "reply") {
-        response = await addTicketMessage(selectedTicketResolved.id, {
+        let replyPayload = {
           message: data,
-          attachments: replyFiles,
           visibility: "PUBLIC"
-        });
+        };
+        if (Array.isArray(replyFiles) && replyFiles.length > 0) {
+          const formData = new FormData();
+          formData.append("message", String(data || "Kỹ thuật viên đã gửi tệp đính kèm."));
+          formData.append("visibility", "PUBLIC");
+          replyFiles.forEach((file) => formData.append("attachments", file));
+          replyPayload = formData;
+        }
+        response = await addTicketMessage(selectedTicketResolved.id, replyPayload);
         setReplyMessage("");
         setReplyFiles([]);
         if (replyFileInputRef.current) replyFileInputRef.current.value = "";

@@ -1,6 +1,30 @@
 import React from "react";
 import { errorLogger } from "../utils/errorLogger";
 
+const SAFE_CACHE_KEY_PREFIXES = [
+  "pc_builder_",
+  "pcmall_ai_chat_",
+  "compare_",
+  "direct_checkout_"
+];
+
+function clearNonAuthCacheStorage() {
+  try {
+    const keys = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (key) keys.push(key);
+    }
+    keys.forEach((key) => {
+      if (SAFE_CACHE_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+        window.localStorage.removeItem(key);
+      }
+    });
+  } catch {
+    // ignore storage restrictions
+  }
+}
+
 export class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -18,51 +42,74 @@ export class ErrorBoundary extends React.Component {
 
   render() {
     if (this.state.hasError) {
+      const isDev = Boolean(import.meta.env.DEV);
       return (
         <div style={{
-          padding: "40px",
-          maxWidth: "800px",
+          padding: "36px",
+          maxWidth: "760px",
           margin: "40px auto",
-          fontFamily: "monospace",
+          fontFamily: "'Inter', system-ui, sans-serif",
           backgroundColor: "#fff1f2",
-          border: "2px solid #f43f5e",
+          border: "1px solid #fecdd3",
           borderRadius: "16px",
-          color: "#9f1239"
+          color: "#881337"
         }}>
-          <h2 style={{ fontSize: "22px", marginBottom: "12px", color: "#e11d48" }}>
-            ⚠️ Lỗi Hiển Thị Trang Web (React Runtime Error)
+          <h2 style={{ fontSize: "20px", marginBottom: "10px", color: "#be123c" }}>
+            ⚠️ Đã xảy ra lỗi hiển thị giao diện
           </h2>
-          <p style={{ fontWeight: "bold", fontSize: "14px", marginBottom: "8px" }}>
-            {this.state.error && this.state.error.toString()}
+          <p style={{ fontSize: "14px", marginBottom: "12px", lineHeight: 1.6 }}>
+            {isDev && this.state.error
+              ? this.state.error.toString()
+              : "Rất tiếc, trang gặp sự cố ngoài ý muốn. Phiên đăng nhập của bạn vẫn được giữ nguyên."}
           </p>
-          <pre style={{
-            backgroundColor: "#ffe4e6",
-            padding: "16px",
-            borderRadius: "8px",
-            overflowX: "auto",
-            fontSize: "12px",
-            lineHeight: "1.5"
-          }}>
-            {this.state.errorInfo?.componentStack || "Không có thông tin stack trace"}
-          </pre>
-          <button
-            onClick={() => {
-              window.localStorage.clear();
-              window.location.reload();
-            }}
-            style={{
-              marginTop: "16px",
-              padding: "10px 20px",
-              backgroundColor: "#e11d48",
-              color: "#fff",
-              border: "none",
+          {isDev && this.state.errorInfo?.componentStack ? (
+            <pre style={{
+              backgroundColor: "#ffe4e6",
+              padding: "14px",
               borderRadius: "8px",
-              fontWeight: "bold",
-              cursor: "pointer"
-            }}
-          >
-            🧹 Xóa Storage & Tải Lại Trang
-          </button>
+              overflowX: "auto",
+              fontSize: "12px",
+              lineHeight: "1.5",
+              fontFamily: "monospace"
+            }}>
+              {this.state.errorInfo.componentStack}
+            </pre>
+          ) : null}
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "16px" }}>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              style={{
+                padding: "10px 18px",
+                backgroundColor: "#2563eb",
+                color: "#fff",
+                border: "none",
+                borderRadius: "8px",
+                fontWeight: 700,
+                cursor: "pointer"
+              }}
+            >
+              🔄 Tải lại trang
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                clearNonAuthCacheStorage();
+                window.location.reload();
+              }}
+              style={{
+                padding: "10px 18px",
+                backgroundColor: "#e11d48",
+                color: "#fff",
+                border: "none",
+                borderRadius: "8px",
+                fontWeight: 700,
+                cursor: "pointer"
+              }}
+            >
+              🧹 Xóa bộ nhớ đệm tạm & Tải lại
+            </button>
+          </div>
         </div>
       );
     }

@@ -13,7 +13,8 @@ import {
   patchTicket,
   postTicketMessage,
   postMyTicket,
-  ticketManageRoles
+  ticketManageRoles,
+  ticketReadRoles
 } from "./tickets.controller";
 
 export const ticketsRouter = Router();
@@ -23,15 +24,16 @@ ticketsRouter.use(authenticate);
 const ticketUploadDir = path.resolve(__dirname, "../../../uploads/tickets");
 fs.mkdirSync(ticketUploadDir, { recursive: true });
 
-const allowedAttachmentTypes = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "video/mp4",
-  "video/webm",
-  "video/quicktime",
-  "application/pdf"
-]);
+const ALLOWED_TICKET_MIME_TO_EXT: Record<string, string> = {
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/gif": ".gif",
+  "image/webp": ".webp",
+  "video/mp4": ".mp4",
+  "video/webm": ".webm",
+  "video/quicktime": ".mov",
+  "application/pdf": ".pdf"
+};
 
 const ticketAttachmentUpload = multer({
   storage: multer.diskStorage({
@@ -43,9 +45,10 @@ const ticketAttachmentUpload = multer({
         .replace(/[^a-zA-Z0-9._-]+/g, "-")
         .replace(/^-+|-+$/g, "")
         .slice(0, 120);
-      const ext = path.extname(safeName) || "";
-      const base = path.basename(safeName, ext) || "ticket-file";
-      cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}-${base}${ext}`);
+      const rawExt = path.extname(safeName) || "";
+      const base = path.basename(safeName, rawExt) || "ticket-file";
+      const safeExt = ALLOWED_TICKET_MIME_TO_EXT[String(file.mimetype || "").toLowerCase()] || ".bin";
+      cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}-${base}${safeExt}`);
     }
   }),
   limits: {
@@ -53,7 +56,8 @@ const ticketAttachmentUpload = multer({
     fileSize: 20 * 1024 * 1024
   },
   fileFilter: (_req: Request, file: any, cb: (error: Error | null, acceptFile?: boolean) => void) => {
-    if (!allowedAttachmentTypes.has(file.mimetype)) {
+    const mime = String(file.mimetype || "").toLowerCase();
+    if (!Object.prototype.hasOwnProperty.call(ALLOWED_TICKET_MIME_TO_EXT, mime)) {
       return cb(new AppError("Chỉ hỗ trợ định dạng JPG, PNG, GIF, MP4, WEBM, MOV hoặc PDF", 400));
     }
     return cb(null, true);
@@ -120,8 +124,8 @@ function appendMessageAttachments(req: Request, _res: Response, next: NextFuncti
 
 ticketsRouter.post("/", handleTicketAttachmentUpload, appendCreateAttachments, postMyTicket);
 ticketsRouter.get("/my", getMyTickets);
-ticketsRouter.get("/stats", authorize(ticketManageRoles), getTicketStats);
-ticketsRouter.get("/", authorize(ticketManageRoles), getAllTickets);
+ticketsRouter.get("/stats", authorize(ticketReadRoles), getTicketStats);
+ticketsRouter.get("/", authorize(ticketReadRoles), getAllTickets);
 ticketsRouter.post("/:id/messages", handleTicketAttachmentUpload, appendMessageAttachments, postTicketMessage);
 ticketsRouter.get("/:id", getTicketDetail);
 ticketsRouter.patch("/:id", authorize(ticketManageRoles), patchTicket);

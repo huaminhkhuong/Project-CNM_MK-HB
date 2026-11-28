@@ -21,7 +21,7 @@ def load_ai_env():
                         k, v = line.split("=", 1)
                         k = k.strip()
                         v = v.strip().strip("'\"")
-                        if k not in os.environ:
+                        if not (os.environ.get(k) or "").strip():
                             os.environ[k] = v
 
 load_ai_env()
@@ -77,8 +77,33 @@ class ChromaKnowledgeStore:
                 self.collection_name = "pcmall_knowledge"
 
     def is_indexed(self) -> bool:
-        """Kiểm tra xem Vector Database đã có dữ liệu chưa."""
-        return self.collection.count() > 0 or self.local_collection.count() > 0
+        """Kiểm tra xem Collection đang hoạt động (active primary) đã có dữ liệu vector chưa."""
+        return self.collection.count() > 0
+
+    def get_status(self) -> Dict[str, Any]:
+        """Trả về trạng thái thực tế của các ChromaDB collections."""
+        gemini_count = 0
+        if getattr(self, "gemini_collection", None) is not None:
+            try:
+                gemini_count = self.gemini_collection.count()
+            except Exception:
+                gemini_count = 0
+        local_count = 0
+        try:
+            local_count = self.local_collection.count()
+        except Exception:
+            local_count = 0
+        active_count = self.collection.count() if self.collection is not None else 0
+        using_gemini_active = bool(self.is_using_gemini and self.collection_name == "pcmall_gemini_knowledge" and gemini_count > 0)
+        return {
+            "active_collection": self.collection_name,
+            "active_vectors_count": active_count,
+            "gemini_vectors_count": gemini_count,
+            "local_vectors_count": local_count,
+            "is_using_gemini": using_gemini_active,
+            "gemini_configured": bool(self.gemini_api_key),
+            "embedding_model": self.embedding_model if using_gemini_active else "sentence-transformers/all-MiniLM-L6-v2 (ONNX)"
+        }
 
     def index_documents(self, documents: List[Dict[str, Any]], batch_size: int = 40):
         """Index toàn bộ danh sách tài liệu vào ChromaDB theo batch."""
@@ -123,7 +148,8 @@ class ChromaKnowledgeStore:
         except Exception as ex:
             print(f"⚠️ [ChromaDB Indexing] Lỗi khi nạp dữ liệu với Gemini Embedding ({ex}).")
             if self.is_using_gemini:
-                print("🛡️ [ChromaDB] Tự động chuyển hướng sang Collection Local ONNX (1226 vectors sẵn có) để bảo toàn dịch vụ!")
+                print("🛡️ [ChromaDB] Tự động chuyển hướng sang Collection Local ONNX để bảo toàn dịch vụ!")
+                self.is_using_gemini = False
                 self.collection = self.local_collection
                 self.collection_name = "pcmall_knowledge"
                 # Đảm bảo local_collection có dữ liệu
@@ -131,10 +157,16 @@ class ChromaKnowledgeStore:
                     print("🔄 Đang nạp vào Local ONNX...")
                     for i in range(0, total, 100):
                         batch = documents[i:i+100]
-                        self.local_collection.add(
+                        clean_metas = []
+                        for d in batch:
+                            cm = {}
+                            for k, v in d.get("metadata", {}).items():
+                                cm[k] = v if isinstance(v, (str, int, float, bool)) else ("" if v is None else str(v))
+                            clean_metas.append(cm)
+                        self.local_collection.upsert(
                             ids=[d["id"] for d in batch],
                             documents=[d["text"] for d in batch],
-                            metadatas=[d.get("metadata", {}) for d in batch]
+                            metadatas=clean_metas
                         )
                 print(f"✅ Collection Local ONNX đã sẵn sàng với {self.local_collection.count()} vectors!")
 

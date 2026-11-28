@@ -5,6 +5,7 @@ import { errorLogger } from "../utils/errorLogger";
 
 export const httpClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || "/api",
+  timeout: 30000,
   headers: {
     "Content-Type": "application/json"
   }
@@ -32,7 +33,7 @@ async function tryRefreshToken() {
       .post(
         `${import.meta.env.VITE_API_BASE_URL || "/api"}/auth/refresh`,
         { refreshToken },
-        { headers: { "Content-Type": "application/json" } }
+        { timeout: 15000, headers: { "Content-Type": "application/json" } }
       )
       .then((response) => {
         const payload = response?.data?.data || response?.data;

@@ -53,7 +53,7 @@ export const AUTO_RECOMMEND_PROFILES = {
 export const SPEC_ALIASES = {
   socket:           ["socket"],
   ramType:          ["ram_type", "loại ram", "loai ram", "memory type", "ddr"],
-  psuWattage:       ["psu_wattage", "wattage", "power", "công suất psu", "cong suat psu"],
+  psuWattage:       ["psu_wattage", "wattage", "power", "công suất nguồn", "công suất psu", "cong suat nguon", "cong suat psu"],
   tdp:              ["tdp", "power"],
   gpuLength:        ["gpu_length", "gpu length", "vga length", "chiều dài gpu", "chiều dài vga"],
   caseGpuClearance: ["gpu clearance", "vga clearance", "case_gpu_clearance", "hỗ trợ vga tối đa", "vga dài tối đa"],

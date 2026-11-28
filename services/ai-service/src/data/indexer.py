@@ -9,32 +9,52 @@ CORE_COMPATIBILITY_RULES = [
     {
         "id": "rule_COMP-001",
         "rule_id": "COMP-001",
-        "text": "Quy tắc COMP-001 (CPU - Mainboard Socket): Socket của bộ vi xử lý (CPU) bắt buộc phải khớp tuyệt đối với socket bo mạch chủ (Mainboard), ví dụ LGA1700 đi với Mainboard LGA1700 (H610/B660/B760/Z790), AM4 đi với AM4 (A520/B550/X570), AM5 đi với AM5 (A620/B650/X670).",
+        "text": "Quy tắc COMP-001 (CPU - Mainboard Socket): Socket của bộ vi xử lý (CPU) bắt buộc phải khớp tuyệt đối với socket bo mạch chủ (Mainboard), ví dụ LGA1851 đi với B860/Z890, LGA1700 đi với H610/B660/B760/Z790, AM4 đi với A520/B550/X570, AM5 đi với A620/B650/X670/X870.",
     },
     {
         "id": "rule_COMP-002",
         "rule_id": "COMP-002",
-        "text": "Quy tắc COMP-002 (Mainboard - RAM Generation): Chuẩn RAM DDR4 chỉ lắp được trên Mainboard hỗ trợ DDR4; chuẩn RAM DDR5 chỉ lắp được trên Mainboard hỗ trợ DDR5. Không thể lắp lẫn DDR4 và DDR5.",
+        "text": "Quy tắc COMP-002 (Mainboard - RAM Type & Slots): Chuẩn RAM DDR4 chỉ lắp trên Mainboard hỗ trợ DDR4; DDR5 chỉ lắp trên Mainboard hỗ trợ DDR5; số thanh RAM không vượt quá số khe RAM trên Mainboard (ưu tiên Dual Channel 2 thanh).",
     },
     {
         "id": "rule_COMP-003",
         "rule_id": "COMP-003",
-        "text": "Quy tắc COMP-003 (Công suất nguồn PSU): Công suất thực của bộ nguồn (PSU) nên đạt tối thiểu 1.25 lần tổng TDP của CPU + GPU + 120W phụ tải hệ thống, khuyến nghị chuẩn 80 Plus Bronze trở lên để máy vận hành êm và bền bỉ.",
+        "text": "Quy tắc COMP-003 (Khe PCIe x16 GPU - Mainboard): Card đồ họa rời yêu cầu Mainboard có khe PCIe x16; lưu ý băng thông PCIe x8 nếu kết hợp APU đời cũ với GPU cao cấp.",
     },
     {
         "id": "rule_COMP-004",
         "rule_id": "COMP-004",
-        "text": "Quy tắc COMP-004 (Form Factor Mainboard - Vỏ Case): Vỏ máy ATX hỗ trợ bo mạch chủ ATX, mATX và ITX; vỏ mATX chỉ hỗ trợ mATX và ITX; vỏ ITX chỉ hỗ trợ bo mạch chủ Mini-ITX.",
+        "text": "Quy tắc COMP-004 (Chiều dài GPU - Khoảng trống Case): Chiều dài thực tế của card màn hình (GPU Length) phải nhỏ hơn hoặc bằng giới hạn không gian VGA của vỏ máy (Case GPU Clearance).",
     },
     {
         "id": "rule_COMP-005",
         "rule_id": "COMP-005",
-        "text": "Quy tắc COMP-005 (Tản nhiệt - Socket CPU): Tản nhiệt khí hoặc tản nước AIO cần hỗ trợ ngàm lắp tương ứng với socket CPU đang chọn (LGA1700, AM4, AM5) và đủ năng lực tản nhiệt cho công suất tỏa nhiệt của CPU.",
+        "text": "Quy tắc COMP-005 (Yêu cầu tản nhiệt CPU): Các CPU dòng K/KF/X/Tray hoặc không có tản stock bắt buộc phải trang bị tản nhiệt khí hoặc tản nước AIO rời.",
     },
     {
         "id": "rule_COMP-006",
         "rule_id": "COMP-006",
-        "text": "Quy tắc COMP-006 (Dual Channel RAM): Ưu tiên lắp 2 thanh RAM (Dual Channel) thay vì 1 thanh đơn để tăng 15-20% độ mượt mà khi chơi game và đa nhiệm.",
+        "text": "Quy tắc COMP-006 (Tản nhiệt - Socket, TDP, Chiều cao & Radiator): Tản nhiệt phải hỗ trợ đúng socket CPU, có công suất tản nhiệt >= TDP CPU, chiều cao tản khí <= giới hạn Case và kích thước Radiator AIO <= giới hạn Case.",
+    },
+    {
+        "id": "rule_COMP-007",
+        "rule_id": "COMP-007",
+        "text": "Quy tắc COMP-007 (Công suất nguồn PSU): Công suất thực của bộ nguồn (PSU) phải >= tổng TDP hệ thống (CPU + GPU + phụ tải), khuyến nghị dư địa an toàn tối thiểu 20-25%.",
+    },
+    {
+        "id": "rule_COMP-008",
+        "rule_id": "COMP-008",
+        "text": "Quy tắc COMP-008 (Nguồn phụ GPU / CPU): Phân khúc nguồn phải đáp ứng cấp nguồn phụ PCIe 8-pin hoặc 12VHPWR ATX 3.0 tương xứng với TDP của card đồ họa rời.",
+    },
+    {
+        "id": "rule_COMP-009",
+        "rule_id": "COMP-009",
+        "text": "Quy tắc COMP-009 (Khe cắm M.2 SSD - Mainboard): Số lượng ổ cứng SSD M.2 NVMe không được vượt quá tổng số khe cắm M.2 khả dụng trên bo mạch chủ.",
+    },
+    {
+        "id": "rule_COMP-010",
+        "rule_id": "COMP-010",
+        "text": "Quy tắc COMP-010 (Form Factor Mainboard - Vỏ Case): Vỏ máy ATX hỗ trợ ATX/mATX/ITX; vỏ mATX chỉ hỗ trợ mATX/ITX; vỏ Mini-ITX chỉ hỗ trợ bo mạch chủ Mini-ITX.",
     },
 ]
 

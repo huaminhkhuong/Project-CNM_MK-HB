@@ -328,7 +328,7 @@ export const mergeMyCart = asyncHandler(async (req: Request, res: Response) => {
           include: { ProductSku: { where: { status: "ACTIVE" }, take: 1 } }
         });
         if (product && product.is_active && product.ProductSku[0]) {
-          primarySku = product.ProductSku[0];
+          primarySku = { ...product.ProductSku[0], Product: product };
         }
       }
 

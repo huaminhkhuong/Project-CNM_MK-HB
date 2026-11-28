@@ -1,7 +1,36 @@
 import { Server as HttpServer } from "http";
 import { Server as SocketIOServer, Socket } from "socket.io";
+import jwt from "jsonwebtoken";
+import { env } from "../config/env";
+import { prisma } from "../config/prisma";
+import { isTokenBlacklisted } from "../services/token-blacklist.service";
+import { getLiveUserAuthState } from "../middlewares/auth.middleware";
 
 let io: SocketIOServer | null = null;
+
+interface SocketAuthUser {
+  userId: string;
+  email: string;
+  role: string;
+}
+
+function normalizeSocketRole(role?: string | null): string {
+  return String(role || "").trim().toUpperCase();
+}
+
+function isStaffOrAdminRole(role?: string | null): boolean {
+  const r = normalizeSocketRole(role);
+  return r === "ADMIN" || r === "SALES_STAFF" || r === "SALES";
+}
+
+function isTechOrAdminRole(role?: string | null): boolean {
+  const r = normalizeSocketRole(role);
+  return r === "ADMIN" || r === "TECH_STAFF" || r === "TECH";
+}
+
+function isAnyStaffRole(role?: string | null): boolean {
+  return isStaffOrAdminRole(role) || isTechOrAdminRole(role);
+}
 
 export interface OnlineStaff {
   socketId: string;
@@ -102,9 +131,14 @@ export function releaseStaffSession(staffName?: string | null): void {
 }
 
 export function initSocketIO(httpServer: HttpServer, frontendUrl: string): SocketIOServer {
+  const allowedOrigins =
+    env.nodeEnv === "production"
+      ? [frontendUrl].filter(Boolean)
+      : Array.from(new Set([frontendUrl, "http://localhost:5173", "http://localhost:3000"].filter(Boolean)));
+
   io = new SocketIOServer(httpServer, {
     cors: {
-      origin: [frontendUrl, "http://localhost:5173", "http://localhost:3000"],
+      origin: allowedOrigins,
       methods: ["GET", "POST"],
       credentials: true
     },
@@ -112,16 +146,79 @@ export function initSocketIO(httpServer: HttpServer, frontendUrl: string): Socke
     transports: ["websocket", "polling"]
   });
 
+  // Authenticate JWT on Socket.io handshake (guests remain allowed ONLY for chat room subscriptions)
+  io.use(async (socket, next) => {
+    try {
+      const authToken = typeof socket.handshake.auth?.token === "string" ? socket.handshake.auth.token.trim() : "";
+      const headerAuth = typeof socket.handshake.headers?.authorization === "string"
+        ? socket.handshake.headers.authorization.replace(/^Bearer\s+/i, "").trim()
+        : "";
+      const token = authToken || headerAuth;
+
+      if (token) {
+        const blacklisted = await isTokenBlacklisted(token).catch(() => false);
+        if (!blacklisted) {
+          const decoded = jwt.verify(token, env.jwtAccessSecret) as any;
+          const uid = decoded?.userId ?? decoded?.id;
+          if (uid) {
+            const numericUid = Number(uid);
+            let effectiveRole = normalizeSocketRole(decoded?.role);
+            let isAllowed = true;
+            if (Number.isInteger(numericUid) && numericUid > 0) {
+              const liveUser = await getLiveUserAuthState(numericUid);
+              if (liveUser) {
+                if (liveUser.status !== "ACTIVE") {
+                  isAllowed = false;
+                } else if (
+                  liveUser.roleName &&
+                  (!decoded?.email || !liveUser.email || String(decoded.email).toLowerCase() === liveUser.email.toLowerCase())
+                ) {
+                  effectiveRole = normalizeSocketRole(liveUser.roleName);
+                }
+              }
+            }
+            if (isAllowed) {
+              socket.data.user = {
+                userId: String(uid),
+                email: String(decoded?.email || ""),
+                role: effectiveRole
+              } as SocketAuthUser;
+            } else {
+              socket.data.user = null;
+            }
+          }
+        }
+      }
+    } catch {
+      socket.data.user = null;
+    }
+    next();
+  });
+
   io.on("connection", (socket: Socket) => {
-    console.log(`[Socket.io] Client connected: ${socket.id}`);
+    const authUser = (socket.data.user || null) as SocketAuthUser | null;
+    console.log(`[Socket.io] Client connected: ${socket.id} (${authUser ? `${authUser.role}#${authUser.userId}` : "guest"})`);
 
     // ── CHAT ──────────────────────────────────────────────
-    // Nhân viên / Khách hàng tham gia room của 1 chat session
-    socket.on("join_chat", (sessionId: string) => {
-      if (!sessionId) return;
-      const room = `chat:${sessionId}`;
-      socket.join(room);
-      console.log(`[Socket.io] ${socket.id} joined room ${room}`);
+    // Nhân viên / Khách hàng tham gia room của 1 chat session (chỉ cho phép session UUID tồn tại thật)
+    socket.on("join_chat", async (sessionId: string) => {
+      const cleanId = typeof sessionId === "string" ? sessionId.trim() : "";
+      if (!cleanId || cleanId.length < 8 || cleanId.length > 80) return;
+      try {
+        const existingSession = await prisma.chatSession.findUnique({
+          where: { session_id: cleanId },
+          select: { id: true }
+        });
+        if (!existingSession) {
+          socket.emit("socket:error", { code: "NOT_FOUND", message: "Chat session not found" });
+          return;
+        }
+        const room = `chat:${cleanId}`;
+        socket.join(room);
+        console.log(`[Socket.io] ${socket.id} joined room ${room}`);
+      } catch {
+        socket.emit("socket:error", { code: "INTERNAL_ERROR", message: "Unable to verify chat session" });
+      }
     });
 
     socket.on("leave_chat", (sessionId: string) => {
@@ -130,10 +227,25 @@ export function initSocketIO(httpServer: HttpServer, frontendUrl: string): Socke
     });
 
     // ── TICKET ────────────────────────────────────────────
-    // Kỹ thuật viên / Khách hàng tham gia room của 1 ticket
-    socket.on("join_ticket", (ticketId: string | number) => {
-      if (!ticketId) return;
-      const room = `ticket:${ticketId}`;
+    // Kỹ thuật viên / Chủ ticket tham gia room của 1 ticket (bắt buộc xác thực JWT + sở hữu/vai trò)
+    socket.on("join_ticket", async (ticketId: string | number) => {
+      const numericId = Number(ticketId);
+      if (!Number.isInteger(numericId) || numericId <= 0) return;
+      if (!authUser) {
+        socket.emit("socket:error", { code: "UNAUTHORIZED", message: "Authentication required to join ticket room" });
+        return;
+      }
+      if (!isAnyStaffRole(authUser.role)) {
+        const ownsTicket = await prisma.ticket.findFirst({
+          where: { id: numericId, user_id: Number(authUser.userId) },
+          select: { id: true }
+        }).catch(() => null);
+        if (!ownsTicket) {
+          socket.emit("socket:error", { code: "FORBIDDEN", message: "Forbidden: cannot join another user's ticket room" });
+          return;
+        }
+      }
+      const room = `ticket:${numericId}`;
       socket.join(room);
       console.log(`[Socket.io] ${socket.id} joined room ${room}`);
     });
@@ -144,10 +256,18 @@ export function initSocketIO(httpServer: HttpServer, frontendUrl: string): Socke
     });
 
     // ── STAFF QUEUES ──────────────────────────────────────
-    // Nhân viên bán hàng đăng ký nhận thông báo hàng đợi chat & tham gia routing pool
+    // Chỉ SALES_STAFF / ADMIN đã xác thực JWT mới được tham gia routing pool hàng đợi chat
     socket.on("join_staff_queue", (data?: { staffId?: string | number; staffName?: string; role?: string }) => {
+      if (!authUser || !isStaffOrAdminRole(authUser.role)) {
+        socket.emit("socket:error", { code: "FORBIDDEN", message: "Forbidden: staff authentication required" });
+        return;
+      }
       socket.join("staff:chat_queue");
-      const staffMember = registerOnlineStaff(socket.id, data);
+      const staffMember = registerOnlineStaff(socket.id, {
+        staffId: authUser.userId,
+        staffName: data?.staffName || authUser.email || "Nhân viên bán hàng",
+        role: authUser.role
+      });
       console.log(`[Socket.io] Staff "${staffMember.staffName}" (${socket.id}) joined staff:chat_queue`);
     });
 
@@ -157,17 +277,25 @@ export function initSocketIO(httpServer: HttpServer, frontendUrl: string): Socke
       console.log(`[Socket.io] ${socket.id} left staff:chat_queue`);
     });
 
-    // Kỹ thuật viên đăng ký nhận thông báo hàng đợi ticket
+    // Chỉ TECH_STAFF / ADMIN đã xác thực JWT mới được vào hàng đợi ticket kỹ thuật
     socket.on("join_tech_queue", () => {
+      if (!authUser || !isTechOrAdminRole(authUser.role)) {
+        socket.emit("socket:error", { code: "FORBIDDEN", message: "Forbidden: tech staff authentication required" });
+        return;
+      }
       socket.join("staff:tech_queue");
       console.log(`[Socket.io] ${socket.id} joined staff:tech_queue`);
     });
 
     // ── USER IN-APP NOTIFICATIONS ─────────────────────────
-    // Khách hàng hoặc người dùng đăng ký nhận thông báo cá nhân (đơn hàng, bảo hành, ticket...)
+    // Chỉ cho phép tham gia room thông báo của CHÍNH tài khoản trong JWT
     socket.on("join_user", (userId: string | number) => {
       if (!userId) return;
-      const room = `user:${userId}`;
+      if (!authUser || String(authUser.userId) !== String(userId)) {
+        socket.emit("socket:error", { code: "FORBIDDEN", message: "Forbidden: cannot join another user's notification room" });
+        return;
+      }
+      const room = `user:${authUser.userId}`;
       socket.join(room);
       console.log(`[Socket.io] ${socket.id} joined personal notification room ${room}`);
     });

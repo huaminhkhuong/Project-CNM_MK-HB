@@ -380,17 +380,17 @@ class XaiExplanationService {
           return {
             ruleId: meta.ruleId,
             severity: "INFO",
-            short: "✅ [COMP-008] Đầu nguồn cấp điện (PCIe 8-pin / 12VHPWR) đầy đủ",
-            long: `Bộ nguồn cung cấp đầy đủ các đầu cắm nguồn 8-pin PCIe / 12V-2x6 chuẩn ATX 3.0 cho Card đồ họa và 8-pin EPS cho CPU (${detail}). Đảm bảo truyền tải điện an toàn không cần qua đầu chuyển.`,
+            short: "✅ [COMP-008] Phân khúc nguồn đáp ứng yêu cầu cấp nguồn phụ GPU/CPU",
+            long: `Công suất bộ nguồn đạt ngưỡng khuyến nghị cho mức tiêu thụ TDP của GPU và CPU (${detail}). Lưu ý: kiểm tra thực tế dựa trên ngưỡng công suất chuẩn; cần đối chiếu thêm số dây PCIe 8-pin / 12VHPWR vật lý theo thông số hộp nguồn.`,
             level: "success"
           };
         }
         return {
           ruleId: meta.ruleId,
           severity: "BLOCKER",
-          short: "❌ [COMP-008] [BLOCKER] Thiếu đầu cắm nguồn mở rộng cho GPU / CPU",
-          long: `Bộ nguồn thiếu số lượng dây cáp cắm nguồn PCIe 8-pin hoặc cổng 12VHPWR cấp cho GPU (${detail}). Việc dùng dây nối chuyển Molex/SATA rất rủi ro và dễ gây cháy nổ.`,
-          suggestion: "Nâng cấp lên bộ nguồn chuẩn ATX 3.0 có sẵn dây 12VHPWR hoặc đủ số đầu 8-pin PCIe độc lập. [Xem các PSU phù hợp →]",
+          short: "❌ [COMP-008] [BLOCKER] Công suất nguồn dưới mức an toàn cho nguồn phụ GPU/CPU",
+          long: `Bộ nguồn chưa đạt phân khúc công suất khuyến nghị cho đầu cấp nguồn phụ PCIe 8-pin / 12VHPWR của GPU (${detail}). Dùng dây nối chuyển Molex/SATA rất rủi ro quá tải.`,
+          suggestion: "Nâng cấp lên bộ nguồn công suất ≥ 650W chuẩn ATX 3.0 hoặc có sẵn đủ đầu 8-pin PCIe độc lập. [Xem các PSU phù hợp →]",
           level: "error"
         };
 
@@ -558,24 +558,74 @@ class XaiExplanationService {
   }
 
   /**
-   * Tính toán bộ 5 điểm số Scorecard (Build Health 5-Dimensional Scores)
+   * Tính toán bộ 5 điểm số Scorecard (Build Health 5-Dimensional Scores) dựa trên dữ liệu thực
    */
   calculateFiveDimensionalScorecard(
     checks: EnrichedCheckResult[],
-    performanceScore: number
+    performanceScore: number,
+    componentsMap: Record<string, any> = {}
   ): FiveDimensionalScorecard {
     const applicableChecks = checks.filter((c) => c.applicable !== false);
     const blockers = applicableChecks.filter((c) => c.severity === "BLOCKER");
     const warnings = applicableChecks.filter((c) => c.severity === "WARNING");
     const advisories = applicableChecks.filter((c) => c.severity === "ADVISORY");
 
-    const compatibilityScore = blockers.length > 0 ? 0 : Math.max(20, Math.round(100 - warnings.length * 15 - advisories.length * 5));
-    const perfScore = Math.min(100, Math.max(30, performanceScore));
-    const valueScore = Math.min(98, Math.round(perfScore * 0.95 + (compatibilityScore > 80 ? 8 : 0)));
-    const powerThermalFailures = applicableChecks.filter((c) => (c.key === "psu" || c.key.startsWith("cooling") || c.key === "radiator_fit" || c.key === "cooler_height") && !c.ok).length;
-    const powerThermalScore = Math.max(25, Math.round(100 - powerThermalFailures * 25));
-    const upgradeScore = Math.min(95, Math.max(40, Math.round(compatibilityScore * 0.4 + perfScore * 0.5 + 10)));
-    const requirementMatchScore = blockers.length > 0 ? 30 : Math.round((compatibilityScore + perfScore) / 2);
+    const compatibilityScore =
+      blockers.length > 0 ? 0 : Math.max(20, Math.round(100 - warnings.length * 15 - advisories.length * 5));
+    const perfScore = Math.min(100, Math.max(20, Math.round(performanceScore)));
+
+    // Value (P/P): đánh giá hiệu năng trên chi phí thực tế (triệu VNĐ)
+    const totalPrice = Object.values(componentsMap || {}).reduce(
+      (sum: number, comp: any) => sum + Number(comp?.price || comp?.variant?.price || 0),
+      0
+    );
+    let valueScore: number;
+    if (totalPrice > 0) {
+      const priceInMillions = Math.max(5, totalPrice / 1_000_000);
+      // Tỷ lệ perf/triệu chuẩn ~2.4–3.5 cho tầm trung, giảm nhẹ ở phân khúc flagship (diminishing returns)
+      const perfPerMillion = perfScore / priceInMillions;
+      valueScore = Math.min(98, Math.max(40, Math.round(52 + perfPerMillion * 14 - (blockers.length > 0 ? 25 : 0))));
+    } else {
+      valueScore = Math.min(95, Math.max(40, Math.round(perfScore * 0.7 + compatibilityScore * 0.25)));
+    }
+
+    const powerThermalFailures = applicableChecks.filter(
+      (c) => (c.key === "psu" || c.key.startsWith("cooling") || c.key === "radiator_fit" || c.key === "cooler_height") && !c.ok
+    ).length;
+    const powerThermalScore = Math.max(20, Math.round(100 - powerThermalFailures * 25));
+
+    // Upgradeability: đánh giá dựa trên nền tảng Socket (AM5/LGA1851 > LGA1700 > AM4), chuẩn RAM DDR5, khe RAM/M.2 & PSU
+    const mbName = String(componentsMap?.mainboard?.productName || componentsMap?.mainboard?.name || "").toLowerCase();
+    const cpuName = String(componentsMap?.cpu?.productName || componentsMap?.cpu?.name || "").toLowerCase();
+    const ramName = String(componentsMap?.ram?.productName || componentsMap?.ram?.name || "").toLowerCase();
+    let upgradePoints = 45;
+    if (mbName.includes("am5") || mbName.includes("b650") || mbName.includes("x670") || mbName.includes("x870") || mbName.includes("b860") || mbName.includes("z890") || cpuName.includes("ultra")) {
+      upgradePoints += 22;
+    } else if (mbName.includes("b760") || mbName.includes("z790") || mbName.includes("1700")) {
+      upgradePoints += 14;
+    } else if (mbName.includes("am4") || mbName.includes("b550") || mbName.includes("a520")) {
+      upgradePoints += 6;
+    }
+    if (ramName.includes("ddr5") || mbName.includes("ddr5") || mbName.includes("d5")) upgradePoints += 10;
+    const ramSlotsCheck = applicableChecks.find((c) => c.key === "ram_slots");
+    const m2Check = applicableChecks.find((c) => c.key === "storage_m2");
+    const psuCheck = applicableChecks.find((c) => c.key === "psu");
+    if (!ramSlotsCheck || ramSlotsCheck.ok) upgradePoints += 7;
+    if (!m2Check || m2Check.ok) upgradePoints += 7;
+    if (!psuCheck || psuCheck.ok) upgradePoints += 7;
+    if (blockers.length > 0) upgradePoints -= 20;
+    const upgradeScore = Math.min(98, Math.max(25, upgradePoints));
+
+    const selectedCount = Object.values(componentsMap || {}).filter(
+      (c: any) => c && (c.productName || c.name || c.id || c.productId)
+    ).length;
+    const completenessBonus = Math.min(10, Math.round((selectedCount / 7) * 10));
+    const bottleneckCheck = applicableChecks.find((c) => c.key === "bottleneck");
+    const bottleneckPenalty = bottleneckCheck && !bottleneckCheck.ok ? 12 : 0;
+    const requirementMatchScore =
+      blockers.length > 0
+        ? Math.max(15, 35 - blockers.length * 10)
+        : Math.min(99, Math.max(35, Math.round(compatibilityScore * 0.45 + perfScore * 0.45 + completenessBonus - bottleneckPenalty)));
 
     return {
       compatibilityScore,
@@ -588,32 +638,49 @@ class XaiExplanationService {
   }
 
   /**
-   * Ước tính hiệu năng và chỉ số FPS dựa trên GPU/CPU
+   * Ước tính hiệu năng và chỉ số FPS dựa trên Tier GPU + CPU thực tế (phủ đủ RTX 50/40/30 & RX 9000/7000/6000)
    */
   estimatePerformance(checks: RawCheckResult[], componentsMap: Record<string, any>): PerformanceEstimate {
-    let score = 50;
-    const gpuName = String(componentsMap?.gpu?.productName || "").toLowerCase();
+    const gpuName = String(componentsMap?.gpu?.productName || componentsMap?.gpu?.name || "").toLowerCase();
+    const cpuName = String(componentsMap?.cpu?.productName || componentsMap?.cpu?.name || "").toLowerCase();
 
-    if (gpuName.includes("4090") || gpuName.includes("7900 xtx")) score = 98;
-    else if (gpuName.includes("4080") || gpuName.includes("4070 ti")) score = 90;
-    else if (gpuName.includes("4070") || gpuName.includes("7800 xt")) score = 82;
-    else if (gpuName.includes("4060 ti") || gpuName.includes("3070")) score = 75;
-    else if (gpuName.includes("4060") || gpuName.includes("3060")) score = 68;
-    else if (gpuName.includes("1650") || gpuName.includes("6600")) score = 55;
-    else if (!gpuName) score = 35;
+    let gpuScore = 45;
+    if (gpuName.includes("5090") || gpuName.includes("4090")) gpuScore = 100;
+    else if (gpuName.includes("5080") || gpuName.includes("7900 xtx")) gpuScore = 95;
+    else if (gpuName.includes("4080") || gpuName.includes("5070 ti") || gpuName.includes("7900 xt")) gpuScore = 90;
+    else if (gpuName.includes("4070 ti") || gpuName.includes("9070 xt") || gpuName.includes("3090")) gpuScore = 86;
+    else if (gpuName.includes("5070") || gpuName.includes("4070") || gpuName.includes("7800 xt") || gpuName.includes("9070") || gpuName.includes("3080")) gpuScore = 82;
+    else if (gpuName.includes("5060 ti") || gpuName.includes("4060 ti") || gpuName.includes("7700 xt") || gpuName.includes("3070")) gpuScore = 75;
+    else if (gpuName.includes("5060") || gpuName.includes("4060") || gpuName.includes("3060") || gpuName.includes("7600") || gpuName.includes("6700")) gpuScore = 68;
+    else if (gpuName.includes("5050") || gpuName.includes("3050") || gpuName.includes("6600") || gpuName.includes("1660")) gpuScore = 58;
+    else if (gpuName.includes("1650") || gpuName.includes("6500") || gpuName.includes("6400") || gpuName.includes("1050")) gpuScore = 48;
+    else if (!gpuName) gpuScore = 30;
+
+    let cpuScore = 65;
+    if (cpuName.includes("285k") || cpuName.includes("ultra 9") || cpuName.includes("14900") || cpuName.includes("13900") || cpuName.includes("9950") || cpuName.includes("7950")) cpuScore = 98;
+    else if (cpuName.includes("265k") || cpuName.includes("ultra 7") || cpuName.includes("14700") || cpuName.includes("13700") || cpuName.includes("9800x3d") || cpuName.includes("7800x3d")) cpuScore = 92;
+    else if (cpuName.includes("245k") || cpuName.includes("14600") || cpuName.includes("13600") || cpuName.includes("7700")) cpuScore = 84;
+    else if (cpuName.includes("ultra 5") || cpuName.includes("235") || cpuName.includes("225") || cpuName.includes("14400") || cpuName.includes("13400") || cpuName.includes("7600") || cpuName.includes("7500f")) cpuScore = 76;
+    else if (cpuName.includes("12400") || cpuName.includes("5600") || cpuName.includes("5700")) cpuScore = 68;
+    else if (cpuName.includes("12100") || cpuName.includes("13100") || cpuName.includes("5500") || cpuName.includes("3400g") || cpuName.includes("3200g")) cpuScore = 55;
+    else if (!cpuName) cpuScore = 45;
+
+    const score = gpuName
+      ? Math.round(gpuScore * 0.72 + cpuScore * 0.28)
+      : Math.round(gpuScore * 0.5 + cpuScore * 0.5);
 
     let grade: PerformanceEstimate["grade"] = "Entry-level";
     if (score >= 88) grade = "Enthusiast";
-    else if (score >= 78) grade = "High-end";
-    else if (score >= 62) grade = "Mid-range";
+    else if (score >= 76) grade = "High-end";
+    else if (score >= 60) grade = "Mid-range";
 
     return {
       score,
       grade,
       estimatedFps: {
-        esports1080p: Math.round(score * 2.8),
-        aaa1080p: Math.max(30, Math.round(score * 0.95)),
-        rendering4k: score >= 75 ? "Rất mượt (Dưới 5 phút)" : score >= 60 ? "Khá mượt (5-15 phút)" : "Cơ bản"
+        esports1080p: Math.round(cpuScore * 2.1 + gpuScore * 1.45),
+        aaa1080p: Math.max(25, Math.round(gpuScore * 1.1 + cpuScore * 0.2)),
+        rendering4k: score >= 78 ? "Rất mượt (Dưới 5 phút)" : score >= 62 ? "Khá mượt (5-15 phút)" : "Cơ bản"
       }
     };
   }
@@ -651,7 +718,7 @@ class XaiExplanationService {
     else if (warningCount > 0) buildReadiness = "WARNINGS_ACKNOWLEDGED";
 
     const performanceEstimate = this.estimatePerformance(checks, componentsMap);
-    const scores = this.calculateFiveDimensionalScorecard(enrichedChecks, performanceEstimate.score);
+    const scores = this.calculateFiveDimensionalScorecard(enrichedChecks, performanceEstimate.score, componentsMap);
 
     const selectedCount = Object.values(componentsMap).filter(
       (c: any) => c && (c.productName || c.name || c.id || c.productId)

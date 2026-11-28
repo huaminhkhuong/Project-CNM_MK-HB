@@ -49,10 +49,10 @@ describe("API route smoke coverage", () => {
     assert.notEqual(response.status, 404);
   });
 
-  it("exposes protected PC Builder replace item route", async () => {
+  it("exposes protected PC Builder add/upsert item route", async () => {
     const response = await request(app)
-      .patch("/api/pc-builder/1/items/cpu")
-      .send({ productVariantId: 1 });
+      .post("/api/pc-builder/1/items")
+      .send({ productVariantId: 1, componentType: "cpu" });
 
     assert.equal(response.status, 401);
     assert.notEqual(response.status, 404);

@@ -140,17 +140,20 @@ function getHighlights(product, attributes) {
   ];
 }
 
-function getSpecRows(product, attributes, skus) {
+function getSpecRows(product, attributes, skus, selectedSku = null, availableStock = null) {
   const rows = (attributes || []).map((attr) => ({
     key: attr.key || attr.name || attr.attribute_name || "Thông số",
     value: attr.value || attr.attribute_value || "Đang cập nhật"
   }));
 
+  const stockNum = availableStock !== null ? Number(availableStock) : Number(selectedSku?.stock ?? skus[0]?.stock ?? product?.stock ?? 0);
+  const stockLabel = stockNum > 0 ? `Còn hàng (${stockNum} sản phẩm)` : "Tạm hết hàng";
+
   const baseRows = [
     { key: "Thương hiệu", value: getProductBrand(product) },
     { key: "Danh mục", value: getProductCategory(product) },
-    { key: "SKU chính", value: skus[0]?.sku || product?.sku || "Đang cập nhật" },
-    { key: "Tình trạng", value: "Còn hàng" }
+    { key: "SKU chính", value: selectedSku?.sku || skus[0]?.sku || product?.sku || "Đang cập nhật" },
+    { key: "Tình trạng", value: stockLabel }
   ];
 
   return [...baseRows, ...rows].filter((row, index, arr) => arr.findIndex((item) => item.key === row.key) === index);
@@ -220,6 +223,7 @@ export function ProductDetailPage() {
   const [successMessage, setSuccessMessage] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [selectedSkuId, setSelectedSkuId] = useState("");
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
   const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
@@ -265,7 +269,10 @@ export function ProductDetailPage() {
   const brandName = getProductBrand(product);
   const completePc = isCompletePc(product);
   const pcConfig = useMemo(() => buildPcConfig(product || {}, attributes), [attributes, product]);
-  const specRows = useMemo(() => getSpecRows(product || {}, attributes, skus), [attributes, product, skus]);
+  const specRows = useMemo(
+    () => getSpecRows(product || {}, attributes, skus, selectedSku, availableStock),
+    [attributes, availableStock, product, selectedSku, skus]
+  );
   const audience = useMemo(() => getAudience(product || {}, attributes), [attributes, product]);
   const highlights = useMemo(() => getHighlights(product || {}, attributes), [attributes, product]);
 
@@ -273,10 +280,24 @@ export function ProductDetailPage() {
     if (!product) return resolveProductImage({});
     return resolveProductImage({
       ...product,
+      image_url: selectedSku?.image_url || selectedSku?.imageUrl || product?.image_url || product?.imageUrl,
       skus,
       category_name: categoryName
     });
-  }, [categoryName, product, skus]);
+  }, [categoryName, product, selectedSku, skus]);
+
+  const galleryImages = useMemo(() => {
+    const candidates = [
+      displayImage,
+      ...skus
+        .map((s) => s?.imageUrl || s?.image_url)
+        .filter(Boolean)
+        .map((url) => resolveProductImage({ image_url: url, category_name: categoryName }))
+    ].filter(Boolean);
+    return Array.from(new Set(candidates));
+  }, [categoryName, displayImage, skus]);
+
+  const activeDisplayImage = galleryImages[activeImageIndex] || displayImage;
 
   function saveDirectCheckoutDraft() {
     if (!product || !selectedSku) return;
@@ -331,6 +352,7 @@ export function ProductDetailPage() {
         setActionError("");
         setSuccessMessage("");
         setSelectedSkuId("");
+        setActiveImageIndex(0);
         setQuantity(1);
         window.scrollTo({ top: 0, behavior: "smooth" });
         const response = await getProductDetail(idOrSlug);
@@ -484,7 +506,7 @@ export function ProductDetailPage() {
         <div className="product-gallery">
           <div className="product-gallery__image v2-gallery-main">
             <img
-              src={displayImage}
+              src={activeDisplayImage}
               alt={productName}
               className="v2-gallery-img"
               onError={(e) => { e.currentTarget.src = resolveProductImage({}, { label: categoryName }); }}
@@ -493,20 +515,25 @@ export function ProductDetailPage() {
             <div className="v2-gallery-zoom-hint">🔍 Hover để phóng to</div>
           </div>
 
-          {/* Thumbnail strip */}
-          <div className="v2-gallery-thumbs">
-            {[displayImage, displayImage, displayImage].map((src, i) => (
-              <div
-                key={i}
-                className={`v2-gallery-thumb ${i === 0 ? "is-active" : ""}`}
-              >
-                <img src={src} alt={`${productName} ${i + 1}`} onError={e => { e.target.style.opacity = 0.3; }} />
-              </div>
-            ))}
-          </div>
+          {/* Thumbnail strip: only render when there are multiple distinct product/SKU images */}
+          {galleryImages.length > 1 && (
+            <div className="v2-gallery-thumbs">
+              {galleryImages.map((src, i) => (
+                <button
+                  type="button"
+                  key={src}
+                  onClick={() => setActiveImageIndex(i)}
+                  className={`v2-gallery-thumb ${i === activeImageIndex ? "is-active" : ""}`}
+                  style={{ padding: 0, cursor: "pointer" }}
+                >
+                  <img src={src} alt={`${productName} ${i + 1}`} onError={(e) => { e.target.style.opacity = 0.3; }} />
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="product-badges">
-            <span>✅ Còn hàng</span>
+            <span>{availableStock > 0 ? "✅ Còn hàng" : "⚠️ Tạm hết hàng"}</span>
             <span>🏆 Chính hãng 100%</span>
             <span>🛡️ Bảo hành điện tử</span>
             <span>🚀 Giao nhanh</span>
@@ -518,8 +545,7 @@ export function ProductDetailPage() {
           <h1>{productName}</h1>
           <p>{parseDescription(product?.description)}</p>
           <div className="product-rating">
-            <strong>★★★★★</strong>
-            <span>4.8/5 · 128 đánh giá · Đã kiểm tra tương thích PC Mall</span>
+            <span>🛡️ Bảo hành điện tử theo Serial · Đã kiểm tra tương thích PC Mall</span>
           </div>
 
           <div className="product-overview">
@@ -536,13 +562,6 @@ export function ProductDetailPage() {
           {/* Price */}
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
             <strong className="buy-sidebar__price">{formatCurrency(heroPrice)}đ</strong>
-            <span style={{ fontSize: 14, color: "#64748b", textDecoration: "line-through", fontWeight: 600 }}>
-              {formatCurrency(Math.round(heroPrice * 1.12))}đ
-            </span>
-            <span style={{
-              padding: "2px 8px", borderRadius: 99, fontSize: 11, fontWeight: 800,
-              background: "linear-gradient(135deg, #f5a623, #f97316)", color: "#0f172a",
-            }}>-12%</span>
           </div>
 
           <div className="stock-pill" style={{ color: availableStock > 0 ? "#10b981" : "#ef4444" }}>

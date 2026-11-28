@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { Request, Response } from "express";
 
 import { prisma } from "../../config/prisma";
@@ -21,7 +22,7 @@ import {
 } from "./orders.repository";
 import { checkoutSchema, updateOrderStatusSchema } from "./orders.validator";
 import { generateVnpayUrl, verifyVnpayReturn } from "../../utils/vnpay";
-import { generateMomoUrl, verifyMomoSignature } from "../../utils/momo";
+import { generateMomoUrl, isMomoConfigured, verifyMomoSignature } from "../../utils/momo";
 import { env } from "../../config/env";
 import jwt from "jsonwebtoken";
 import { sendEmailAsync } from "../../services/email.service";
@@ -32,10 +33,27 @@ import { createWarrantyRecordsForDeliveredOrder } from "../warranties/warranty-s
 import { publishOrderEvent, subscribeOrderEvents } from "../../services/order-events";
 import { validateAndCalculateCoupon } from "../coupons/coupons.service";
 import { sendOrderStatusNotification } from "../notifications/notifications.service";
+import { isTokenBlacklisted } from "../../services/token-blacklist.service";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { recordAuditLog } = require("../../services/audit-log.service");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { isMockPaymentEnabled } = require("../../services/payment-mode.service");
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { ORDER_STATUS_TRANSITIONS } = require("./orders.common");
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { calculateServerShippingFee } = require("./shipping-fee.service");
+
+const SSE_TICKET_TTL_MS = 30_000;
+const sseTicketStore = new Map<string, { userId: string; expiresAt: number }>();
+
+function pruneExpiredSseTickets() {
+  const now = Date.now();
+  for (const [ticket, entry] of sseTicketStore.entries()) {
+    if (entry.expiresAt <= now) {
+      sseTicketStore.delete(ticket);
+    }
+  }
+}
 
 type UploadedPaymentProofFile = {
   filename: string;
@@ -163,14 +181,24 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
       total += Number(item.unitPrice) * Number(item.quantity);
     }
 
-    const shippingFee = Number(payload.shippingFee || 0);
+    // Authoritative server-side shipping fee (completely ignores client-supplied shippingFee)
+    const shippingFee = await calculateServerShippingFee(total, {
+      shippingMethod: (payload as any).shippingMethod
+    });
 
     let discountAmount = 0;
     let appliedCoupon: any = null;
 
     if (payload.couponCode) {
+      const normalizedCouponCode = String(payload.couponCode).trim().toUpperCase();
+      // Row-level lock on coupon inside transaction prevents concurrent double-spend race
+      const lockedCoupons = (await tx.$queryRawUnsafe(
+        `SELECT id, usage_limit, used_count, usage_limit_per_user FROM coupons WHERE code = ? FOR UPDATE`,
+        normalizedCouponCode
+      )) as Array<{ id: number; usage_limit: number | null; used_count: number; usage_limit_per_user: number | null }>;
+
       const couponResult = await validateAndCalculateCoupon({
-        code: payload.couponCode,
+        code: normalizedCouponCode,
         userId: Number(currentUser.userId),
         items: orderSourceItems.map((item) => ({
           productId: item.product_id,
@@ -182,6 +210,23 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
         totalAmount: total,
         shippingFee
       });
+
+      const lockedCoupon = lockedCoupons[0];
+      if (lockedCoupon) {
+        if (lockedCoupon.usage_limit !== null && Number(lockedCoupon.used_count) >= Number(lockedCoupon.usage_limit)) {
+          throw new AppError("Mã giảm giá đã hết lượt sử dụng", 400);
+        }
+        if (lockedCoupon.usage_limit_per_user !== null) {
+          const userUsageRows = (await tx.$queryRawUnsafe(
+            `SELECT COUNT(*) AS cnt FROM coupon_usages WHERE coupon_id = ? AND user_id = ?`,
+            lockedCoupon.id,
+            Number(currentUser.userId)
+          )) as Array<{ cnt: number | bigint }>;
+          if (Number(userUsageRows[0]?.cnt || 0) >= Number(lockedCoupon.usage_limit_per_user)) {
+            throw new AppError("Bạn đã dùng hết số lần áp dụng mã giảm giá này", 400);
+          }
+        }
+      }
 
       discountAmount = couponResult.discountAmount;
       appliedCoupon = couponResult.coupon;
@@ -216,19 +261,20 @@ export const checkout = asyncHandler(async (req: Request, res: Response) => {
     });
 
     if (appliedCoupon && discountAmount > 0) {
+      const couponAffected = await tx.$executeRawUnsafe(
+        `UPDATE coupons SET used_count = used_count + 1 WHERE id = ? AND (usage_limit IS NULL OR used_count < usage_limit)`,
+        appliedCoupon.id
+      );
+      if (Number(couponAffected) === 0) {
+        throw new AppError("Mã giảm giá đã hết lượt sử dụng", 400);
+      }
+
       await tx.couponUsage.create({
         data: {
           coupon_id: appliedCoupon.id,
           user_id: Number(currentUser.userId),
           order_id: order.id,
           discount_amount: discountAmount
-        }
-      });
-
-      await tx.coupon.update({
-        where: { id: appliedCoupon.id },
-        data: {
-          used_count: { increment: 1 }
         }
       });
     }
@@ -355,22 +401,47 @@ export const getMyOrders = asyncHandler(async (req: Request, res: Response) => {
   });
 });
 
-export const streamOrderEvents = asyncHandler(async (req: Request, res: Response) => {
-  const token = String(req.query.token || "");
-  if (!token) {
+export const createOrderEventsTicket = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user?.userId) {
     throw new AppError("Unauthorized", 401);
   }
+  pruneExpiredSseTickets();
+  const ticket = crypto.randomBytes(24).toString("hex");
+  const expiresAt = Date.now() + SSE_TICKET_TTL_MS;
+  sseTicketStore.set(ticket, { userId: String(req.user.userId), expiresAt });
 
-  try {
-    const payload = jwt.verify(token, env.jwtAccessSecret) as { userId?: string; sub?: string };
-    const userId = payload.userId || payload.sub;
-    if (!userId) {
-      throw new Error("Token does not include user id");
+  res.status(201).json({
+    success: true,
+    data: {
+      ticket,
+      expiresInMs: SSE_TICKET_TTL_MS
     }
-    subscribeOrderEvents(userId, res);
-  } catch (_error) {
-    throw new AppError("Invalid or expired token", 401);
+  });
+});
+
+export const streamOrderEvents = asyncHandler(async (req: Request, res: Response) => {
+  const ticket = String(req.query.ticket || "").trim();
+  if (!ticket) {
+    throw new AppError("Unauthorized: one-time SSE ticket required", 401);
   }
+
+  pruneExpiredSseTickets();
+  const entry = sseTicketStore.get(ticket);
+  sseTicketStore.delete(ticket); // Consume one-time ticket immediately
+
+  if (!entry || entry.expiresAt <= Date.now()) {
+    throw new AppError("Invalid or expired SSE ticket", 401);
+  }
+
+  const dbUser = await prisma.user.findUnique({
+    where: { id: Number(entry.userId) },
+    select: { status: true }
+  });
+  if (dbUser && String(dbUser.status || "ACTIVE").toUpperCase() !== "ACTIVE") {
+    throw new AppError("Tài khoản đã bị khóa", 403);
+  }
+
+  subscribeOrderEvents(entry.userId, res);
 });
 
 export const getOrderDetail = asyncHandler(async (req: Request, res: Response) => {
@@ -412,77 +483,112 @@ export const patchOrderStatus = asyncHandler(async (req: Request, res: Response)
   const payload = updateOrderStatusSchema.parse(req.body);
   const orderId = Number(req.params.id);
 
-  const current = await getOrderById(orderId);
-  if (!current) {
-    throw new AppError("Order not found", 404);
+  if (!Number.isInteger(orderId) || orderId <= 0) {
+    throw new AppError("Invalid order id", 400);
   }
 
-  const result = await prisma.$transaction(async (tx: any) => {
-    // Note: trackingCode is not in the schema, using note field as workaround
-    if ((payload.status === "PROCESSING" || payload.status === "SHIPPED")) {
-      // Shipment tracking can be managed via Shipment model instead
+  await prisma.$transaction(async (tx: any) => {
+    const lockedRows = (await tx.$queryRawUnsafe(
+      `SELECT id, status, coupon_id, user_id, payment_status FROM orders WHERE id = ? FOR UPDATE`,
+      orderId
+    )) as Array<{ id: number; status: string; coupon_id: number | null; user_id: number | null; payment_status: string | null }>;
+
+    const lockedOrder = lockedRows[0];
+    if (!lockedOrder) {
+      throw new AppError("Order not found", 404);
     }
 
-    // Atomically restore inventory when transitioning to CANCELED from an active status
-    if (payload.status === "CANCELED") {
-      const orderToCancel = await tx.order.findUnique({
-        where: { id: orderId },
-        include: { OrderItem: true }
+    const currentStatus = String(lockedOrder.status || "PENDING").toUpperCase();
+    const nextStatus = String(payload.status || "").toUpperCase();
+    const allowedNextStatuses: string[] = ORDER_STATUS_TRANSITIONS[currentStatus] || [];
+
+    if (currentStatus !== nextStatus && !allowedNextStatuses.includes(nextStatus)) {
+      throw new AppError(`Cannot change order status from ${currentStatus} to ${nextStatus}`, 400);
+    }
+
+    if (nextStatus === "SHIPPED" || nextStatus === "DELIVERED") {
+      const shipment = await tx.shipment.findFirst({
+        where: { order_id: orderId },
+        orderBy: { id: "desc" }
+      });
+      if (!shipment || !String(shipment.tracking_code || "").trim()) {
+        throw new AppError(`Cannot mark order as ${nextStatus} without a shipment tracking code`, 400);
+      }
+
+      if (nextStatus === "SHIPPED") {
+        const itemsCountRows = (await tx.$queryRawUnsafe(
+          `SELECT COALESCE(SUM(quantity), 0) AS totalRequired FROM order_items WHERE order_id = ?`,
+          orderId
+        )) as Array<{ totalRequired: number | bigint }>;
+        const serialsCountRows = (await tx.$queryRawUnsafe(
+          `SELECT COUNT(*) AS totalAssigned FROM order_item_serials WHERE order_id = ?`,
+          orderId
+        )) as Array<{ totalAssigned: number | bigint }>;
+
+        const totalRequired = Number(itemsCountRows[0]?.totalRequired || 0);
+        const totalAssigned = Number(serialsCountRows[0]?.totalAssigned || 0);
+        if (totalRequired > 0 && totalAssigned < totalRequired) {
+          throw new AppError(
+            `Vui lòng gán đủ Serial Number cho tất cả linh kiện trước khi xuất kho / giao hàng (${totalAssigned}/${totalRequired} S/N đã gán).`,
+            400
+          );
+        }
+      }
+
+      await tx.shipment.updateMany({
+        where: { order_id: orderId },
+        data: { status: nextStatus === "SHIPPED" ? "IN_TRANSIT" : "DELIVERED" }
+      });
+    }
+
+    // Atomically restore inventory ONCE when transitioning to CANCELED from a non-canceled status
+    if (nextStatus === "CANCELED" && currentStatus !== "CANCELED") {
+      const orderItems = await tx.orderItem.findMany({
+        where: { order_id: orderId },
+        select: { product_variant_id: true, quantity: true }
       });
 
-      if (orderToCancel && orderToCancel.status !== "CANCELED") {
-        for (const item of orderToCancel.OrderItem || []) {
-          const variantId = item.product_variant_id;
-          const quantity = Number(item.quantity || 0);
-          if (variantId && quantity > 0) {
-            await tx.productSku.update({
-              where: { id: variantId },
-              data: {
-                stock: {
-                  increment: quantity
-                }
-              }
-            });
-          }
+      for (const item of orderItems) {
+        const variantId = item.product_variant_id;
+        const quantity = Number(item.quantity || 0);
+        if (variantId && quantity > 0) {
+          await tx.productSku.update({
+            where: { id: variantId },
+            data: { stock: { increment: quantity } }
+          });
         }
-
-        await tx.shipment.updateMany({
-          where: { order_id: orderId },
-          data: { status: "CANCELED" }
-        });
-
-        await tx.orderItemSerial.deleteMany({
-          where: { order_id: orderId }
-        }).catch(() => {});
-
-        await tx.orderItem.updateMany({
-          where: { order_id: orderId },
-          data: { serial_numbers: null }
-        }).catch(() => {});
-
-        if (orderToCancel.coupon_id) {
-          await tx.coupon.update({
-            where: { id: orderToCancel.coupon_id },
-            data: { used_count: { decrement: 1 } }
-          }).catch(() => {});
-          await tx.couponUsage.deleteMany({
-            where: { order_id: orderId }
-          }).catch(() => {});
-        }
-
-        await tx.payment.updateMany({
-          where: {
-            order_id: orderId,
-            status: { in: ["PENDING_GATEWAY", "UNPAID", "AWAITING_ADMIN_CONFIRMATION"] }
-          },
-          data: { status: "CANCELED", updated_at: new Date() }
-        }).catch(() => {});
       }
+
+      await tx.shipment.updateMany({
+        where: { order_id: orderId },
+        data: { status: "CANCELED" }
+      });
+
+      await tx.orderItemSerial.deleteMany({ where: { order_id: orderId } }).catch(() => {});
+      await tx.orderItem.updateMany({ where: { order_id: orderId }, data: { serial_numbers: null } }).catch(() => {});
+
+      if (lockedOrder.coupon_id) {
+        const deletedUsage = await tx.couponUsage.deleteMany({ where: { order_id: orderId } });
+        if (deletedUsage.count > 0) {
+          await tx.$executeRawUnsafe(
+            `UPDATE coupons SET used_count = GREATEST(used_count - 1, 0) WHERE id = ?`,
+            lockedOrder.coupon_id
+          );
+        }
+      }
+
+      await tx.payment.updateMany({
+        where: {
+          order_id: orderId,
+          status: { in: ["PENDING_GATEWAY", "UNPAID", "AWAITING_ADMIN_CONFIRMATION"] }
+        },
+        data: { status: "CANCELED", updated_at: new Date() }
+      }).catch(() => {});
     }
 
     return await tx.order.update({
       where: { id: orderId },
-      data: { status: payload.status, updated_at: new Date() }
+      data: { status: nextStatus, updated_at: new Date() }
     });
   });
 
@@ -493,6 +599,17 @@ export const patchOrderStatus = asyncHandler(async (req: Request, res: Response)
     );
   }
   const finalOrder = await getOrderById(orderId);
+  await recordAuditLog({
+    actorUserId: req.user?.userId,
+    actorRole: req.user?.role,
+    action: "ORDER_STATUS_UPDATED",
+    entityType: "ORDER",
+    entityId: orderId,
+    description: `Updated order #${orderId} status to ${payload.status}`,
+    metadata: {
+      nextStatus: payload.status
+    }
+  });
   if (finalOrder?.user_id) {
     publishOrderEvent(finalOrder.user_id, {
       orderId: finalOrder.id,
@@ -830,6 +947,11 @@ export const approvePaymentProof = asyncHandler(async (req: Request, res: Respon
   }
 
   const approved = Boolean(req.body?.approved);
+  const currentOrderStatus = String(order.status || "").toUpperCase();
+  const currentPaymentStatus = String(order.payment_status || "").toUpperCase();
+  if (!approved && (currentPaymentStatus === "PAID" || ["SHIPPED", "DELIVERED", "COMPLETED"].includes(currentOrderStatus))) {
+    throw new AppError("Không thể từ chối chứng từ của đơn hàng đã thanh toán hoặc đã giao hàng", 409);
+  }
   const rejectionReason = String(
     req.body?.reason || req.body?.rejectionReason || "Ảnh hóa đơn không hợp lệ hoặc không rõ ràng."
   ).trim();
@@ -1113,36 +1235,87 @@ export const vnpayIpn = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const momoIpn = asyncHandler(async (req: Request, res: Response) => {
-  const payload = req.body || req.query;
+  if (!isMomoConfigured()) {
+    res.status(503).json({ message: "MoMo payment gateway is not configured", resultCode: 99 });
+    return;
+  }
+
+  const payload = req.body && Object.keys(req.body).length > 0 ? req.body : req.query;
   const isSecure = verifyMomoSignature(payload);
 
   if (!isSecure) {
-    console.error("[MoMo IPN] Signature verification failed:", payload);
+    console.error("[MoMo IPN] Signature verification failed");
     res.status(400).json({ message: "Invalid MoMo signature", resultCode: 97 });
     return;
   }
 
-  const { orderId, resultCode, transId } = payload;
-  console.log(`[MoMo IPN] Order: ${orderId}, ResultCode: ${resultCode}, TransId: ${transId}`);
+  const { orderId, resultCode, transId, amount } = payload;
+  const numericOrderId = Number(orderId);
+  if (!Number.isInteger(numericOrderId) || numericOrderId <= 0) {
+    res.status(400).json({ message: "Invalid orderId", resultCode: 1 });
+    return;
+  }
+  console.log(`[MoMo IPN] Order: ${numericOrderId}, ResultCode: ${resultCode}, TransId: ${transId}`);
 
   if (Number(resultCode) === 0) {
-    const order = await getOrderById(orderId);
-    if (!order) {
+    const checkOutcome = await prisma.$transaction(async (tx: any) => {
+      const rows = (await tx.$queryRawUnsafe(
+        `SELECT id, status, payment_status, payment_method, final_amount, total_amount FROM orders WHERE id = ? FOR UPDATE`,
+        numericOrderId
+      )) as Array<{
+        id: number;
+        status: string;
+        payment_status: string;
+        payment_method: string;
+        final_amount: number | string;
+        total_amount: number | string;
+      }>;
+      const lockedOrder = rows[0];
+      if (!lockedOrder) return { state: "NOT_FOUND" as const };
+      if (String(lockedOrder.payment_method || "").toUpperCase() !== "MOMO") {
+        return { state: "WRONG_METHOD" as const };
+      }
+      if (String(lockedOrder.status || "").toUpperCase() === "CANCELED") {
+        return { state: "CANCELED" as const };
+      }
+      const expectedAmount = Math.round(Number(lockedOrder.final_amount || lockedOrder.total_amount || 0));
+      const paidAmount = Math.round(Number(amount || 0));
+      if (!Number.isFinite(paidAmount) || paidAmount !== expectedAmount) {
+        return { state: "AMOUNT_MISMATCH" as const };
+      }
+      if (String(lockedOrder.payment_status || "").toUpperCase() === "PAID") {
+        return { state: "ALREADY_PAID" as const };
+      }
+      return { state: "READY" as const };
+    });
+
+    if (checkOutcome.state === "NOT_FOUND") {
       res.status(404).json({ message: "Order not found", resultCode: 1 });
       return;
     }
-
-    if (order.payment_status === "PAID") {
+    if (checkOutcome.state === "WRONG_METHOD") {
+      res.status(400).json({ message: "Order payment method is not MOMO", resultCode: 2 });
+      return;
+    }
+    if (checkOutcome.state === "CANCELED") {
+      res.status(409).json({ message: "Order is canceled", resultCode: 3 });
+      return;
+    }
+    if (checkOutcome.state === "AMOUNT_MISMATCH") {
+      res.status(400).json({ message: "Invalid payment amount", resultCode: 4 });
+      return;
+    }
+    if (checkOutcome.state === "ALREADY_PAID") {
       res.status(200).json({ message: "Already paid", resultCode: 0 });
       return;
     }
 
-    await markOrderPaid(orderId, {
+    await markOrderPaid(numericOrderId, {
       transactionCode: transId ? String(transId) : undefined,
       provider: "MOMO_SANDBOX",
       note: "Confirmed via MoMo IPN"
     });
-    const updatedOrder = await getOrderById(orderId);
+    const updatedOrder = await getOrderById(numericOrderId);
     if (updatedOrder?.user_id) {
       publishOrderEvent(updatedOrder.user_id, {
         orderId: updatedOrder.id,
@@ -1183,24 +1356,29 @@ export const cancelMyOrder = asyncHandler(async (req: Request, res: Response) =>
     throw new AppError("Unauthorized", 401);
   }
 
-  const orderId = req.params.id;
+  const numericOrderId = Number(req.params.id);
+  if (!Number.isInteger(numericOrderId) || numericOrderId <= 0) {
+    throw new AppError("Invalid order id", 400);
+  }
   const userId = req.user.userId;
 
   const result = await prisma.$transaction(async (tx: any) => {
-    const order = await tx.order.findUnique({
-      where: { id: parseInt(orderId) },
-      include: { OrderItem: true }
-    });
+    // Serialize concurrent cancellation attempts with FOR UPDATE row lock
+    const lockedRows = (await tx.$queryRawUnsafe(
+      `SELECT id, user_id, status, coupon_id, payment_status FROM orders WHERE id = ? FOR UPDATE`,
+      numericOrderId
+    )) as Array<{ id: number; user_id: number; status: string; coupon_id: number | null; payment_status: string | null }>;
 
+    const order = lockedRows[0];
     if (!order) {
       throw new AppError("Order not found", 404);
     }
 
-    if (order.user_id !== Number(userId)) {
+    if (Number(order.user_id) !== Number(userId)) {
       throw new AppError("Forbidden: You can only cancel your own orders", 403);
     }
 
-    if (order.status !== "PENDING") {
+    if (String(order.status || "").toUpperCase() !== "PENDING") {
       throw new AppError(`Cannot cancel order in ${order.status} status. Only PENDING orders can be canceled.`, 400);
     }
 
@@ -1210,8 +1388,13 @@ export const cancelMyOrder = asyncHandler(async (req: Request, res: Response) =>
       data: { status: "CANCELED", updated_at: new Date() }
     });
 
-    // Restore stock
-    for (const item of order.OrderItem) {
+    const orderItems = await tx.orderItem.findMany({
+      where: { order_id: order.id },
+      select: { product_variant_id: true, quantity: true }
+    });
+
+    // Restore stock atomically once
+    for (const item of orderItems) {
       const variantId = item.product_variant_id;
       const quantity = Number(item.quantity || 0);
       if (variantId && quantity > 0) {
@@ -1232,13 +1415,15 @@ export const cancelMyOrder = asyncHandler(async (req: Request, res: Response) =>
     });
 
     if (order.coupon_id) {
-      await tx.coupon.update({
-        where: { id: order.coupon_id },
-        data: { used_count: { decrement: 1 } }
-      }).catch(() => {});
-      await tx.couponUsage.deleteMany({
+      const deletedUsage = await tx.couponUsage.deleteMany({
         where: { order_id: order.id }
       });
+      if (deletedUsage.count > 0) {
+        await tx.$executeRawUnsafe(
+          `UPDATE coupons SET used_count = GREATEST(used_count - 1, 0) WHERE id = ?`,
+          order.coupon_id
+        );
+      }
     }
 
     await tx.payment.updateMany({
@@ -1259,13 +1444,13 @@ export const cancelMyOrder = asyncHandler(async (req: Request, res: Response) =>
   });
 
   publishOrderEvent(userId, {
-    orderId,
+    orderId: String(numericOrderId),
     status: "CANCELED",
     paymentStatus: result.payment_status
   });
   sendOrderStatusNotification({
     userId: Number(userId),
-    orderId,
+    orderId: numericOrderId,
     status: "CANCELED"
   }).catch(() => {});
 });

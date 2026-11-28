@@ -86,7 +86,12 @@ export function LoginPage() {
 
       const redirectParam = new URLSearchParams(location.search).get("redirect");
       const returnPath = location.state?.from?.pathname || redirectParam || result.redirectPath;
+      const preservedFromState =
+        location.state?.from?.state && typeof location.state.from.state === "object"
+          ? location.state.from.state
+          : {};
       const state = {
+        ...preservedFromState,
         ...(result.onboarding?.buildsMigrated > 0 ? { buildsMigrated: result.onboarding.buildsMigrated } : {}),
         ...(result.onboarding?.cartItemsMerged > 0 ? { cartItemsMerged: result.onboarding.cartItemsMerged } : {})
       };

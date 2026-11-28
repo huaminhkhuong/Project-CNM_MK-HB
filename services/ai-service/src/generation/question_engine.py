@@ -55,7 +55,7 @@ def generate_dynamic_questions(
     step: int = 1
 ) -> Dict[str, Any]:
     """
-    Sinh câu hỏi trắc nghiệm ĐỘNG 100% qua mô hình Gemini 3.5 Flash-Lite (với fallback 3.1 Flash-Lite).
+    Sinh câu hỏi trắc nghiệm ĐỘNG 100% qua LLM (với chuỗi fallback dự phòng).
     Tuân thủ nghiêm ngặt:
     1. ĐÚNG TRỌNG TÂM: Nhu cầu Gaming tuyệt đối không hỏi văn phòng/kế toán.
     2. NGÔN NGỮ PHỔ THÔNG: Dành cho người dùng phổ thông, không dùng từ ngữ kỹ thuật khó hiểu.
@@ -163,18 +163,14 @@ BỘ LỌC NGỮ CẢNH & PHÂN TÍCH NHU CẦU THÔNG MINH TẠI PROMPT:
 HƯỚNG DẪN BẮT BUỘC CHO LĨNH VỰC NÀY:
 {domain_guidelines}
 
-QUY TẮC PHÂN BỔ CÂU HỎI VÒNG 1 (TRỌNG TÂM: TÁC VỤ & HIỆU NĂNG CỐT LÕI):
-1. ĐÚNG TRỌNG TÂM: Chỉ tập trung hỏi về phần mềm/tựa game cụ thể, trải nghiệm màn hình (độ phân giải/số màn hình) hoặc mức độ ưu tiên đồ họa.
-2. TUYỆT ĐỐI CẤM HỎI Ở VÒNG 1 (ĐỂ DÀNH TRỌN VẸN CHO VÒNG 2):
-   - CẤM hỏi về mở nhiều tab web hay thói quen đa nhiệm RAM.
-   - CẤM hỏi về dung lượng ổ cứng lưu trữ SSD (500GB, 1TB, 2TB).
-   - CẤM hỏi về kết nối Internet Wi-Fi hay dây LAN.
-   - CẤM hỏi về màu sắc, đèn LED hay kiểu dáng vỏ thùng máy.
-   - CẤM hỏi về độ ồn hay quạt tản nhiệt.
+QUY TẮC PHÂN BỔ CÂU HỎI VÒNG 1 (TỐI ĐA 5 CÂU - TỔNG 2 VÒNG KHÔNG QUÁ 10 CÂU):
+1. ĐÚNG TRỌNG TÂM & BAO QUÁT: Tập trung hỏi về mục đích cốt lõi, phần mềm/tựa game cụ thể, độ phân giải & tần số quét màn hình, cường độ tải công việc hoặc yêu cầu đặc thù (ví dụ: máy ảo, AI VRAM, render 4K, stream...) để không lọt lỗ hổng.
+2. ĐỂ DÀNH CHI TIẾT NGOẠI VI CHO VÒNG 2: Không hỏi sâu về màu sắc vỏ case, đèn LED hay dung lượng SSD chi tiết ở Vòng 1 (sẽ hỏi ở Vòng 2).
 3. DỄ HIỂU, KHÔNG DÙNG THUẬT NGỮ KHÓ: Hỏi bằng tiếng Việt tự nhiên, gần gũi, người không biết gì về máy tính cũng trả lời được ngay.
 4. KHÔNG TỰ ĐẨY GIÁ TIỀN: Tuyệt đối không gợi ý ngân sách cao hơn {budget_val:,}đ. Mọi phương án xoay quanh mức ngân sách ban đầu của khách hàng.
-5. SỐ LƯỢNG: Tạo đúng từ 2 đến 3 câu hỏi trắc nghiệm, mỗi câu 2-3 phương án dễ chọn.
-6. ĐỊNH DẠNG: Trả về DUY NHẤT một chuỗi JSON hợp lệ theo đúng cấu trúc mẫu. TUYỆT ĐỐI KHÔNG dùng emoji (biểu tượng cảm xúc) và KHÔNG dùng ký tự Markdown '#' trong toàn bộ nội dung.
+5. SỐ LƯỢNG: Tự sinh từ 3 đến 5 câu hỏi trắc nghiệm (tối đa 5 câu ở Vòng 1), mỗi câu 2-4 phương án rõ ràng.
+6. BẮT BUỘC NGÔN NGỮ: Toàn bộ văn bản (title, description, label, options) PHẢI viết bằng tiếng Việt CÓ DẤU ĐẦY ĐỦ (UTF-8 chuẩn). Tuyệt đối KHÔNG viết tiếng Việt không dấu.
+7. ĐỊNH DẠNG: Trả về DUY NHẤT một chuỗi JSON hợp lệ theo đúng cấu trúc mẫu. TUYỆT ĐỐI KHÔNG dùng emoji (biểu tượng cảm xúc) và KHÔNG dùng ký tự Markdown '#' trong toàn bộ nội dung.
 
 CẤU TRÚC JSON MẪU:
 {{
@@ -212,62 +208,51 @@ Khách hàng đã hoàn thành VÒNG 1:
 - Các lựa chọn ở Vòng 1 của khách:
 {context_str}
 
-Giai đoạn hiện tại: VÒNG 2 (TÙY CHỌN THÓI QUEN SỬ DỤNG, LƯU TRỮ, KẾT NỐI MẠNG & THẨM MỸ BÀN LÀM VIỆC)
+Giai đoạn hiện tại: VÒNG 2 (ĐÀO SÂU CHI TIẾT CÒN THIẾU DỰA TRÊN NGỮ CẢNH VÒNG 1)
 
-QUY TẮC BẮT BUỘC VÒNG 2 CHO NGƯỜI DÙNG PHỔ THÔNG:
-1. TUYỆT ĐỐI CẤM HỎI LẠI HOẶC GẦN GIỐNG VÒNG 1:
-   - CẤM hỏi lại về phần mềm, game, hệ điều hành, công cụ làm việc hoặc độ phân giải màn hình đã khảo sát ở Vòng 1.
-2. VÒNG 2 CHỈ TẬP TRUNG VÀO 4 MẶT NGOẠI VI & THÓI QUEN SAU ĐÂY:
-   - Câu 1: Mức độ mở nhiều ứng dụng hoặc cửa sổ cùng lúc của bạn? (Đa nhiệm RAM)
-     Options:
-       + Vừa phải (Mở vài ứng dụng cơ bản và 10-15 tab web)
-       + Nhiều & Thoải mái (Mở hàng chục tab web, chạy đồng thời ứng dụng làm việc, Zalo, nghe nhạc mượt mà không sợ đơ máy)
-   - Câu 2: Nhu cầu lưu trữ tài liệu, hình ảnh và phần mềm của bạn? (Ổ cứng SSD)
-     Options:
-       + Lưu trữ cơ bản (Đủ dùng cho hệ điều hành, tài liệu văn phòng và phần mềm thường dùng)
-       + Lưu trữ thoải mái (Tha hồ lưu trữ ảnh, video kỷ niệm, tải nhiều phần mềm và tài liệu nặng)
-       + Lưu trữ khổng lồ (Cần kho lưu trữ mênh mông cho phim ảnh hoặc dự án dài hạn)
-   - Câu 3: Vị trí đặt máy tính của bạn kết nối Internet bằng hình thức nào? (Wi-Fi vs LAN)
-     Options:
-       + Bắt sóng Wi-Fi không dây (Gọn gàng, không cần kéo dây mạng và có Bluetooth tiện lợi)
-       + Cắm dây mạng trực tiếp (Đã kéo sẵn dây mạng LAN tới bàn)
-       + Cần cả hai để linh hoạt di chuyển
-   - Câu 4: Bạn thích phong cách thùng máy đặt trên bàn làm việc như thế nào? (Thẩm mỹ & Màu sắc)
-     Options:
-       + Đen tối giản, kín đáo (Không đèn màu, êm ái, tập trung tối đa)
-       + Mặt kính trong suốt có đèn LED (Hiện đại, ánh sáng lung linh tạo cảm hứng)
-       + Tone màu Trắng trang nhã (Sang trọng, làm sáng góc làm việc)
-3. TUYỆT ĐỐI KHÔNG dùng emoji (biểu tượng cảm xúc) và KHÔNG dùng ký tự Markdown '#' trong toàn bộ kết quả.
-4. Số lượng: Tạo đúng 4 câu hỏi trắc nghiệm tương ứng 4 mặt trên.
+QUY TẮC BẮT BUỘC VÒNG 2:
+1. BÁM SÁT NGỮ CẢNH VÒNG 1 & KHÔNG TRÙNG LẶP:
+   - Đọc kỹ các lựa chọn Vòng 1 ở trên để sinh câu hỏi nối tiếp hợp lý, KHÔNG hỏi lại những gì khách đã trả lời ở Vòng 1.
+2. BAO QUÁT KHÔNG LỌT LỖ HỔNG (TỰ SINH LINH HOẠT):
+   - Tổng câu hỏi của cả 2 vòng tối đa 10 câu (Vòng 2 tối đa 5 câu).
+   - Hãy tự rà soát xem từ nhu cầu "{purpose_clean}" + câu trả lời Vòng 1 còn thiếu thông tin gì để chốt đủ 8 linh kiện (RAM đa nhiệm, dung lượng lưu trữ SSD/HDD, yêu cầu tản nhiệt/độ ồn 24/7, khả năng nâng cấp tương lai, số màn hình/cổng kết nối, kích thước/màu sắc/thẩm mỹ thùng máy) rồi tự sinh các câu hỏi sát thực tế nhất.
+   - Cấm hỏi các câu vô nghĩa rập khuôn như Wi-Fi vs dây mạng LAN nếu khách không yêu cầu.
+3. NGÔN NGỮ PHỔ THÔNG 100% (CỰC KỲ QUAN TRỌNG):
+   - Khách hàng là NGƯỜI DÙNG PHỔ THÔNG không rành kỹ thuật.
+   - TUYỆT ĐỐI CẤM dùng các từ chuyên môn phần cứng trong cả câu hỏi lẫn các phương án trả lời: CẤM ghi "RAM 16GB/32GB", "SSD/HDD/NVMe/500GB/1TB", "HDMI/DisplayPort", "card rời/card tích hợp", "socket", "DDR4/DDR5", "TDP", "Watt", "AIO".
+   - Hãy mô tả bằng TRẢI NGHIỆM ĐỜI THƯỜNG dễ hiểu: ví dụ "mở 5-10 tab web và 1-2 file Excel" vs "mở hàng chục tab và nhiều file Excel nặng cùng lúc"; "lưu trữ tài liệu cơ bản" vs "lưu trữ kho dữ liệu nhiều năm, ảnh/video"; "cắm 2 màn hình văn phòng thông thường" vs "cần màn hình lớn độ nét cao"; "máy chạy êm ái, gọn gàng" vs "hiện đại có đèn trang trí".
+4. BẮT BUỘC NGÔN NGỮ: Toàn bộ văn bản (title, description, label, options) PHẢI viết bằng tiếng Việt CÓ DẤU ĐẦY ĐỦ (UTF-8 chuẩn). Tuyệt đối KHÔNG viết tiếng Việt không dấu.
+5. TUYỆT ĐỐI KHÔNG dùng emoji (biểu tượng cảm xúc) và KHÔNG dùng ký tự Markdown '#' trong toàn bộ kết quả.
+6. SỐ LƯỢNG: Tự sinh từ 3 đến 5 câu hỏi trắc nghiệm (tối đa 5 câu ở Vòng 2), không áp cứng một mẫu cố định cho mọi khách hàng.
 
 CẤU TRÚC JSON MẪU:
 {{
   "purpose": "{purpose_clean}",
-  "title": "Thói quen sử dụng & Không gian ({purpose_clean})",
-  "description": "Lựa chọn thói quen đa nhiệm, nhu cầu lưu trữ, kết nối mạng và kiểu dáng thùng máy",
+  "title": "Chi tiết tối ưu cấu hình ({purpose_clean})",
+  "description": "Khảo sát chuyên sâu các yếu tố phần cứng còn thiếu dựa trên lựa chọn Vòng 1",
   "step": 2,
   "total_steps": 2,
   "questions": [
     {{
-      "id": "multitask_habit",
-      "label": "Mức độ mở nhiều ứng dụng hoặc cửa sổ cùng lúc của bạn?",
+      "id": "ten_id_ngan_gon",
+      "label": "Câu hỏi chuyên sâu nối tiếp ngữ cảnh Vòng 1 bằng tiếng Việt có dấu?",
       "type": "single_select",
       "required": true,
       "options": [
-        {{"value": "ram_16gb", "label": "Vừa phải: Mở vài ứng dụng cơ bản và 10-15 tab web"}},
-        {{"value": "ram_32gb", "label": "Nhiều & Thoải mái: Mở hàng chục tab web, chạy đồng thời Zalo, nhạc và ứng dụng nặng không sợ giật lag (Khuyên dùng)"}}
+        {{"value": "opt_1", "label": "Mô tả lựa chọn 1 rõ ràng, sát nhu cầu"}},
+        {{"value": "opt_2", "label": "Mô tả lựa chọn 2 rõ ràng, sát nhu cầu"}}
       ]
     }}
   ]
 }}"""
 
-    # 4. Gọi Gemini API với cơ chế Fallback
+    # 4. Gọi Gemini API với cơ chế Fallback các model thực đang hoạt động
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("LLM_API_KEY", "")
     models_to_try = [
-        "gemini-3-flash-preview",
-        os.environ.get("LLM_MODEL") or "gemini-flash-lite-latest",
-        os.environ.get("LLM_FALLBACK_MODEL") or "gemini-3.5-flash-lite",
-        "gemini-3.5-flash",
+        os.environ.get("LLM_MODEL") or "gemini-2.5-flash",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        os.environ.get("LLM_FALLBACK_MODEL") or "gemini-3-flash-preview",
         "gemini-flash-latest"
     ]
 
@@ -321,123 +306,29 @@ def deduplicate_and_clean_questions(
     budget: int
 ) -> List[Dict[str, Any]]:
     """
-    Loại bỏ triệt để trùng lặp giữa Vòng 1 và Vòng 2.
-    - Ở Vòng 1: Đảm bảo không có câu hỏi nào về RAM, SSD, Wi-Fi, Case.
-    - Ở Vòng 2: Đảm bảo không hỏi lại phần mềm, game, độ phân giải màn hình đã hỏi ở Vòng 1.
-    - Ở Vòng 2: Đảm bảo phủ đủ 4 trụ cột độc lập: RAM, SSD, Wi-Fi, Case style.
+    Loại bỏ triệt để trùng lặp giữa Vòng 1 và Vòng 2 và giới hạn tối đa 5 câu mỗi vòng (tổng <= 10 câu).
     """
     if not questions:
         return []
 
     if step == 1:
-        # Vòng 1: Lọc bỏ các câu vô tình hỏi về RAM, SSD, Wi-Fi, Case
-        v1_filtered = []
-        for q in questions:
-            qid = str(q.get("id", "")).lower()
-            qlabel = str(q.get("label", "")).lower()
-            is_step2_topic = any(k in qid or k in qlabel for k in [
-                "ram", "đa nhiệm", "multitask", "ssd", "lưu trữ", "storage",
-                "wifi", "mạng", "lan", "thùng máy", "vỏ case", "case_style", "đèn led"
-            ])
-            if not is_step2_topic:
-                v1_filtered.append(q)
-        return v1_filtered if len(v1_filtered) >= 2 else questions
+        return questions[:5]
 
-    # Step == 2:
+    # Step == 2: Chỉ lọc trùng lặp với Vòng 1 và giới hạn tối đa 5 câu (không áp cứng thêm câu hỏi)
     prev_keys = [str(k).lower() for k in (prev_ans or {}).keys()]
-
-    step1_keywords = [
-        "độ phân giải", "resolution", "màn hình", "monitor", "phần mềm",
-        "tựa game", "game_genre", "lĩnh vực", "hệ điều hành", "android", "flutter",
-        "tác vụ", "cường độ", "workload", "render", "livestream", "docker", "ai_ml",
-        "work_type", "work_intensity", "editing_tasks", "video_resolution"
-    ]
-
     clean_v2 = []
-    seen_categories = set()
+    seen_ids = set()
 
     for q in questions:
-        qid = str(q.get("id", "")).lower()
-        qlabel = str(q.get("label", "")).lower()
-
-        # Kiểm tra xem câu này có lặp lại nội dung đã hỏi ở Vòng 1 không
-        is_step1_repeat = any(k in qid or k in qlabel for k in step1_keywords) or (qid in prev_keys)
-        is_legit_step2 = any(k in qid or k in qlabel for k in [
-            "ram", "đa nhiệm", "multitask", "ssd", "lưu trữ", "storage",
-            "wifi", "mạng", "lan", "internet", "thùng máy", "vỏ case", "case_style", "màu sắc", "led"
-        ])
-
-        if is_step1_repeat and not is_legit_step2:
+        qid = str(q.get("id", "")).lower().strip()
+        if not qid or qid in prev_keys or qid in seen_ids:
             continue
+        seen_ids.add(qid)
+        clean_v2.append(q)
+        if len(clean_v2) >= 5:
+            break
 
-        cat = None
-        if any(k in qid or k in qlabel for k in ["ram", "đa nhiệm", "multitask", "cửa sổ", "ứng dụng", "tab"]):
-            cat = "ram"
-        elif any(k in qid or k in qlabel for k in ["ssd", "lưu trữ", "storage", "dung lượng", "ổ cứng"]):
-            cat = "storage"
-        elif any(k in qid or k in qlabel for k in ["wifi", "mạng", "lan", "internet", "kết nối", "sóng"]):
-            cat = "network"
-        elif any(k in qid or k in qlabel for k in ["thùng máy", "vỏ case", "case", "màu sắc", "led", "phong cách", "kính"]):
-            cat = "case"
-
-        if cat:
-            if cat not in seen_categories:
-                seen_categories.add(cat)
-                clean_v2.append(q)
-        else:
-            clean_v2.append(q)
-
-    # Đảm bảo 4 trụ cột của Vòng 2 luôn hiện diện đầy đủ
-    standard_v2_pool = {
-        "ram": {
-            "id": "multitask_habit",
-            "label": "Mức độ mở nhiều ứng dụng hoặc cửa sổ cùng lúc của bạn?",
-            "type": "single_select",
-            "required": True,
-            "options": [
-                {"value": "ram_16gb", "label": "Vừa phải: Mở vài ứng dụng cơ bản và 10-15 tab web"},
-                {"value": "ram_32gb", "label": "Nhiều & Thoải mái: Mở hàng chục tab web, chạy đồng thời ứng dụng làm việc, Zalo, nghe nhạc không sợ đơ máy (Khuyên dùng)"}
-            ]
-        },
-        "storage": {
-            "id": "storage_capacity",
-            "label": "Nhu cầu lưu trữ tài liệu, hình ảnh và phần mềm của bạn?",
-            "type": "single_select",
-            "required": True,
-            "options": [
-                {"value": "ssd_500gb", "label": "Lưu trữ cơ bản: Đủ dùng cho hệ điều hành, tài liệu văn phòng và phần mềm thường dùng"},
-                {"value": "ssd_1tb", "label": "Lưu trữ thoải mái: Tha hồ lưu ảnh, video kỷ niệm, tải nhiều phần mềm và tài liệu nặng (Khuyên dùng)"},
-                {"value": "ssd_2tb", "label": "Lưu trữ khổng lồ: Cần kho lưu trữ mênh mông cho phim ảnh hoặc dự án dài hạn"}
-            ]
-        },
-        "network": {
-            "id": "network_connection",
-            "label": "Vị trí đặt máy tính của bạn kết nối Internet bằng hình thức nào?",
-            "type": "single_select",
-            "options": [
-                {"value": "wifi_bt", "label": "Bắt sóng Wi-Fi không dây: Gọn gàng, không cần kéo dây mạng và có sẵn Bluetooth"},
-                {"value": "lan_cable", "label": "Cắm dây mạng trực tiếp: Độ trễ thấp, ping ổn định tối đa"},
-                {"value": "both", "label": "Cả hai hình thức để linh hoạt di chuyển"}
-            ]
-        },
-        "case": {
-            "id": "case_style",
-            "label": "Bạn thích phong cách thùng máy đặt trên bàn làm việc như thế nào?",
-            "type": "single_select",
-            "options": [
-                {"value": "stealth_black", "label": "Đen tối giản, kín đáo: Không đèn màu rườm rà, vận hành êm ái"},
-                {"value": "aquarium_rgb", "label": "Mặt kính trong suốt có đèn LED: Hiện đại, ánh sáng lung linh tạo cảm hứng"},
-                {"value": "pure_white", "label": "Tone màu Trắng trang nhã: Sang trọng, làm sáng góc làm việc"}
-            ]
-        }
-    }
-
-    for required_cat, standard_q in standard_v2_pool.items():
-        if required_cat not in seen_categories:
-            clean_v2.append(standard_q)
-            seen_categories.add(required_cat)
-
-    return clean_v2
+    return clean_v2 if clean_v2 else questions[:5]
 
 def _build_resilient_fallback(purpose: str, budget: int, step: int, domain: str) -> Dict[str, Any]:
     """Tạo bộ câu hỏi fallback thông minh được chia rạch ròi theo domain và thân thiện cho end-user."""

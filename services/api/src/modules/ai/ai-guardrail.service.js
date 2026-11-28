@@ -94,7 +94,7 @@ const DOMAIN_WHITELIST_KEYWORDS = [
   // 4. Xuất xứ, Nơi sản xuất & Phân phối (Origin / Manufacturing / Warranty)
   "chinh hang", "hang cong ty", "nguyen seal", "full box", "tray", "box", "xach tay", "nhap khau",
   "like new", "troi bao hanh", "xuat xu", "noi san xuat", "san xuat tai", "made in",
-  "taiwan", "dai loan", "china", "trung quoc", "vietnam", "viet nam", "korea", "han quoc", "usa", "my",
+  "taiwan", "dai loan", "china", "trung quoc", "vietnam", "viet nam", "korea", "han quoc", "usa",
   "malaysia", "philippines", "costa rica", "synnex fpt", "fpt", "vien son", "vinh xuan", "mai hoang", "khai thien", "dgw", "digiworld",
 
   // 5. Tác vụ công nghệ & Nhu cầu (Gaming, Đồ họa, Lập trình, Văn phòng)
@@ -102,7 +102,7 @@ const DOMAIN_WHITELIST_KEYWORDS = [
   "fps", "valorant", "csgo", "cs2", "lol", "lien minh", "dota", "dota 2", "genshin", "wukong", "cyberpunk",
   "gta", "fifa", "fc online", "fo4", "pubg", "free fire", "roblox", "minecraft", "apex", "warzone", "elden ring",
   "render", "do hoa", "blender", "premiere", "photoshop", "autocad", "3ds max",
-  "lap trinh", "code", "dev", "docker", "may ao", "vm", "machine learning", "deep learning", "ai",
+  "lap trinh", "code", "dev", "docker", "may ao", "vm", "machine learning", "deep learning", "tri tue nhan tao", "ai workstation",
   "van phong", "hoc tap", "word", "excel", "sinh vien",
 
   // 6. Khái niệm kỹ thuật & So sánh
@@ -152,14 +152,14 @@ function validateChatMessageDomain(message) {
   }
 
   // 2. Kiểm tra các mẫu Prohibited / Jailbreak / Off-topic rõ rệt
-  const hasPcContext = /\b(may tinh|may|pc|laptop|mua|tu van|cau hinh|gia|hoc|dung|can tim|cho con|linh kien|ngan sach|trieu|tr)\b/i.test(normalized);
+  // Chỉ coi là ngữ cảnh phần cứng thật sự (tránh từ đơn mơ hồ như "mua" trùng "mùa", "may", "gia", "hoc")
+  const hasPcContext = /\b(may tinh|mua pc|mua laptop|mua may|pc|laptop|tu van|cau hinh|linh kien|ngan sach|bo pc|dan pc|card man hinh|cpu|gpu|vga|ram|ssd)\b/i.test(normalized);
 
   for (let idx = 0; idx < PROHIBITED_PATTERNS.length; idx++) {
     const pattern = PROHIBITED_PATTERNS[idx];
     if (pattern.test(raw) || pattern.test(normalized)) {
-      // Nếu câu hỏi có ngữ cảnh mua sắm máy tính rõ ràng (VD: mua máy cho con học bài tập giải toán),
-      // chỉ chặn nếu dính Jailbreak (nhóm 1: 0..9) hoặc Cờ bạc (nhóm 6: 24..25)
-      const isSevereJailbreakOrGambling = idx < 10 || idx >= 24;
+      // Jailbreak (0..9) và Cờ bạc (2 mẫu cuối mảng) luôn bị chặn tuyệt đối dù có từ khóa PC
+      const isSevereJailbreakOrGambling = idx < 10 || idx >= PROHIBITED_PATTERNS.length - 2;
       if (hasPcContext && !isSevereJailbreakOrGambling) {
         continue;
       }

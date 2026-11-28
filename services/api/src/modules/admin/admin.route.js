@@ -59,6 +59,14 @@ router.get(
 );
 
 router.get(
+  "/system/audit-logs",
+  verifyToken,
+  requireRole(ROLES.ADMIN),
+  requirePermission(PERMISSIONS.MANAGE_SYSTEM_SETTINGS),
+  controller.getAuditLogs
+);
+
+router.get(
   "/reports/sales",
   verifyToken,
   requireRole(ROLES.ADMIN),
@@ -312,6 +320,38 @@ router.patch(
   requirePermission(PERMISSIONS.MANAGE_COMPATIBILITY_RULES),
   validateChangeCompatibilityRuleStatus,
   controller.changeCompatibilityRuleStatus
+);
+
+router.get(
+  "/tags",
+  verifyToken,
+  requireRole(ROLES.ADMIN),
+  requirePermission(PERMISSIONS.MANAGE_PRODUCTS),
+  controller.getTags
+);
+
+router.post(
+  "/tags",
+  verifyToken,
+  requireRole(ROLES.ADMIN),
+  requirePermission(PERMISSIONS.MANAGE_PRODUCTS),
+  controller.createTag
+);
+
+router.delete(
+  "/tags/:tagId",
+  verifyToken,
+  requireRole(ROLES.ADMIN),
+  requirePermission(PERMISSIONS.MANAGE_PRODUCTS),
+  controller.deleteTag
+);
+
+router.put(
+  "/products/:productId/tags",
+  verifyToken,
+  requireRole(ROLES.ADMIN),
+  requirePermission(PERMISSIONS.MANAGE_PRODUCTS),
+  controller.setProductTags
 );
 
 module.exports = router;

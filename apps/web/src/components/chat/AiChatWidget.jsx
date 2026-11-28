@@ -27,7 +27,6 @@ export function AiChatWidget() {
   const navigate = useNavigate();
 
   const isExcluded = location.pathname.includes("ai-chat") || location.pathname.includes("ai-advisor") || location.pathname.includes("pc-builder") || location.pathname.includes("pcbuilder");
-  if (isExcluded) return null;
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("form"); // "form" | "chat"
 
@@ -68,6 +67,7 @@ export function AiChatWidget() {
   });
 
   useEffect(() => {
+    if (isExcluded) return undefined;
     let timeoutId;
     function handleScroll() {
       const scrolled = window.scrollY > 80;
@@ -86,7 +86,7 @@ export function AiChatWidget() {
       window.removeEventListener("scroll", handleScroll);
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, []);
+  }, [isExcluded]);
 
   function handleDismissTooltip(e) {
     e.stopPropagation();
@@ -225,6 +225,8 @@ export function AiChatWidget() {
     // Dispatch custom event for real-time update if already on /pc-builder
     window.dispatchEvent(new CustomEvent("pcmall:apply-pending-ai-build", { detail: buildPayload }));
   }
+
+  if (isExcluded) return null;
 
   return (
     <div className="ai-chat-widget-root">

@@ -19,11 +19,11 @@ const {
   buildOrderItemInsertData
 } = require("./orders.common");
 const { getOrderDetail } = require("./order-query.service");
+const { calculateServerShippingFee } = require("./shipping-fee.service");
 
 async function createOrderFromCart(userId, payload = {}) {
   const config = await getSchemaConfig();
   const addressId = toPositiveInteger(payload.addressId, "addressId");
-  const shippingFee = toNonNegativeNumber(payload.shippingFee || 0, "shippingFee");
   const pool = getDbPool();
   const connection = await pool.getConnection();
 
@@ -74,6 +74,9 @@ async function createOrderFromCart(userId, payload = {}) {
     }
 
     const totalAmount = toMoney(cartItems.reduce((sum, item) => sum + item.lineTotal, 0));
+    const shippingFee = await calculateServerShippingFee(totalAmount, {
+      shippingMethod: payload.shippingMethod
+    });
 
     let discountAmount = 0;
     let appliedCoupon = null;

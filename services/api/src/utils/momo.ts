@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import axios from "axios";
 import { env } from "../config/env";
+import { AppError } from "../errors/app-error";
 
 export interface MomoPaymentResponse {
   partnerCode: string;
@@ -15,19 +16,20 @@ export interface MomoPaymentResponse {
   qrCodeUrl?: string;
 }
 
-// ─── Default MoMo Test Credentials (Cấu hình mặc định cho Sandbox Test) ──────
-const DEFAULT_PARTNER_CODE = "MOMO";
-const DEFAULT_ACCESS_KEY = "F8BBA842ECF82";
-const DEFAULT_SECRET_KEY = "K951B6PE1waDMi680xqZrqH3fi6WrStj";
 const DEFAULT_MOMO_ENDPOINT = "https://test-payment.momo.vn/v2/gateway/api/create";
 
 export function getMomoConfig() {
   return {
-    partnerCode: env.momoPartnerCode || process.env.MOMO_PARTNER_CODE || DEFAULT_PARTNER_CODE,
-    accessKey: env.momoAccessKey || process.env.MOMO_ACCESS_KEY || DEFAULT_ACCESS_KEY,
-    secretKey: env.momoSecretKey || process.env.MOMO_SECRET_KEY || DEFAULT_SECRET_KEY,
-    endpoint: env.momoApiUrl || process.env.MOMO_API_URL || DEFAULT_MOMO_ENDPOINT
+    partnerCode: String(env.momoPartnerCode || process.env.MOMO_PARTNER_CODE || "").trim(),
+    accessKey: String(env.momoAccessKey || process.env.MOMO_ACCESS_KEY || "").trim(),
+    secretKey: String(env.momoSecretKey || process.env.MOMO_SECRET_KEY || "").trim(),
+    endpoint: String(env.momoApiUrl || process.env.MOMO_API_URL || DEFAULT_MOMO_ENDPOINT).trim()
   };
+}
+
+export function isMomoConfigured(): boolean {
+  const { partnerCode, accessKey, secretKey } = getMomoConfig();
+  return Boolean(partnerCode && accessKey && secretKey);
 }
 
 /**
@@ -39,6 +41,9 @@ export async function generateMomoUrl(
   orderInfo: string
 ): Promise<{ payUrl: string; requestId: string }> {
   const { partnerCode, accessKey, secretKey, endpoint } = getMomoConfig();
+  if (!partnerCode || !accessKey || !secretKey) {
+    throw new AppError("Cổng thanh toán MoMo chưa được cấu hình đầy đủ (thiếu MOMO_PARTNER_CODE/ACCESS_KEY/SECRET_KEY)", 503);
+  }
   const requestId = `MOMO_${orderId}_${Date.now()}`;
   const redirectUrl = `${env.frontendUrl || process.env.FRONTEND_URL || "http://localhost:5173"}/payment/result`;
   const backendBase = (env.backendUrl || process.env.BACKEND_URL || process.env.API_BASE_URL || `http://localhost:${env.port || 4000}`).replace(/\/+$/, "");
@@ -94,7 +99,11 @@ export async function generateMomoUrl(
  * Xác minh chữ ký số trả về từ MoMo (IPN / Return URL)
  */
 export function verifyMomoSignature(payload: Record<string, any>): boolean {
-  const { accessKey, secretKey } = getMomoConfig();
+  const { partnerCode: configuredPartnerCode, accessKey, secretKey } = getMomoConfig();
+  if (!accessKey || !secretKey) {
+    return false;
+  }
+
   const {
     partnerCode,
     orderId,
@@ -110,7 +119,8 @@ export function verifyMomoSignature(payload: Record<string, any>): boolean {
     signature
   } = payload;
 
-  if (!signature) return false;
+  if (!signature || typeof signature !== "string") return false;
+  if (configuredPartnerCode && String(partnerCode || "") !== configuredPartnerCode) return false;
 
   const rawSignature = `accessKey=${accessKey}&amount=${amount}&extraData=${extraData || ""}&message=${message}&orderId=${orderId}&orderInfo=${orderInfo}&orderType=${orderType}&partnerCode=${partnerCode}&requestId=${requestId}&responseTime=${responseTime}&resultCode=${resultCode}&transId=${transId}`;
 
@@ -119,5 +129,8 @@ export function verifyMomoSignature(payload: Record<string, any>): boolean {
     .update(rawSignature)
     .digest("hex");
 
-  return signature === expectedSignature;
+  const actualBuf = Buffer.from(signature, "utf8");
+  const expectedBuf = Buffer.from(expectedSignature, "utf8");
+  if (actualBuf.length !== expectedBuf.length) return false;
+  return crypto.timingSafeEqual(actualBuf, expectedBuf);
 }

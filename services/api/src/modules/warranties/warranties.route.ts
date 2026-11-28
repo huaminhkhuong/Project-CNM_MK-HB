@@ -6,7 +6,7 @@ import path from "path";
 
 import { env } from "../../config/env";
 import { AppError } from "../../errors/app-error";
-import { authenticate, authorize, ROLES } from "../../middlewares/auth.middleware";
+import { authenticate, authorize, optionalAuthenticate, ROLES } from "../../middlewares/auth.middleware";
 import {
   activateWarranty,
   getAdminWarrantyRequests,
@@ -21,6 +21,17 @@ import {
 
 export const warrantiesRouter = Router();
 
+const ALLOWED_WARRANTY_MIME_TO_EXT: Record<string, string> = {
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/gif": ".gif",
+  "image/webp": ".webp",
+  "video/mp4": ".mp4",
+  "video/webm": ".webm",
+  "video/quicktime": ".mov",
+  "application/pdf": ".pdf"
+};
+
 const warrantyMediaStorage = multer.diskStorage({
   destination: (_req: Request, _file: { originalname: string }, cb: (error: Error | null, destination: string) => void) => {
     const uploadsDir = path.join(__dirname, "../../../uploads/warranty-requests");
@@ -29,9 +40,10 @@ const warrantyMediaStorage = multer.diskStorage({
     }
     cb(null, uploadsDir);
   },
-  filename: (_req: Request, file: { originalname: string }, cb: (error: Error | null, filename: string) => void) => {
+  filename: (_req: Request, file: { mimetype?: string; originalname: string }, cb: (error: Error | null, filename: string) => void) => {
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    cb(null, `warranty-${uniqueSuffix}${path.extname(file.originalname)}`);
+    const safeExt = ALLOWED_WARRANTY_MIME_TO_EXT[String(file.mimetype || "").toLowerCase()] || ".bin";
+    cb(null, `warranty-${uniqueSuffix}${safeExt}`);
   }
 });
 
@@ -39,11 +51,12 @@ const uploadWarrantyMediaFile = multer({
   storage: warrantyMediaStorage,
   limits: { fileSize: 10 * 1024 * 1024, files: 5 },
   fileFilter: (_req: Request, file: { mimetype: string }, cb: (error: Error | null, acceptFile?: boolean) => void) => {
-    if (/^(image|video)\//.test(file.mimetype) || file.mimetype === "application/pdf") {
+    const mime = String(file.mimetype || "").toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(ALLOWED_WARRANTY_MIME_TO_EXT, mime)) {
       cb(null, true);
       return;
     }
-    cb(new AppError("Chỉ chấp nhận ảnh, video hoặc PDF minh chứng", 400));
+    cb(new AppError("Chỉ chấp nhận ảnh (JPG/PNG/GIF/WEBP), video (MP4/WEBM/MOV) hoặc PDF minh chứng", 400));
   }
 });
 
@@ -81,34 +94,31 @@ function createGuestRateLimit(prefix: string, max: number, windowMs: number) {
   };
 }
 
+function cleanupUploadedWarrantyFiles(req: Request) {
+  const files = (req as any).files;
+  if (!Array.isArray(files)) return;
+  for (const file of files) {
+    if (file?.path) {
+      fs.unlink(file.path, () => {});
+    }
+  }
+}
+
 function basicAntiSpam(req: Request, _res: Response, next: NextFunction) {
   const honeypot = String(req.body?.website || "").trim();
   if (honeypot) {
+    cleanupUploadedWarrantyFiles(req);
     next(new AppError("Không thể xử lý yêu cầu này", 400));
     return;
   }
 
   const startedAt = Number(req.body?.startedAt || 0);
   if (startedAt && Date.now() - startedAt < 1500) {
+    cleanupUploadedWarrantyFiles(req);
     next(new AppError("Biểu mẫu được gửi quá nhanh. Vui lòng thử lại.", 400));
     return;
   }
 
-  next();
-}
-
-function optionalAuthenticate(req: Request, _res: Response, next: NextFunction) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
-    next();
-    return;
-  }
-
-  try {
-    req.user = jwt.verify(authHeader.split(" ")[1], env.jwtAccessSecret) as any;
-  } catch {
-    // Keep guest lookup/request available even with stale token.
-  }
   next();
 }
 
@@ -131,8 +141,8 @@ warrantiesRouter.get("/lookup", optionalAuthenticate, createGuestRateLimit("gues
 warrantiesRouter.post(
   "/request",
   optionalAuthenticate,
-  handleWarrantyUpload,
   createGuestRateLimit("guest-warranty-request", 5, 15 * 60 * 1000),
+  handleWarrantyUpload,
   basicAntiSpam,
   submitWarrantyRequest
 );
@@ -146,7 +156,7 @@ warrantiesRouter.post("/activate", activateWarranty);
 warrantiesRouter.get("/admin/requests", authorize([ROLES.ADMIN, ROLES.TECH_STAFF, ROLES.SALES_STAFF]), getAdminWarrantyRequests);
 warrantiesRouter.patch(
   "/admin/requests/:requestId",
-  authorize([ROLES.ADMIN, ROLES.TECH_STAFF, ROLES.SALES_STAFF]),
+  authorize([ROLES.ADMIN, ROLES.TECH_STAFF]),
   handleWarrantyUpload,
   updateAdminWarrantyRequest
 );

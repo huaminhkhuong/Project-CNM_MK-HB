@@ -1,4 +1,4 @@
-﻿const { query } = require("../../config/database");
+const { query } = require("../../config/database");
 const { createError, toPositiveInteger } = require("../../utils/service-helpers");
 const { getTableColumns, pickColumn } = require("../../utils/schema-helpers");
 const { ROLES, hasAnyRole, normalizeRole } = require("../../utils/role-helpers");
@@ -251,6 +251,21 @@ async function getShipmentByOrder(userOrUserId, orderId) {
   return mapShipment(shipment);
 }
 
+async function assertFullSerialsAssigned(orderId) {
+  const [itemsRows, serialsRows] = await Promise.all([
+    query(`SELECT COALESCE(SUM(quantity), 0) AS totalRequired FROM order_items WHERE order_id = ?`, [orderId]),
+    query(`SELECT COUNT(*) AS totalAssigned FROM order_item_serials WHERE order_id = ?`, [orderId])
+  ]);
+  const totalRequired = Number(itemsRows[0]?.totalRequired || 0);
+  const totalAssigned = Number(serialsRows[0]?.totalAssigned || 0);
+  if (totalRequired > 0 && totalAssigned < totalRequired) {
+    throw createError(
+      `Vui lòng gán đủ Serial Number cho tất cả linh kiện trước khi xuất kho / giao hàng (${totalAssigned}/${totalRequired} S/N đã gán).`,
+      400
+    );
+  }
+}
+
 async function createShipment(actorUser, payload = {}) {
   const actor = toActor(actorUser);
 
@@ -268,6 +283,9 @@ async function createShipment(actorUser, payload = {}) {
 
   const nextPayload = mockProvider.createShipmentPayload(orderId, payload);
   const shipmentStatus = normalizeShipmentStatus(nextPayload.status);
+  if (["IN_TRANSIT", "DELIVERED"].includes(shipmentStatus)) {
+    await assertFullSerialsAssigned(orderId);
+  }
   const existingShipment = await getShipmentRowByOrderId(orderId);
 
   if (existingShipment) {
@@ -332,6 +350,9 @@ async function updateShipmentStatus(actorUser, shipmentId, payload = {}) {
   }
 
   const nextStatus = normalizeShipmentStatus(payload.status || shipment.status || "CREATED");
+  if (["IN_TRANSIT", "DELIVERED"].includes(nextStatus)) {
+    await assertFullSerialsAssigned(shipment.orderId);
+  }
   const nextTrackingCode = String(payload.trackingCode || shipment.trackingCode || "").trim() || null;
   const updates = [];
   const params = [];

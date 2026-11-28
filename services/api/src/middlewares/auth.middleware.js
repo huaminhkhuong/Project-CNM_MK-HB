@@ -6,6 +6,9 @@ const {
   requireRole,
   optionalAuthenticate,
   optionalAuth,
+  invalidateUserAuthCache,
+  PERMISSIONS,
+  requirePermission,
   ROLES
 } = require("./auth.middleware.ts");
 
@@ -17,6 +20,9 @@ module.exports = {
   requireRole,
   optionalAuthenticate,
   optionalAuth,
+  invalidateUserAuthCache,
+  PERMISSIONS,
+  requirePermission,
   ROLES
 };
 

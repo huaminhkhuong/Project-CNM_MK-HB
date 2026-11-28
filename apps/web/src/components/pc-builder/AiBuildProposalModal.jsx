@@ -239,7 +239,12 @@ export default function AiBuildProposalModal({
 
   // Dynamic balance & smoothness analysis (Thân thiện 100% cho Non-tech)
   const bottleneckSource = dynamicBottleneck || proposalData.bottleneckReport || proposalData.bottleneck;
-  const rawBn = bottleneckSource?.bottleneckPercent ?? bottleneckSource?.percentage ?? bottleneckSource?.bottleneckRatio ?? null;
+  const rawBn =
+    bottleneckSource?.bottleneckPercentage ??
+    bottleneckSource?.bottleneckPercent ??
+    bottleneckSource?.percentage ??
+    bottleneckSource?.bottleneckRatio ??
+    null;
   const bnNum = rawBn !== null && rawBn !== undefined ? Math.round(parseFloat(rawBn)) : 4;
   
   // Tính điểm cân đối hệ thống (thang điểm 10)

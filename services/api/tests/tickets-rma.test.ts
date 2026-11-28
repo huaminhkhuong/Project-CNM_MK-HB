@@ -252,4 +252,43 @@ describe("Tickets RMA & Customer Support Authorization", () => {
     assert.equal(oversizeRes.body.success, false);
     assert.equal(oversizeRes.body.message, "Mỗi tệp đính kèm phải nhỏ hơn hoặc bằng 20MB");
   });
+
+  test("11. Phân quyền RBAC SALES_STAFF: chỉ được xem PUBLIC (ẩn INTERNAL), bị chặn 403 khi PATCH hoặc gửi phản hồi kỹ thuật", async () => {
+    let salesUser = await prisma.user.findFirst({ where: { email: "sales@cnm.local" } });
+    if (!salesUser) {
+      salesUser = await prisma.user.findFirst({
+        where: { Role: { name: "SALES_STAFF" } }
+      });
+    }
+    const salesToken = signAccessToken({
+      userId: String(salesUser ? salesUser.id : 999991),
+      email: salesUser?.email || "sales_rbac_test@cnm.local",
+      role: "SALES_STAFF"
+    });
+
+    // Read-only PUBLIC view allowed for CSKH lookup, but INTERNAL notes MUST be stripped
+    const detailRes = await request(app)
+      .get(`/api/tickets/${createdTicketId}`)
+      .set("Authorization", `Bearer ${salesToken}`);
+    assert.equal(detailRes.status, 200);
+    const messages = detailRes.body.data?.messages || [];
+    assert.ok(
+      !messages.some((m: any) => m.visibility === "INTERNAL" || String(m.message || "").includes("INTERNAL SECRET")),
+      "SALES_STAFF tuyệt đối không được xem ghi chú INTERNAL kỹ thuật"
+    );
+
+    // PATCH status/assignee must be blocked with 403
+    const patchRes = await request(app)
+      .patch(`/api/tickets/${createdTicketId}`)
+      .set("Authorization", `Bearer ${salesToken}`)
+      .send({ status: "OPEN" });
+    assert.equal(patchRes.status, 403);
+
+    // Posting messages on another customer's technical ticket must be blocked with 403
+    const msgRes = await request(app)
+      .post(`/api/tickets/${createdTicketId}/messages`)
+      .set("Authorization", `Bearer ${salesToken}`)
+      .send({ message: "Sales trying to post internal note", visibility: "INTERNAL" });
+    assert.equal(msgRes.status, 403);
+  });
 });

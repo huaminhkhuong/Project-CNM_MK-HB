@@ -81,13 +81,13 @@ const LLM_PROVIDER_PRESETS = {
     badgeBg: "#dbeafe",
     badgeColor: "#1d4ed8",
     desc: "Tốt cho tiếng Việt & đồng bộ với Gemini Embedding. Nên bật kèm dự phòng Groq tránh lỗi 503/429 Free Tier.",
-    defaultModel: "gemini-3.5-flash-lite",
+    defaultModel: "gemini-2.5-flash",
     keyUrl: "https://aistudio.google.com/apikey",
     keyPlaceholder: "AIza... (Lấy tại aistudio.google.com/apikey)",
     models: [
-      { value: "gemini-3.5-flash-lite", label: "gemini-3.5-flash-lite (Nhanh ~1,4s - Khuyên dùng trên Gemini)" },
-      { value: "gemini-3-flash-preview", label: "gemini-3-flash-preview (Sâu sắc - giới hạn 20 lượt/ngày Free)" },
-      { value: "gemini-3.1-flash-lite", label: "gemini-3.1-flash-lite (Dự phòng)" }
+      { value: "gemini-2.5-flash", label: "gemini-2.5-flash (Khuyên dùng - Cân bằng tốc độ & tiếng Việt)" },
+      { value: "gemini-2.0-flash", label: "gemini-2.0-flash (Nhanh, ổn định, dự phòng tốt)" },
+      { value: "gemini-3-flash-preview", label: "gemini-3-flash-preview (Preview mới - giới hạn quota Free)" }
     ]
   },
   openai: {
@@ -131,13 +131,7 @@ export function AdminAiConfigPage({ initialTab }) {
   const [searchParams] = useSearchParams();
   const queryTab = searchParams.get("tab") || initialTab || "rules";
 
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (role !== "ADMIN") {
-    return <Navigate to="/" replace />;
-  }
+  const canAccess = Boolean(isAuthenticated) && role === "ADMIN";
 
   const [activeTab, setActiveTab] = useState(queryTab);
 
@@ -189,7 +183,7 @@ export function AdminAiConfigPage({ initialTab }) {
   // System AI Config & Token Estimation States
   const [systemConfig, setSystemConfig] = useState({
     provider: "gemini",
-    model: "gemini-3.5-flash-lite",
+    model: "gemini-2.5-flash",
     fallbackProvider: "groq",
     fallbackModel: "llama-3.3-70b-versatile",
     autoFailover: true,
@@ -223,6 +217,17 @@ export function AdminAiConfigPage({ initialTab }) {
   const [docSearchKeyword, setDocSearchKeyword] = useState("");
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const fileInputRef = useRef(null);
+  const reindexPollRef = useRef(null);
+
+  // Clear any pending reindex polling interval on unmount
+  useEffect(() => {
+    return () => {
+      if (reindexPollRef.current) {
+        clearInterval(reindexPollRef.current);
+        reindexPollRef.current = null;
+      }
+    };
+  }, []);
 
   const filteredDocuments = useMemo(() => {
     const q = docSearchKeyword.trim().toLowerCase();
@@ -243,8 +248,9 @@ export function AdminAiConfigPage({ initialTab }) {
 
   // Load Rules, Prompts, and Central System Config on mount
   useEffect(() => {
+    if (!canAccess) return;
     loadData();
-  }, []);
+  }, [canAccess]);
 
   async function loadData() {
     try {
@@ -372,11 +378,12 @@ export function AdminAiConfigPage({ initialTab }) {
 
   // Effect to load RAG documents and models when RAG tab is selected
   useEffect(() => {
+    if (!canAccess) return;
     if (activeTab === "rag") {
       loadDocuments();
       loadEmbeddingModels();
     }
-  }, [activeTab]);
+  }, [activeTab, canAccess]);
 
   async function loadDocuments() {
     try {
@@ -468,21 +475,29 @@ export function AdminAiConfigPage({ initialTab }) {
       const res = await reindexAdminAiDocuments();
       if (res?.success) {
         setSuccessMessage(res.message || "Đã kích hoạt tái lập chỉ mục trong nền...");
+        if (reindexPollRef.current) {
+          clearInterval(reindexPollRef.current);
+        }
         const pollInterval = setInterval(async () => {
           try {
             const statusRes = await getAdminAiReindexStatus();
             const status = statusRes?.status;
             if (status && !status.is_running) {
               clearInterval(pollInterval);
+              if (reindexPollRef.current === pollInterval) reindexPollRef.current = null;
               setIsReindexing(false);
               setSuccessMessage(status.message || "Đã hoàn tất tái lập chỉ mục Vector DB!");
               await loadDocuments();
             }
           } catch {
             clearInterval(pollInterval);
+            if (reindexPollRef.current === pollInterval) reindexPollRef.current = null;
             setIsReindexing(false);
           }
         }, 3000);
+        reindexPollRef.current = pollInterval;
+      } else {
+        setIsReindexing(false);
       }
     } catch (err) {
       setIsReindexing(false);
@@ -636,6 +651,14 @@ export function AdminAiConfigPage({ initialTab }) {
     } finally {
       setIsTesting(false);
     }
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (role !== "ADMIN") {
+    return <Navigate to="/" replace />;
   }
 
   return (
@@ -1113,7 +1136,7 @@ export function AdminAiConfigPage({ initialTab }) {
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
                       <AdminField label="AI Model Engine">
                         <select
-                          value={promptData.model || "gemini-3.5-flash-lite"}
+                          value={promptData.model || "gemini-2.5-flash"}
                           onChange={(e) => {
                             setPrompts((prev) => ({
                               ...prev,
@@ -1122,8 +1145,9 @@ export function AdminAiConfigPage({ initialTab }) {
                           }}
                           style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #cbd5e1" }}
                         >
-                          <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite (Khuyên dùng - Siêu tốc, phản hồi tức thì)</option>
-                          <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite (Dự phòng ổn định / Fallback)</option>
+                          <option value="gemini-2.5-flash">Gemini 2.5 Flash (Khuyên dùng - Chuẩn Production)</option>
+                          <option value="gemini-2.0-flash">Gemini 2.0 Flash (Dự phòng ổn định / Fallback)</option>
+                          <option value="gemini-3-flash-preview">Gemini 3 Flash Preview (Thử nghiệm)</option>
                         </select>
                       </AdminField>
 
@@ -1867,7 +1891,7 @@ export function AdminAiConfigPage({ initialTab }) {
                       style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid #cbd5e1", fontWeight: 600 }}
                     >
                       <option value="groq">⚡ Groq Cloud (Siêu nhanh ~0,4s, 14.400 lượt/ngày)</option>
-                      <option value="gemini">🔷 Google Gemini (gemini-3.5-flash-lite)</option>
+                      <option value="gemini">🔷 Google Gemini (gemini-2.5-flash / 2.0-flash)</option>
                       <option value="openai">🧠 OpenAI (GPT-4o-mini / GPT-4o)</option>
                       <option value="ollama">💻 Ollama Local (Chạy máy chủ nội bộ)</option>
                     </select>

@@ -45,7 +45,7 @@ function normalizeActor(userOrUserId) {
 }
 
 function canManageTickets(role) {
-  return hasAnyRole(role, [ROLES.ADMIN, ROLES.SALES_STAFF, ROLES.TECH_STAFF]);
+  return hasAnyRole(role, [ROLES.ADMIN, ROLES.TECH_STAFF]);
 }
 
 async function resolveTableNames() {

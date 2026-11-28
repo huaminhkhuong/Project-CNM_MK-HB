@@ -180,25 +180,28 @@ export class AiAssistantService {
       }
     };
 
-    // 1. CPU
+    const missingCategories: string[] = [];
+
+    // 1. CPU (Chỉ chọn sản phẩm thật đang còn hàng trong DB — không bịa sản phẩm cứng)
     const cpuBudget = budget * ratios.cpu;
     const pickedCpu = await pickBestProduct("cpu", cpuBudget);
-    const cpuId = pickedCpu?.productId || 1;
-    const cpuName = pickedCpu?.name || "Intel Core i5-13400F";
-    const cpuPrice = pickedCpu?.price || 4890000;
-    const cpuSocket = pickedCpu?.socket || "LGA1700";
+    const cpuSocket = pickedCpu?.socket;
     const cpuTdp = pickedCpu?.tdp || 65;
 
-    totalPrice += cpuPrice;
-    components.push({
-      type: "CPU",
-      componentType: "cpu",
-      id: cpuId,
-      productId: cpuId,
-      name: cpuName,
-      price: cpuPrice,
-      explanation: `CPU hiệu năng cao socket ${cpuSocket}, TDP ${cpuTdp}W đáp ứng mượt nhu cầu ${purpose}.`
-    });
+    if (pickedCpu) {
+      totalPrice += pickedCpu.price;
+      components.push({
+        type: "CPU",
+        componentType: "cpu",
+        id: pickedCpu.productId,
+        productId: pickedCpu.productId,
+        name: pickedCpu.name,
+        price: pickedCpu.price,
+        explanation: `CPU hiệu năng cao${cpuSocket ? ` socket ${cpuSocket}` : ""}, TDP ${cpuTdp}W đáp ứng mượt nhu cầu ${purpose}.`
+      });
+    } else {
+      missingCategories.push("CPU");
+    }
 
     // 2. MAINBOARD (Tương thích 100% Socket CPU)
     const mbBudget = budget * ratios.mainboard;
@@ -208,21 +211,22 @@ export class AiAssistantService {
       socket: cpuSocket,
       ramType: preferredRamType
     });
-    const mbId = pickedMb?.productId || 2;
-    const mbName = pickedMb?.name || `Mainboard Chipset B760 (${cpuSocket})`;
-    const mbPrice = pickedMb?.price || 3250000;
-    const mbRamType = pickedMb?.ramType || (preferredRamType || "DDR4");
+    const mbRamType = pickedMb?.ramType || preferredRamType;
 
-    totalPrice += mbPrice;
-    components.push({
-      type: "MAINBOARD",
-      componentType: "mainboard",
-      id: mbId,
-      productId: mbId,
-      name: mbName,
-      price: mbPrice,
-      explanation: `Bo mạch chủ tương thích Socket ${cpuSocket}, hỗ trợ RAM ${mbRamType}.`
-    });
+    if (pickedMb) {
+      totalPrice += pickedMb.price;
+      components.push({
+        type: "MAINBOARD",
+        componentType: "mainboard",
+        id: pickedMb.productId,
+        productId: pickedMb.productId,
+        name: pickedMb.name,
+        price: pickedMb.price,
+        explanation: `Bo mạch chủ tương thích${cpuSocket ? ` Socket ${cpuSocket}` : ""}${mbRamType ? `, hỗ trợ RAM ${mbRamType}` : ""}.`
+      });
+    } else {
+      missingCategories.push("Mainboard");
+    }
 
     // 3. RAM (Xử lý linh kiện có sẵn)
     if (isRamOwned) {
@@ -239,20 +243,20 @@ export class AiAssistantService {
     } else {
       const ramBudget = budget * ratios.ram;
       const pickedRam = await pickBestProduct("ram", ramBudget, { ramType: mbRamType });
-      const ramId = pickedRam?.productId || 3;
-      const ramName = pickedRam?.name || `RAM 16GB (2x8GB) ${mbRamType}`;
-      const ramPrice = pickedRam?.price || 1250000;
-
-      totalPrice += ramPrice;
-      components.push({
-        type: "RAM",
-        componentType: "ram",
-        id: ramId,
-        productId: ramId,
-        name: ramName,
-        price: ramPrice,
-        explanation: `Bộ nhớ kênh đôi Dual Channel chạy mượt mà, ổn định.`
-      });
+      if (pickedRam) {
+        totalPrice += pickedRam.price;
+        components.push({
+          type: "RAM",
+          componentType: "ram",
+          id: pickedRam.productId,
+          productId: pickedRam.productId,
+          name: pickedRam.name,
+          price: pickedRam.price,
+          explanation: `Bộ nhớ kênh đôi Dual Channel chạy mượt mà, ổn định.`
+        });
+      } else {
+        missingCategories.push("RAM");
+      }
     }
 
     // 4. GPU (Card màn hình - Xử lý linh kiện có sẵn)
@@ -271,21 +275,22 @@ export class AiAssistantService {
     } else {
       const gpuBudget = budget * ratios.gpu;
       const pickedGpu = await pickBestProduct("gpu", gpuBudget);
-      const gpuId = pickedGpu?.productId || 4;
-      const gpuName = pickedGpu?.name || "NVIDIA GeForce RTX 4060 8GB";
-      const gpuPrice = pickedGpu?.price || 8290000;
-      gpuTdp = pickedGpu?.tdp || 160;
-
-      totalPrice += gpuPrice;
-      components.push({
-        type: "GPU",
-        componentType: "gpu",
-        id: gpuId,
-        productId: gpuId,
-        name: gpuName,
-        price: gpuPrice,
-        explanation: `Card đồ họa chiến mượt các tựa game/đồ họa ở độ phân giải ${resolution.toUpperCase()}.`
-      });
+      if (pickedGpu) {
+        gpuTdp = pickedGpu.tdp || 160;
+        totalPrice += pickedGpu.price;
+        components.push({
+          type: "GPU",
+          componentType: "gpu",
+          id: pickedGpu.productId,
+          productId: pickedGpu.productId,
+          name: pickedGpu.name,
+          price: pickedGpu.price,
+          explanation: `Card đồ họa chiến mượt các tựa game/đồ họa ở độ phân giải ${resolution.toUpperCase()}.`
+        });
+      } else {
+        gpuTdp = 0;
+        missingCategories.push("GPU");
+      }
     }
 
     // 5. STORAGE / SSD (Xử lý linh kiện có sẵn)
@@ -303,40 +308,40 @@ export class AiAssistantService {
     } else {
       const ssdBudget = budget * ratios.ssd;
       const pickedSsd = await pickBestProduct("ssd", ssdBudget);
-      const ssdId = pickedSsd?.productId || 5;
-      const ssdName = pickedSsd?.name || "SSD 500GB M.2 NVMe PCIe 4.0";
-      const ssdPrice = pickedSsd?.price || 1190000;
-
-      totalPrice += ssdPrice;
-      components.push({
-        type: "STORAGE",
-        componentType: "storage",
-        id: ssdId,
-        productId: ssdId,
-        name: ssdName,
-        price: ssdPrice,
-        explanation: "Ổ cứng thể rắn NVMe PCIe tốc độ đọc ghi cao, khởi động máy và load game siêu nhanh."
-      });
+      if (pickedSsd) {
+        totalPrice += pickedSsd.price;
+        components.push({
+          type: "STORAGE",
+          componentType: "storage",
+          id: pickedSsd.productId,
+          productId: pickedSsd.productId,
+          name: pickedSsd.name,
+          price: pickedSsd.price,
+          explanation: "Ổ cứng thể rắn NVMe PCIe tốc độ đọc ghi cao, khởi động máy và load game siêu nhanh."
+        });
+      } else {
+        missingCategories.push("SSD");
+      }
     }
 
     // 6. PSU (Tính nguồn theo công thức vàng RAG: (TDP CPU + GPU + 100W) x 1.25)
     const requiredWattage = Math.round((cpuTdp + gpuTdp + 100) * 1.25);
     const psuBudget = budget * ratios.psu;
     const pickedPsu = await pickBestProduct("psu", psuBudget);
-    const psuId = pickedPsu?.productId || 6;
-    const psuName = pickedPsu?.name || `Nguồn 650W 80 Plus Bronze (${requiredWattage}W đề xuất)`;
-    const psuPrice = pickedPsu?.price || 1350000;
-
-    totalPrice += psuPrice;
-    components.push({
-      type: "PSU",
-      componentType: "psu",
-      id: psuId,
-      productId: psuId,
-      name: psuName,
-      price: psuPrice,
-      explanation: `Bộ nguồn công suất thực đáp ứng tải ${requiredWattage}W, chuẩn 80 Plus an toàn, bền bỉ.`
-    });
+    if (pickedPsu) {
+      totalPrice += pickedPsu.price;
+      components.push({
+        type: "PSU",
+        componentType: "psu",
+        id: pickedPsu.productId,
+        productId: pickedPsu.productId,
+        name: pickedPsu.name,
+        price: pickedPsu.price,
+        explanation: `Bộ nguồn công suất thực đáp ứng tải ${requiredWattage}W, chuẩn 80 Plus an toàn, bền bỉ.`
+      });
+    } else {
+      missingCategories.push("PSU");
+    }
 
     // 7. CASE (Vỏ máy)
     if (isCaseOwned) {
@@ -353,20 +358,20 @@ export class AiAssistantService {
     } else {
       const caseBudget = budget * ratios.case;
       const pickedCase = await pickBestProduct("case", caseBudget);
-      const caseId = pickedCase?.productId || 7;
-      const caseName = pickedCase?.name || "Vỏ Case Mid Tower Airflow";
-      const casePrice = pickedCase?.price || 890000;
-
-      totalPrice += casePrice;
-      components.push({
-        type: "CASE",
-        componentType: "case",
-        id: caseId,
-        productId: caseId,
-        name: caseName,
-        price: casePrice,
-        explanation: "Vỏ case mặt lưới thông thoáng, tối ưu luồng gió làm mát linh kiện."
-      });
+      if (pickedCase) {
+        totalPrice += pickedCase.price;
+        components.push({
+          type: "CASE",
+          componentType: "case",
+          id: pickedCase.productId,
+          productId: pickedCase.productId,
+          name: pickedCase.name,
+          price: pickedCase.price,
+          explanation: "Vỏ case mặt lưới thông thoáng, tối ưu luồng gió làm mát linh kiện."
+        });
+      } else {
+        missingCategories.push("Case");
+      }
     }
 
     // 8. COOLING (Tản nhiệt nếu CPU TDP >= 100W hoặc ngân sách cho phép)
@@ -386,15 +391,19 @@ export class AiAssistantService {
       }
     }
 
-    const budgetUtilization = Math.round((totalPrice / budget) * 100);
+    const budgetUtilization = budget > 0 ? Math.round((totalPrice / budget) * 100) : 0;
+    const compatibilityScore = Math.max(0, 98 - missingCategories.length * 14);
+    const missingNote = missingCategories.length > 0
+      ? ` Lưu ý: Hiện kho tạm hết sản phẩm phù hợp cho mục ${missingCategories.join(", ")} (hệ thống không tự bịa mã linh kiện).`
+      : "";
 
     return {
       label: `Cấu hình PC ${purpose.toUpperCase()} Tối Ưu (${totalPrice.toLocaleString("vi-VN")}đ)`,
       totalPrice,
       budgetUtilization,
       components,
-      compatibilityScore: 98,
-      summaryText: `Đã thiết kế cấu hình tối ưu theo ngân sách ${budget.toLocaleString("vi-VN")}đ cho mục đích ${purpose.toUpperCase()}.${ownedList.length > 0 ? ` Đã loại trừ ${ownedList.join(", ")} bạn có sẵn ở nhà.` : ""}`
+      compatibilityScore,
+      summaryText: `Đã thiết kế cấu hình tối ưu từ linh kiện còn hàng trong kho theo ngân sách ${budget.toLocaleString("vi-VN")}đ cho mục đích ${purpose.toUpperCase()}.${ownedList.length > 0 ? ` Đã loại trừ ${ownedList.join(", ")} bạn có sẵn ở nhà.` : ""}${missingNote}`
     };
   }
 

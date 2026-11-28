@@ -1172,7 +1172,8 @@ async function fetchAiCatalogProducts({ keyword = "", budget = null, limit = 300
     "(p.is_active IS NULL OR p.is_active = 1)",
     "(p.status IS NULL OR UPPER(p.status) = 'ACTIVE')",
     "(ps.is_active IS NULL OR ps.is_active = 1)",
-    "(ps.status IS NULL OR UPPER(ps.status) = 'ACTIVE')"
+    "(ps.status IS NULL OR UPPER(ps.status) = 'ACTIVE')",
+    "COALESCE(ps.stock, 0) > 0"
   ];
 
   if (budget) {
@@ -1599,32 +1600,9 @@ function generalKnowledgeReply(message) {
   return "Mình có thể giải thích kiến thức PC theo cách ngắn gọn, dễ hiểu. Với câu hỏi này, bạn có thể xem nó như kiến thức nền để chọn linh kiện đúng hơn; nếu muốn mua sản phẩm cụ thể, hãy cho mình biết ngân sách và nhu cầu sử dụng.";
 }
 
-function getSynthesizedBuildByBudget(budget = 15000000, useCase = "gaming") {
-  const b = Number(budget) || 15000000;
-  if (b >= 25000000) {
-    return [
-      { id: 602, productId: 602, skuId: 602, componentType: "cpu", componentLabel: "CPU", name: "CPU Intel Core Ultra 7 270K Plus (Upto 5.3 GHz, LGA 1851)", price: 9890000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1591799264318-7e6ef8ddb7ea?w=400" },
-      { id: 725, productId: 725, skuId: 725, componentType: "mainboard", componentLabel: "MAINBOARD", name: "Mainboard Gigabyte B860M EAGLE PLUS WIFI 6E", price: 3690000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=400" },
-      { id: 456, productId: 456, skuId: 456, componentType: "ram", componentLabel: "RAM", name: "RAM Desktop Kingston Fury Beast 16GB (1x16GB) DDR5 5600MHz", price: 1390000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1562976540-1502c2145186?w=400" },
-      { id: 480, productId: 480, skuId: 480, componentType: "gpu", componentLabel: "GPU", name: "Card màn hình Asus DUAL RTX 4060 O8G V2", price: 7990000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1587202372775-e229f172b9d7?w=400" },
-      { id: 496, productId: 496, skuId: 496, componentType: "storage", componentLabel: "STORAGE", name: "Ổ Cứng SSD KINGSTON KC3000 512GB M.2 PCIe Gen4", price: 1090000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1597872200969-2b65d56bd16b?w=400" },
-      { id: 518, productId: 518, skuId: 518, componentType: "psu", componentLabel: "PSU", name: "Nguồn máy tính AIGO GB550 - 550W (80 Plus Bronze)", price: 1050000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1555680202-c86f0e12f086?w=400" },
-      { id: 539, productId: 539, skuId: 539, componentType: "case", componentLabel: "CASE", name: "Vỏ case KENOO ESPORT MK200 - Đen (mATX/Mid Tower)", price: 790000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1587202372634-32705e3bf49c?w=400" },
-      { id: 551, productId: 551, skuId: 551, componentType: "cooling", componentLabel: "COOLING", name: "Tản nhiệt khí ID-COOLING FROZN A620 PRO SE", price: 550000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1555680202-c86f0e12f086?w=400" }
-    ];
-  } else {
-    // 10tr - 20tr (Phổ thông & Esports: Core i5-12400F + H610 + RAM 16GB + RX 6500 XT / GTX 1650)
-    return [
-      { id: 402, productId: 402, skuId: 402, componentType: "cpu", componentLabel: "CPU", name: "CPU Intel Core i5-12400F (Up to 4.4Ghz, 6 Nhân 12 Luồng, LGA 1700)", price: 2890000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1591799264318-7e6ef8ddb7ea?w=400" },
-      { id: 430, productId: 430, skuId: 430, componentType: "mainboard", componentLabel: "MAINBOARD", name: "Mainboard Asus PRIME H610M-K D4", price: 1850000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=400" },
-      { id: 440, productId: 440, skuId: 440, componentType: "ram", componentLabel: "RAM", name: "RAM Desktop Kingston Fury Beast 16GB (1x16GB) DDR4 3200MHz", price: 850000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1562976540-1502c2145186?w=400" },
-      { id: 486, productId: 486, skuId: 486, componentType: "gpu", componentLabel: "GPU", name: "Card màn hình Asus DUAL-RX 6500 XT-O4G-V2", price: 3490000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1587202372775-e229f172b9d7?w=400" },
-      { id: 496, productId: 496, skuId: 496, componentType: "storage", componentLabel: "STORAGE", name: "Ổ Cứng SSD Kingston NV2 500GB M.2 PCIe Gen4", price: 850000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1597872200969-2b65d56bd16b?w=400" },
-      { id: 518, productId: 518, skuId: 518, componentType: "psu", componentLabel: "PSU", name: "Nguồn máy tính AIGO GB550 - 550W (80 Plus Bronze)", price: 1050000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1555680202-c86f0e12f086?w=400" },
-      { id: 539, productId: 539, skuId: 539, componentType: "case", componentLabel: "CASE", name: "Vỏ case KENOO ESPORT MK200 - Đen (mATX/Mid Tower)", price: 790000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1587202372634-32705e3bf49c?w=400" },
-      { id: 551, productId: 551, skuId: 551, componentType: "cooling", componentLabel: "COOLING", name: "Tản nhiệt khí ID-COOLING SE-214-XT", price: 450000, stock: 25, imageUrl: "https://images.unsplash.com/photo-1555680202-c86f0e12f086?w=400" }
-    ];
-  }
+function getSynthesizedBuildByBudget(_budget = 15000000, _useCase = "gaming") {
+  // Grounding policy: tuyệt đối không tự bịa danh sách linh kiện hardcode ngoài cơ sở dữ liệu kho hàng thật.
+  return [];
 }
 
 async function askDatabaseGroundedAdvisor(payload = {}) {

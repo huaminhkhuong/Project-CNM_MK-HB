@@ -2,11 +2,12 @@ const { query } = require("../../config/database");
 const { createError } = require("../../utils/service-helpers");
 const { getTableColumns } = require("../../utils/schema-helpers");
 const { checkDatabaseHealth } = require("../../services/test-connection.service");
-const { getRecentAuditLogs } = require("../../services/audit-log.service");
+const { getRecentAuditLogs, getPaginatedAuditLogs } = require("../../services/audit-log.service");
 const {
   VALID_ONLINE_PAYMENT_MODES,
   invalidatePaymentModeCache
 } = require("../../services/payment-mode.service");
+const { invalidateShippingFeeCache } = require("../orders/shipping-fee.service");
 const { env } = require("../../config/env");
 
 const DEFAULT_SETTINGS = [
@@ -15,6 +16,8 @@ const DEFAULT_SETTINGS = [
   { key: "support_phone", value: "0900000000", description: "Số điện thoại hỗ trợ" },
   { key: "online_payment_mode", value: "sandbox", description: "Chế độ thanh toán online: sandbox/mock/live" },
   { key: "shipping_mode", value: "mock", description: "Chế độ vận chuyển: mock/live" },
+  { key: "free_shipping_threshold", value: "5000000", description: "Ngưỡng miễn phí giao hàng (VNĐ)" },
+  { key: "default_shipping_fee", value: "30000", description: "Phí giao hàng tiêu chuẩn cho đơn dưới ngưỡng miễn phí (VNĐ)" },
   { key: "maintenance_mode", value: "off", description: "Bật/tắt chế độ bảo trì" },
   // Cấu hình linh hoạt Tài khoản ngân hàng & Thông tin Doanh nghiệp
   { key: "bank_name", value: "Techcombank", description: "Tên ngân hàng nhận chuyển khoản" },
@@ -140,6 +143,7 @@ async function updateSettings(payload = {}) {
   }
 
   invalidatePaymentModeCache();
+  invalidateShippingFeeCache();
 
   return getSettings();
 }
@@ -224,12 +228,26 @@ async function getSystemOverview() {
     countOrdersByPaymentStatus(["PENDING_GATEWAY", "AWAITING_ADMIN_CONFIRMATION", "PENDING_VERIFICATION", "PAID", "REJECTED"]),
     countWhereIfExists("product_skus", "stock <= 5 AND (status IS NULL OR status = 'ACTIVE')"),
     countWhereIfExists("orders", "status IN ('PENDING', 'PROCESSING')"),
-    countWhereIfExists("tickets", "assigned_to IS NULL AND status IN ('OPEN', 'IN_PROGRESS', 'WAITING_CUSTOMER')"),
+    countWhereIfExists("tickets", "assigned_to_id IS NULL AND status IN ('OPEN', 'IN_PROGRESS', 'WAITING_CUSTOMER')"),
     countWhereIfExists("tickets", "status IN ('OPEN', 'IN_PROGRESS', 'WAITING_CUSTOMER')"),
-    countWhereIfExists("warranties", "status IN ('SUBMITTED', 'UNDER_REVIEW', 'RECEIVED', 'PROCESSING')"),
+    countWhereIfExists("warranty_requests", "status IN ('RECEIVED', 'INSPECTING', 'REPAIRING', 'WAITING_PARTS', 'REPLACEMENT')"),
     getSettings(),
-    getRecentAuditLogs(12)
+    getRecentAuditLogs(50)
   ]);
+
+  let aiServiceUp = false;
+  let aiVectorsCount = 0;
+  try {
+    const aiUrl = process.env.AI_SERVICE_URL || "http://127.0.0.1:5001";
+    const aiResp = await fetch(`${aiUrl}/health`, { signal: AbortSignal.timeout(1500) });
+    if (aiResp.ok) {
+      const aiJson = await aiResp.json().catch(() => ({}));
+      aiServiceUp = true;
+      aiVectorsCount = Number(aiJson.chroma_vectors_count || aiJson.local_vectors_count || 0);
+    }
+  } catch {
+    aiServiceUp = false;
+  }
 
   return {
     health: {
@@ -240,6 +258,10 @@ async function getSystemOverview() {
       database: {
         status: dbHealth?.success ? "UP" : "DOWN",
         details: dbHealth
+      },
+      aiService: {
+        status: aiServiceUp ? "UP" : "DOWN",
+        vectorsCount: aiVectorsCount
       }
     },
     metrics: {
@@ -289,13 +311,20 @@ async function getPublicStoreInfo() {
     bankAccountNumber: activeEnv.sepayAccountNumber || map.bank_account_number || "8686868991",
     bankAccountHolder: activeEnv.sepayAccountName || map.bank_account_holder || "HỨA MINH KHƯƠNG",
     transferNotePrefix: activeEnv.sepayTransferPrefix || "PCMALL",
+    freeShippingThreshold: Number(map.free_shipping_threshold ?? 5000000),
+    defaultShippingFee: Number(map.default_shipping_fee ?? 30000),
     sepayAutoVerify: true
   };
+}
+
+async function getAuditLogs(options = {}) {
+  return getPaginatedAuditLogs(options);
 }
 
 module.exports = {
   getSettings,
   updateSettings,
   getSystemOverview,
-  getPublicStoreInfo
+  getPublicStoreInfo,
+  getAuditLogs
 };

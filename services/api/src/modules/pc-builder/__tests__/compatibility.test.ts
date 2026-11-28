@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import { xaiExplanationService } from "../xai-explanation.service";
+import { pcBuilderService } from "../pc-builder.service";
+import { prisma } from "../../../config/prisma";
+const { closePool } = require("../../../config/database");
 
 describe("Compatibility Engine & XAI Rules (COMP-001 -> COMP-010)", () => {
   // Test 1: COMP-001 Socket Mismatch (CPU AM5 + Mainboard AM4)
@@ -144,5 +147,91 @@ describe("Compatibility Engine & XAI Rules (COMP-001 -> COMP-010)", () => {
     assert.equal(report.summary.passedChecks, 1);
     assert.ok(report.checks.some((c: any) => c.severity === "BLOCKER"));
     assert.ok(report.checks.some((c: any) => c.severity === "WARNING"));
+  });
+});
+
+describe("PC Builder Engine Real Integration (DB Rules, Form Factor & RTX 5000 Bottleneck)", () => {
+  after(async () => {
+    try {
+      await prisma.$disconnect();
+    } catch {}
+    try {
+      await closePool();
+    } catch {}
+  });
+
+  it("suggestBuild(20tr, gaming) returns 3 compatible candidates with score >= 95 and realistic RTX 5000 bottleneck", async () => {
+    const result = await pcBuilderService.suggestBuild({
+      budget: 20000000,
+      useCase: "gaming"
+    });
+
+    const candidates = result?.candidates || {};
+    const keys = ["budgetSafe", "bestValue", "bestPerformance"] as const;
+
+    for (const key of keys) {
+      const cand = candidates[key];
+      assert.ok(cand, `Missing candidate ${key}`);
+      const report = cand.compatibilityReport || cand.compatibility;
+      assert.ok(report, `Missing compatibilityReport for ${key}`);
+      const score = Number(report.score ?? report.compatibilityScore ?? 0);
+      assert.ok(
+        score >= 95,
+        `Candidate ${key} expected compatibility score >= 95, got ${score} (failed: ${JSON.stringify(
+          (report.checks || []).filter((c: any) => !c.ok)
+        )})`
+      );
+      assert.equal(report.compatible, true, `Candidate ${key} must be compatible`);
+      assert.notEqual(
+        report.buildReadiness,
+        "BLOCKED",
+        `Candidate ${key} must not be BLOCKED`
+      );
+      const dbRuleChecks = (report.checks || []).filter((c: any) =>
+        String(c.key || "").startsWith("rule_")
+      );
+      assert.ok(
+        dbRuleChecks.length > 0,
+        `Candidate ${key} must evaluate live compatibility_rules from DB (dbRuleChecks.length > 0)`
+      );
+    }
+  });
+
+  it("calculateDynamicBottleneck scores RTX 5060 Ti accurately and respects 1080p vs 4K physics", () => {
+    const cpu = { name: "Intel Core Ultra 5 245K" };
+    const gpu = { name: "Asus DUAL RTX 5060 Ti 16G OC" };
+
+    const bn1080 = pcBuilderService.calculateDynamicBottleneck(cpu, gpu, "1080p");
+    const bn4k = pcBuilderService.calculateDynamicBottleneck(cpu, gpu, "4k");
+
+    assert.ok(
+      bn1080.bottleneckPercentage < 25,
+      `Expected RTX 5060 Ti + Core Ultra 5 at 1080p to be well-balanced (<25%), got ${bn1080.bottleneckPercentage}%`
+    );
+    assert.ok(
+      bn4k.bottleneckComponent === "GPU" && bn4k.bottleneckPercentage > bn1080.bottleneckPercentage,
+      `Expected 4K to shift load toward GPU (4K=${bn4k.bottleneckComponent}:${bn4k.bottleneckPercentage}%, 1080p=${bn1080.bottleneckPercentage}%)`
+    );
+  });
+
+  it("getMainboardFormFactor correctly classifies H610M-K as Micro-ATX", () => {
+    assert.equal(pcBuilderService.getMainboardFormFactor({ name: "Mainboard ASUS Prime H610M-K DDR4" }), "Micro-ATX");
+    assert.equal(pcBuilderService.getMainboardFormFactor({ name: "Mainboard MSI PRO B760M-A WIFI" }), "Micro-ATX");
+  });
+
+  it("findReplacementProducts enforces currentBuild socket and RAM constraints", async () => {
+    const replacements = await pcBuilderService.findReplacementProducts(
+      { category: "ram", priceMin: 500000, priceMax: 5000000 },
+      { mainboard: { name: "Mainboard MSI PRO B760M-A DDR5", specs: [{ name: "Chuẩn RAM", value: "DDR5" }] } }
+    );
+    assert.ok(Array.isArray(replacements));
+    if (replacements.length > 0) {
+      assert.ok(
+        replacements.every((r: any) =>
+          String(r.specs?.ram_type || r.specs?.["chuẩn ram"] || r.name || "").toUpperCase().includes("DDR5")
+        ),
+        "All replacement RAM modules must match currentBuild mainboard DDR5 constraint"
+      );
+    }
   });
 });

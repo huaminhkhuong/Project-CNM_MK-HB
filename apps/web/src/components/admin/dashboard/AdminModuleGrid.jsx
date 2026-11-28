@@ -78,6 +78,33 @@ export const DEFAULT_ADMIN_MODULES = [
     status: "Helpdesk"
   },
   {
+    to: "/admin/coupons",
+    title: "Mã giảm giá",
+    desc: "Tạo, chỉnh sửa và bật/tắt voucher khuyến mãi.",
+    icon: "CPN",
+    metricKey: "orders",
+    accent: "emerald",
+    status: "Khuyến mãi"
+  },
+  {
+    to: "/admin/ai-config",
+    title: "Quản trị AI & RAG",
+    desc: "Rule lọc, Prompt, Failover LLM và tài liệu RAG.",
+    icon: "AI",
+    metricKey: "compatibilityRules",
+    accent: "indigo",
+    status: "AI Studio"
+  },
+  {
+    to: "/admin/payment-approval",
+    title: "Duyệt thanh toán",
+    desc: "Đối soát chứng từ chuyển khoản và phê duyệt.",
+    icon: "PAY",
+    metricKey: "payments",
+    accent: "amber",
+    status: "Tài chính"
+  },
+  {
     to: "/tech/warranties",
     title: "Duyệt bảo hành",
     desc: "Hồ sơ bảo hành và tiến trình kỹ thuật.",

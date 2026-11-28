@@ -18,6 +18,8 @@ import { apiRouter } from "./routes";
 
 export function createApp() {
   const app = express();
+  // Trust first reverse proxy (Nginx) so req.ip & rate limiters reflect real client IP
+  app.set("trust proxy", 1);
   const uploadsDirs = [
     path.resolve(process.cwd(), "services/api/uploads"),
     path.resolve(__dirname, "../uploads")
@@ -87,9 +89,22 @@ export function createApp() {
     next();
   });
   
-  // Serve static files from uploads and data directories.
+  // Serve static files from uploads with strict anti-XSS headers (prevent SVG/HTML script execution).
+  const safeInlineUploadExts = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".mp4", ".webm", ".mov"]);
   uploadsDirs.forEach((uploadsDir) => {
-    app.use("/uploads", express.static(uploadsDir));
+    app.use(
+      "/uploads",
+      express.static(uploadsDir, {
+        setHeaders: (res, filePath) => {
+          res.setHeader("X-Content-Type-Options", "nosniff");
+          res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+          const ext = path.extname(filePath).toLowerCase();
+          if (!safeInlineUploadExts.has(ext)) {
+            res.setHeader("Content-Disposition", "attachment");
+          }
+        }
+      })
+    );
   });
   const dataDirCandidates = [
     path.resolve(process.cwd(), "data"),

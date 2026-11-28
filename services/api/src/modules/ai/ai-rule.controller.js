@@ -1,6 +1,30 @@
 const { sendSuccess } = require("../../utils/api-response");
 const asyncHandler = require("../../utils/async-handler");
 const { aiRuleService } = require("./ai-rule.service");
+const { aiQueryCache } = require("./ai-cache.service");
+const { recordAuditLog } = require("../../services/audit-log.service");
+
+function invalidateAiCache() {
+  try {
+    if (aiQueryCache && typeof aiQueryCache.clear === "function") {
+      aiQueryCache.clear();
+    }
+  } catch (_err) {
+    // non-fatal
+  }
+}
+
+async function logAiConfigAudit(req, action, entityId, description, metadata = null) {
+  await recordAuditLog({
+    actorUserId: req.user?.userId || req.user?.id || null,
+    actorRole: req.user?.role || "ADMIN",
+    action,
+    entityType: "AI_CONFIG",
+    entityId,
+    description,
+    metadata
+  });
+}
 
 function ensureAdminUser(req, res) {
   const role = String(req.user?.role || "").trim().toUpperCase();
@@ -35,6 +59,8 @@ const getRule = asyncHandler(async (req, res) => {
 const createRule = asyncHandler(async (req, res) => {
   if (!ensureAdminUser(req, res)) return;
   const newRule = aiRuleService.createRule(req.body || {});
+  invalidateAiCache();
+  await logAiConfigAudit(req, "AI_RULE_CREATED", newRule?.id, `Created AI rule ${newRule?.name || newRule?.id}`);
   return sendSuccess(res, "Tạo quy tắc lọc AI thành công", newRule, 201);
 });
 
@@ -44,6 +70,8 @@ const updateRule = asyncHandler(async (req, res) => {
   if (!updated) {
     return res.status(404).json({ success: false, message: "Quy tắc không tồn tại" });
   }
+  invalidateAiCache();
+  await logAiConfigAudit(req, "AI_RULE_UPDATED", req.params.id, `Updated AI rule ${updated?.name || req.params.id}`);
   return sendSuccess(res, "Cập nhật quy tắc lọc AI thành công", updated);
 });
 
@@ -53,6 +81,8 @@ const deleteRule = asyncHandler(async (req, res) => {
   if (!success) {
     return res.status(404).json({ success: false, message: "Quy tắc không tồn tại" });
   }
+  invalidateAiCache();
+  await logAiConfigAudit(req, "AI_RULE_DELETED", req.params.id, `Deleted AI rule ${req.params.id}`);
   return sendSuccess(res, "Xóa quy tắc lọc AI thành công");
 });
 
@@ -62,6 +92,8 @@ const toggleRule = asyncHandler(async (req, res) => {
   if (!rule) {
     return res.status(404).json({ success: false, message: "Quy tắc không tồn tại" });
   }
+  invalidateAiCache();
+  await logAiConfigAudit(req, "AI_RULE_TOGGLED", req.params.id, `Toggled AI rule ${req.params.id} -> active=${rule.isActive}`);
   return sendSuccess(res, `Đã ${rule.isActive ? "kích hoạt" : "vô hiệu hóa"} quy tắc thành công`, rule);
 });
 
@@ -74,6 +106,8 @@ const getPrompts = asyncHandler(async (req, res) => {
 const updatePrompt = asyncHandler(async (req, res) => {
   if (!ensureAdminUser(req, res)) return;
   const updated = aiRuleService.updatePrompt(req.params.scope, req.body || {});
+  invalidateAiCache();
+  await logAiConfigAudit(req, "AI_PROMPT_UPDATED", req.params.scope, `Updated AI system prompt for scope ${req.params.scope}`);
   return sendSuccess(res, "Cập nhật cấu hình prompt thành công", updated);
 });
 
@@ -94,6 +128,8 @@ const getSystemConfig = asyncHandler(async (req, res) => {
 const updateSystemConfig = asyncHandler(async (req, res) => {
   if (!ensureAdminUser(req, res)) return;
   const updated = aiRuleService.updateSystemConfig(req.body || {});
+  invalidateAiCache();
+  await logAiConfigAudit(req, "AI_SYSTEM_CONFIG_UPDATED", "llm-system-config", `Updated AI provider/model config (provider=${updated?.provider || "default"})`);
   const estimation = aiRuleService.getTokenEstimation();
   return sendSuccess(res, "Cập nhật cấu hình hệ thống AI thành công", { config: updated, estimation });
 });

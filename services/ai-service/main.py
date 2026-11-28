@@ -1,6 +1,7 @@
 import os
 import sys
 import re
+import hmac
 import json
 import shutil
 from pathlib import Path
@@ -8,9 +9,20 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+def verify_internal_key(x_internal_key: Optional[str] = Header(default=None)):
+    expected = (os.environ.get("AI_SERVICE_INTERNAL_KEY") or "").strip()
+    is_prod = (os.environ.get("APP_ENV") or os.environ.get("NODE_ENV") or "").strip().lower() == "production"
+    if not expected:
+        if is_prod:
+            raise HTTPException(status_code=503, detail="AI_SERVICE_INTERNAL_KEY is not configured in production.")
+        return
+    provided = (x_internal_key or "").strip()
+    if not provided or not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized internal AI service request.")
 
 # Thiết lập sys.path
 BASE_DIR = Path(__file__).resolve().parent
@@ -92,6 +104,22 @@ async def lifespan(app: FastAPI):
 
     # Khởi tạo Hybrid RRF Engine
     hybrid_engine = HybridRAGEngine(chroma_store, all_cached_docs, rrf_k=60)
+
+    # Warmup Local ONNX embedding model (all-MiniLM-L6-v2) lúc khởi động
+    # tránh trễ ~22s tải 79MB ONNX ở request chat/RAG đầu tiên (vượt timeout 4s của Node)
+    try:
+        print("🔥 [AI-Service] Đang warmup mô hình Local ONNX (all-MiniLM-L6-v2)...")
+        if chroma_store and getattr(chroma_store, "local_collection", None) is not None:
+            if chroma_store.local_collection.count() > 0:
+                chroma_store.local_collection.query(query_texts=["warmup pc mall hardware"], n_results=1)
+            else:
+                embed_fn = getattr(chroma_store.local_collection, "_embedding_function", None)
+                if callable(embed_fn):
+                    embed_fn(["warmup pc mall hardware"])
+        print("✅ [AI-Service] Local ONNX embedding model đã sẵn sàng trong bộ nhớ!")
+    except Exception as warmup_err:
+        print(f"⚠️ [AI-Service] Warmup Local ONNX không hoàn tất (sẽ tự tải khi cần): {warmup_err}")
+
     print("🎉 [AI-Service] RAG Microservice đã sẵn sàng phục vụ tại cổng 5001!")
     yield
     print("🛑 [AI-Service] Đang tắt service...")
@@ -103,12 +131,18 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+_raw_origins = (os.environ.get("AI_ALLOWED_ORIGINS") or os.environ.get("ALLOWED_ORIGINS") or "").strip()
+_allowed_origins = (
+    [o.strip() for o in _raw_origins.split(",") if o.strip()]
+    if _raw_origins
+    else ["http://localhost:4000", "http://127.0.0.1:4000", "http://localhost:5173", "http://127.0.0.1:5173"]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Internal-Key"],
 )
 
 # ----------------- SCHEMAS -----------------
@@ -147,12 +181,24 @@ class BuildRecommendRequest(BaseModel):
 
 @app.get("/health")
 def health():
+    store_status = chroma_store.get_status() if chroma_store else {
+        "active_collection": None,
+        "active_vectors_count": 0,
+        "gemini_vectors_count": 0,
+        "local_vectors_count": 0,
+        "is_using_gemini": False,
+        "embedding_model": "uninitialized"
+    }
     return {
-        "status": "healthy",
+        "status": "healthy" if store_status["active_vectors_count"] > 0 else "degraded",
         "service": "pcmall-ai-rag-service",
         "scope": "Exclusively serves Chatbot and Smart PC Builder",
         "total_documents_cached": len(all_cached_docs),
-        "chroma_vectors_count": chroma_store.collection.count() if chroma_store else 0,
+        "chroma_vectors_count": store_status["active_vectors_count"],
+        "active_collection": store_status["active_collection"],
+        "gemini_vectors_count": store_status["gemini_vectors_count"],
+        "local_vectors_count": store_status["local_vectors_count"],
+        "embedding_model": store_status["embedding_model"],
         "features": [
             "Admin Document Management (Upload PDF/MD/TXT, Recursive Chunking)",
             "Hybrid Search (Dense Cosine + Sparse BM25Okapi)",
@@ -163,7 +209,7 @@ def health():
         ]
     }
 
-@app.post("/v1/rag/retrieve", response_model=RetrieveResponse)
+@app.post("/v1/rag/retrieve", response_model=RetrieveResponse, dependencies=[Depends(verify_internal_key)])
 def retrieve(req: RetrieveRequest):
     if not hybrid_engine:
         raise HTTPException(status_code=503, detail="Hệ thống AI Service đang khởi tạo, vui lòng thử lại sau giây lát.")
@@ -172,11 +218,12 @@ def retrieve(req: RetrieveRequest):
     if not query:
         raise HTTPException(status_code=400, detail="Câu hỏi không được để trống.")
 
-    # Thực thi Hybrid Search + RRF + U-shaped
+    # Thực thi Hybrid Search + RRF + U-shaped (hỗ trợ cả doc_type & target_service)
     top_docs = hybrid_engine.search(
-        query=query, 
-        top_k=req.top_k, 
-        doc_type_filter=req.doc_type
+        query=query,
+        top_k=req.top_k,
+        doc_type_filter=req.doc_type,
+        target_service=req.target_service
     )
 
     grounded_prompt = build_grounded_system_prompt(top_docs)
@@ -229,7 +276,7 @@ def do_reindex_task():
         reindex_status["message"] = f"Lỗi tái lập chỉ mục: {str(e)}"
         print(f"❌ [Reindex Error] {e}")
 
-@app.post("/v1/rag/reindex")
+@app.post("/v1/rag/reindex", dependencies=[Depends(verify_internal_key)])
 def trigger_reindex(background_tasks: BackgroundTasks):
     """Đồng bộ và vector hóa lại toàn bộ tài liệu trong background task để tránh timeout."""
     global reindex_status
@@ -250,8 +297,8 @@ def trigger_reindex(background_tasks: BackgroundTasks):
         "chroma_vectors": chroma_store.collection.count() if chroma_store else 0
     }
 
-@app.get("/v1/rag/reindex/status")
-@app.get("/v1/rag/reindex-status")
+@app.get("/v1/rag/reindex/status", dependencies=[Depends(verify_internal_key)])
+@app.get("/v1/rag/reindex-status", dependencies=[Depends(verify_internal_key)])
 def get_reindex_status():
     global reindex_status
     return {
@@ -263,7 +310,7 @@ def get_reindex_status():
 
 # ----------------- ADMIN DOCUMENT MANAGEMENT ENDPOINTS -----------------
 
-@app.get("/v1/rag/documents")
+@app.get("/v1/rag/documents", dependencies=[Depends(verify_internal_key)])
 def list_documents():
     """Liệt kê toàn bộ tài liệu tri thức mở rộng trong thư mục data/docs/."""
     processor = DocumentProcessor(chunk_size=600, chunk_overlap=120)
@@ -321,7 +368,7 @@ def list_documents():
         "documents": sorted(docs, key=lambda x: x["uploadedAt"], reverse=True)
     }
 
-@app.post("/v1/rag/documents/upload")
+@app.post("/v1/rag/documents/upload", dependencies=[Depends(verify_internal_key)])
 async def upload_document(
     file: UploadFile = File(...),
     target_service: str = Form("all") # 'chatbot', 'pc_builder', 'all'
@@ -341,13 +388,19 @@ async def upload_document(
             detail="Định dạng file không được hỗ trợ. Chỉ chấp nhận các file: .pdf, .md, .txt"
         )
 
+    # Giới hạn dung lượng 15MB chống disk-fill khi bị truy cập trực tiếp
+    MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+    raw_bytes = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(raw_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Tài liệu vượt quá giới hạn tối đa 15MB.")
+
     # Đảm bảo tên file an toàn
     safe_name = re.sub(r"[^\w\.-]", "_", filename)
     target_path = DOCS_DIR / safe_name
 
     # Ghi nội dung file
     with open(target_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(raw_bytes)
 
     # Ghi sidecar metadata
     meta_path = target_path.with_suffix(".json")
@@ -402,7 +455,7 @@ async def upload_document(
         }
     }
 
-@app.delete("/v1/rag/documents/{filename}")
+@app.delete("/v1/rag/documents/{filename}", dependencies=[Depends(verify_internal_key)])
 def delete_document(filename: str):
     """Xóa tài liệu khỏi data/docs/ và cập nhật lại Vector DB."""
     safe_name = Path(filename).name
@@ -433,7 +486,7 @@ def delete_document(filename: str):
         "remainingVectors": chroma_store.collection.count()
     }
 
-@app.get("/v1/rag/documents/{filename}/chunks")
+@app.get("/v1/rag/documents/{filename}/chunks", dependencies=[Depends(verify_internal_key)])
 def preview_document_chunks(filename: str):
     """Xem trước các chunks đã trích xuất từ 1 tài liệu để kiểm tra chất lượng phân đoạn."""
     safe_name = Path(filename).name
@@ -495,22 +548,71 @@ def preview_document_chunks(filename: str):
         "chunks": formatted_chunks
     }
 
-@app.get("/v1/rag/models")
+@app.get("/v1/rag/models", dependencies=[Depends(verify_internal_key)])
 def get_embedding_models_info():
     """
-    Trả về thông tin chi tiết về các mô hình Vector Embedding và hồ sơ tài nguyên
-    được tối ưu cho cấu hình máy chủ 4GB RAM + 2-4GB Swap.
+    Trả về thông tin thực tế về mô hình Vector Embedding đang hoạt động, số lượng vector thực
+    trong ChromaDB và hồ sơ tài nguyên máy chủ.
     """
-    return {
-        "currentModel": {
-            "name": "models/gemini-embedding-001 (Google Embedding API)",
+    store_status = chroma_store.get_status() if chroma_store else {
+        "active_collection": None,
+        "active_vectors_count": 0,
+        "gemini_vectors_count": 0,
+        "local_vectors_count": 0,
+        "is_using_gemini": False,
+        "gemini_configured": False,
+        "embedding_model": "uninitialized"
+    }
+    using_gemini = bool(store_status["is_using_gemini"])
+    active_count = int(store_status["active_vectors_count"])
+    local_count = int(store_status["local_vectors_count"])
+    gemini_count = int(store_status["gemini_vectors_count"])
+
+    if using_gemini:
+        current_model = {
+            "name": f"{store_status['embedding_model']} (Google Embedding API)",
             "dimension": 3072,
             "type": "Cloud API (Google TPU)",
-            "ramUsage": "0MB trên server (Toàn bộ Cloud TPU Google tính toán)",
+            "ramUsage": "0MB trên server (Cloud TPU Google)",
             "latency": "120 - 250ms / batch",
             "rateLimit": "Google Gemini API Standard",
-            "status": "Active (Đang hoạt động)"
-        },
+            "activeCollection": store_status["active_collection"],
+            "vectorsCount": active_count,
+            "geminiVectorsCount": gemini_count,
+            "localVectorsCount": local_count,
+            "status": f"Active ({active_count} vectors)"
+        }
+    elif local_count > 0:
+        current_model = {
+            "name": "sentence-transformers/all-MiniLM-L6-v2 (Local ONNX Fallback)",
+            "dimension": 384,
+            "type": "Local ONNX Runtime (Offline)",
+            "ramUsage": "~150MB",
+            "latency": "5 - 15ms / query",
+            "rateLimit": "Không giới hạn (Offline)",
+            "activeCollection": "pcmall_knowledge",
+            "vectorsCount": local_count,
+            "geminiVectorsCount": gemini_count,
+            "localVectorsCount": local_count,
+            "status": f"Fallback Local ONNX ({local_count} vectors)"
+        }
+    else:
+        current_model = {
+            "name": store_status["embedding_model"],
+            "dimension": 3072 if store_status["gemini_configured"] else 384,
+            "type": "Uninitialized",
+            "ramUsage": "0MB",
+            "latency": "N/A",
+            "rateLimit": "N/A",
+            "activeCollection": store_status["active_collection"],
+            "vectorsCount": 0,
+            "geminiVectorsCount": gemini_count,
+            "localVectorsCount": local_count,
+            "status": "Degraded (0 vectors — cần chạy Reindex)"
+        }
+
+    return {
+        "currentModel": current_model,
         "availableModels": [
             {
                 "id": "gemini_embedding_001",
@@ -568,10 +670,10 @@ def get_embedding_models_info():
 
 # ----------------- DYNAMIC PC BUILDER QUESTIONNAIRE (100% LLM GENERATED) -----------------
 
-@app.post("/v1/rag/pc-builder/questions")
+@app.post("/v1/rag/pc-builder/questions", dependencies=[Depends(verify_internal_key)])
 def post_builder_questions(req: QuestionRequest):
     """
-    Sinh câu hỏi tương tác trắc nghiệm động 100% qua Gemini 3.5 Flash-Lite (kèm fallback 3.1 Flash-Lite)
+    Sinh câu hỏi tương tác trắc nghiệm động qua LLM (Gemini 2.5 Flash / 2.0 Flash + fallback offline)
     dựa trên mục đích, ngân sách và các câu trả lời từ các vòng trước.
     """
     return generate_dynamic_questions(
@@ -581,7 +683,7 @@ def post_builder_questions(req: QuestionRequest):
         step=req.step or 1
     )
 
-@app.get("/v1/rag/pc-builder/questions")
+@app.get("/v1/rag/pc-builder/questions", dependencies=[Depends(verify_internal_key)])
 def get_builder_questions(purpose: str = "gaming", budget: int = 20000000, step: int = 1):
     """
     Endpoint tương thích ngược GET cho khảo sát nhanh.

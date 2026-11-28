@@ -34,49 +34,6 @@ function toNumber(value) {
   return Number(value || 0);
 }
 
-function buildRevenueSeries(metrics) {
-  const base = Math.max(8, toNumber(metrics.orders));
-  const productWeight = Math.max(1, Math.round(toNumber(metrics.products) * 0.16));
-  const factors = [0.78, 0.9, 0.86, 1.05, 1.14, 1.02, 1.22];
-  const now = new Date();
-
-  return factors.map((factor, index) => {
-    const date = new Date(now);
-    date.setDate(now.getDate() - (6 - index));
-
-    return {
-      label: `${date.getDate()}/${date.getMonth() + 1}`,
-      value: Math.round((base * factor + productWeight) * 1200000)
-    };
-  });
-}
-
-function buildOrderStatusSeries(metrics) {
-  const total = Math.max(toNumber(metrics.orders), 1);
-  const pending = Math.max(1, Math.round(total * 0.22));
-  const processing = Math.max(1, Math.round(total * 0.3));
-  const shipping = Math.max(1, Math.round(total * 0.18));
-  const completed = Math.max(1, total - pending - processing - shipping);
-
-  return [
-    { label: "Chờ xử lý", value: pending, tone: "amber" },
-    { label: "Đang xử lý", value: processing, tone: "blue" },
-    { label: "Đang giao", value: shipping, tone: "violet" },
-    { label: "Hoàn tất", value: completed, tone: "emerald" }
-  ];
-}
-
-function calculateTrend(current, divisor = 10) {
-  const value = Math.max(0, Number(current || 0));
-  const baseline = Math.max(1, Math.round(value * (1 - 1 / divisor)));
-  const diff = value - baseline;
-
-  return {
-    value: Math.abs(Math.round((diff / baseline) * 100)),
-    positive: diff >= 0
-  };
-}
-
 function getSetting(settingsMap, key, fallback = "Chưa cấu hình") {
   const value = settingsMap?.[key];
   return value === undefined || value === null || value === "" ? fallback : value;
@@ -153,9 +110,11 @@ function AdminKpiGrid({ loading, kpis, activeKey, onKpiClick }) {
         >
           <div className="admin-command-kpi__top">
             <span className={`admin-command-kpi__icon admin-command-kpi__icon--${kpi.accent}`}>{kpi.icon}</span>
-            <span className={`admin-command-trend admin-command-trend--${kpi.trend.positive ? "up" : "down"}`}>
-              {kpi.trend.positive ? "+" : "-"}{kpi.trend.value}%
-            </span>
+            {kpi.trend ? (
+              <span className={`admin-command-trend admin-command-trend--${kpi.trend.positive ? "up" : "down"}`}>
+                {kpi.trend.positive ? "+" : "-"}{kpi.trend.value}%
+              </span>
+            ) : null}
           </div>
           <div>
             <strong>{kpi.value}</strong>
@@ -240,32 +199,20 @@ export function AdminDashboardPage() {
     [settings]
   );
 
-  const revenueSeries = useMemo(() => buildRevenueSeries(metrics), [metrics]);
-  const orderStatusSeries = useMemo(() => buildOrderStatusSeries(metrics), [metrics]);
   const reportSummary = salesReport?.summary || {};
 
   const apiUp = health?.api?.status === "UP";
   const dbUp = health?.database?.status === "UP";
+  const aiUp = health?.aiService?.status === "UP";
+  const aiVectors = toNumber(health?.aiService?.vectorsCount);
   const paymentMode = String(getSetting(settingsMap, "online_payment_mode", "sandbox")).toLowerCase();
   const shippingMode = String(getSetting(settingsMap, "shipping_mode", "mock")).toLowerCase();
-  const monthlyRevenue = reportSummary.revenue ?? revenueSeries[revenueSeries.length - 1]?.value ?? 0;
-  const pendingPayments = toNumber(metrics.pendingPaymentApprovals ?? metrics.bankTransferOrders);
-  const pendingTickets =
-    metrics.pendingTickets !== undefined
-      ? toNumber(metrics.pendingTickets)
-      : Math.max(0, toNumber(metrics.tickets) - Math.round(toNumber(metrics.tickets) * 0.45));
-  const lowStockCount =
-    metrics.lowStockSkus !== undefined
-      ? toNumber(metrics.lowStockSkus)
-      : Math.max(0, Math.round(toNumber(metrics.products) * 0.04));
-  const pendingOrderCount =
-    metrics.pendingOrders !== undefined
-      ? toNumber(metrics.pendingOrders)
-      : orderStatusSeries[0]?.value || 0;
-  const unassignedTicketCount =
-    metrics.unassignedTickets !== undefined
-      ? toNumber(metrics.unassignedTickets)
-      : Math.max(0, Math.round(pendingTickets * 0.35));
+  const monthlyRevenue = toNumber(reportSummary.revenue ?? 0);
+  const pendingPayments = toNumber(metrics.pendingPaymentApprovals ?? 0);
+  const pendingTickets = toNumber(metrics.pendingTickets ?? 0);
+  const lowStockCount = toNumber(metrics.lowStockSkus ?? 0);
+  const pendingOrderCount = toNumber(metrics.pendingOrders ?? 0);
+  const unassignedTicketCount = toNumber(metrics.unassignedTickets ?? 0);
   const updateReportFilter = (key, value) => {
     setReportFilters((current) => ({ ...current, [key]: value }));
   };
@@ -278,19 +225,27 @@ export function AdminDashboardPage() {
     }
   };
 
+  const paymentHealthy = paymentMode === "sandbox" || paymentMode === "live";
   const healthItems = [
     { label: "API", status: apiUp ? "Hoạt động" : "Gián đoạn", tone: apiUp ? "success" : "danger" },
     { label: "Cơ sở dữ liệu", status: dbUp ? "Hoạt động" : "Gián đoạn", tone: dbUp ? "success" : "danger" },
-    { label: "Thanh toán", status: paymentMode === "sandbox" || paymentMode === "live" ? "Sẵn sàng" : "Cần kiểm tra", tone: "success" },
-    { label: "Dịch vụ AI", status: "Sẵn sàng", tone: "success" }
+    { label: "Thanh toán", status: paymentHealthy ? `Sẵn sàng (${paymentMode})` : "Chế độ thử nghiệm", tone: paymentHealthy ? "success" : "warning" },
+    {
+      label: "Dịch vụ AI",
+      status: aiUp
+        ? aiVectors > 0
+          ? `Hoạt động (${aiVectors} vectors)`
+          : "Đang nạp chỉ mục (0 vectors)"
+        : "Ngoại tuyến (Fallback)",
+      tone: aiUp && aiVectors > 0 ? "success" : "warning"
+    }
   ];
 
   const kpis = [
     {
       label: "Người dùng",
       value: formatAdminNumber(metrics.users),
-      hint: "Tài khoản toàn hệ thống",
-      trend: calculateTrend(metrics.users, 8),
+      hint: "Tài khoản thực trong DB",
       icon: "US",
       accent: "blue",
       to: "/admin/users"
@@ -299,7 +254,6 @@ export function AdminDashboardPage() {
       label: "Sản phẩm",
       value: formatAdminNumber(metrics.products),
       hint: "Catalog đang quản lý",
-      trend: calculateTrend(metrics.products, 10),
       icon: "PR",
       accent: "violet",
       to: "/admin/products"
@@ -307,8 +261,7 @@ export function AdminDashboardPage() {
     {
       label: "Đơn hàng",
       value: formatAdminNumber(metrics.orders),
-      hint: "Đơn trong hệ thống",
-      trend: calculateTrend(metrics.orders, 7),
+      hint: `${formatAdminNumber(pendingOrderCount)} chờ / đang xử lý`,
       icon: "OD",
       accent: "indigo",
       to: "/staff/orders"
@@ -316,8 +269,7 @@ export function AdminDashboardPage() {
     {
       label: "Doanh thu tháng",
       value: formatCurrency(monthlyRevenue),
-      hint: "Theo bộ lọc báo cáo",
-      trend: calculateTrend(monthlyRevenue, 9),
+      hint: "Theo báo cáo doanh thu thực",
       icon: "RV",
       accent: "emerald",
       key: "salesReport",
@@ -326,8 +278,7 @@ export function AdminDashboardPage() {
     {
       label: "Ticket kỹ thuật",
       value: formatAdminNumber(metrics.tickets),
-      hint: `${formatAdminNumber(pendingTickets)} đang mở`,
-      trend: calculateTrend(metrics.tickets, 6),
+      hint: `${formatAdminNumber(pendingTickets)} đang mở · ${formatAdminNumber(unassignedTicketCount)} chưa nhận`,
       icon: "TK",
       accent: "amber",
       to: "/tech/tickets"
@@ -336,7 +287,6 @@ export function AdminDashboardPage() {
       label: "Thanh toán chuyển khoản",
       value: formatAdminNumber(pendingPayments),
       hint: `Chờ duyệt (${formatAdminNumber(metrics.bankTransferOrders ?? pendingPayments)} tổng QR)`,
-      trend: calculateTrend(pendingPayments, 5),
       icon: "PM",
       accent: "rose",
       to: "/admin/payment-approval"

@@ -53,6 +53,7 @@ export const routeConfig = {
     skus: "/admin/skus",
     compatibilityRules: "/admin/compatibility-rules",
     users: "/admin/users",
+    coupons: "/admin/coupons",
     paymentApproval: "/admin/payment-approval",
     aiConfig: "/admin/ai-config"
   }

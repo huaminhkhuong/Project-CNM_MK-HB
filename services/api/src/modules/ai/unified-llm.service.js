@@ -22,6 +22,7 @@ class UnifiedLlmService {
       ollama: config.providerKeys?.ollama || ""
     };
     const initialProvider = String(config.provider !== undefined ? config.provider : (env.llmProvider || "gemini")).toLowerCase();
+    this.explicitOffline = config.apiKey === "" && !config.providerKeys;
     this.config = {
       provider: initialProvider,
       apiKey: config.apiKey !== undefined ? config.apiKey : (providerKeys[initialProvider] || env.llmApiKey || env.geminiApiKey || env.groqApiKey || ""),
@@ -42,16 +43,52 @@ class UnifiedLlmService {
     if (p === "openai") return "gpt-4o-mini";
     if (p === "deepseek") return "deepseek-chat";
     if (p === "ollama") return "qwen2.5:7b";
-    return "gemini-3.5-flash-lite";
+    return "gemini-2.5-flash";
+  }
+
+  getProviderCircuitState(provider) {
+    if (!this.providerCircuits) this.providerCircuits = new Map();
+    const key = String(provider || "gemini").toLowerCase();
+    if (!this.providerCircuits.has(key)) {
+      this.providerCircuits.set(key, { failures: 0, openUntil: 0 });
+    }
+    return this.providerCircuits.get(key);
+  }
+
+  isProviderCircuitOpen(provider) {
+    const state = this.getProviderCircuitState(provider);
+    if (state.openUntil <= 0) return false;
+    if (Date.now() >= state.openUntil) {
+      state.openUntil = 0;
+      state.failures = 0;
+      return false;
+    }
+    return true;
+  }
+
+  recordProviderSuccess(provider) {
+    const state = this.getProviderCircuitState(provider);
+    state.failures = 0;
+    state.openUntil = 0;
+  }
+
+  recordProviderFailure(provider) {
+    const state = this.getProviderCircuitState(provider);
+    state.failures += 1;
+    if (state.failures >= 3) {
+      state.openUntil = Date.now() + 60_000;
+    }
   }
 
   resolveApiKeyForProvider(provider) {
+    if (this.explicitOffline) return "";
     const p = String(provider || "gemini").toLowerCase();
     if (p === "ollama") return "";
     const keys = this.config.providerKeys || {};
     if (keys[p]) return keys[p];
-    if (p === String(this.config.provider || "").toLowerCase() && this.config.apiKey) {
-      return this.config.apiKey;
+    if (p === String(this.config.provider || "").toLowerCase()) {
+      if (this.config.apiKey === "") return "";
+      if (this.config.apiKey) return this.config.apiKey;
     }
     if (p === "gemini") return process.env.GEMINI_API_KEY || "";
     if (p === "groq") return process.env.GROQ_API_KEY || "";
@@ -61,6 +98,7 @@ class UnifiedLlmService {
   }
 
   getExecutionChain() {
+    if (this.explicitOffline) return [];
     const primaryProvider = String(this.config.provider || "gemini").toLowerCase();
     const primaryKey = this.resolveApiKeyForProvider(primaryProvider);
     const chain = [];
@@ -70,6 +108,7 @@ class UnifiedLlmService {
       const p = String(provider || "").toLowerCase().trim();
       if (!p || seen.has(p)) return;
       if (p !== "ollama" && !apiKey) return;
+      if (this.isProviderCircuitOpen(p)) return;
       seen.add(p);
       chain.push({
         provider: p,
@@ -103,19 +142,32 @@ class UnifiedLlmService {
       ...(newConfig.providerKeys || {})
     };
     const nextProvider = String(newConfig.provider || this.config.provider || "gemini").toLowerCase();
-    if (newConfig.apiKey && !String(newConfig.apiKey).includes("••")) {
+    if (newConfig.apiKey === "") {
+      mergedKeys[nextProvider] = "";
+      if (!newConfig.providerKeys) {
+        this.explicitOffline = true;
+      }
+    } else if (newConfig.apiKey && !String(newConfig.apiKey).includes("••")) {
       mergedKeys[nextProvider] = String(newConfig.apiKey).trim();
+      this.explicitOffline = false;
+    } else if (newConfig.providerKeys && Object.values(newConfig.providerKeys).some(Boolean)) {
+      this.explicitOffline = false;
     }
+    const nextApiKey =
+      newConfig.apiKey === ""
+        ? ""
+        : (mergedKeys[nextProvider] || newConfig.apiKey || this.config.apiKey || "");
     this.config = {
       ...this.config,
       ...newConfig,
       provider: nextProvider,
       providerKeys: mergedKeys,
-      apiKey: mergedKeys[nextProvider] || newConfig.apiKey || this.config.apiKey || ""
+      apiKey: nextApiKey
     };
-    // Reset cooldown cache khi admin đổi cấu hình mới
+    // Reset circuit breaker & cooldown cache khi admin đổi cấu hình mới
     this.resolvedGeminiModel = null;
     if (this.modelCooldownUntil) this.modelCooldownUntil.clear();
+    if (this.providerCircuits) this.providerCircuits.clear();
   }
 
   /**
@@ -295,9 +347,11 @@ class UnifiedLlmService {
       };
     }
 
-    // ── 3. ĐIỀU PHỐI TUẦN TỰ QUA TỪNG PROVIDER TRONG CHUỖI ────────────────────
+    // ── 3. ĐIỀU PHỐI TUẦN TỰ QUA TỪNG PROVIDER TRONG CHUỖI (AbortController & Circuit Breaker riêng từng provider) ──
     let lastError = null;
+    const perProviderTimeoutMs = Math.min(18000, Number(options.timeoutMs || this.config.timeoutMs || 18000));
     for (const target of chain) {
+      const providerCtrl = this.createTimeoutController(perProviderTimeoutMs, options.signal);
       try {
         if (target.provider === "gemini") {
           const res = await this.callGeminiAdapter({
@@ -306,9 +360,12 @@ class UnifiedLlmService {
             systemInstruction,
             temp,
             maxTokens,
-            signal
+            signal: providerCtrl.signal
           });
-          if (res?.text) return res;
+          if (res?.text) {
+            this.recordProviderSuccess(target.provider);
+            return res;
+          }
         } else {
           const res = await this.callOpenAiCompatibleAdapter({
             provider: target.provider,
@@ -318,14 +375,20 @@ class UnifiedLlmService {
             systemInstruction,
             temp,
             maxTokens,
-            signal
+            signal: providerCtrl.signal
           });
-          if (res?.text) return res;
+          if (res?.text) {
+            this.recordProviderSuccess(target.provider);
+            return res;
+          }
         }
       } catch (err) {
         lastError = err;
+        this.recordProviderFailure(target.provider);
         console.warn(`[Unified LLM] Lỗi gọi ${target.provider} (${target.model}):`, err.message || err);
-        if (signal && signal.aborted) break;
+        if (options.signal && options.signal.aborted) break;
+      } finally {
+        providerCtrl.clear();
       }
     }
 
@@ -408,21 +471,29 @@ class UnifiedLlmService {
     }
 
     let lastError = null;
+    const perProviderStreamTimeout = Math.min(25000, Number(options.timeoutMs || 25000));
     for (const target of chain) {
+      const providerCtrl = this.createTimeoutController(perProviderStreamTimeout, options.signal);
+      const wrappedOnChunk = (chunk) => {
+        providerCtrl.reset();
+        if (typeof onChunk === "function") onChunk(chunk);
+      };
       try {
         if (target.provider === "gemini") {
-          return await this.callGeminiStreamAdapter({
+          const res = await this.callGeminiStreamAdapter({
             apiKey: target.apiKey,
             prompt,
             systemInstruction,
             temp,
             maxTokens,
-            signal,
-            onChunk
+            signal: providerCtrl.signal,
+            onChunk: wrappedOnChunk
           });
+          this.recordProviderSuccess(target.provider);
+          return res;
         }
 
-        return await this.callOpenAiStreamAdapter({
+        const res = await this.callOpenAiStreamAdapter({
           provider: target.provider,
           model: target.model,
           apiKey: target.apiKey,
@@ -430,13 +501,18 @@ class UnifiedLlmService {
           systemInstruction,
           temp,
           maxTokens,
-          signal,
-          onChunk
+          signal: providerCtrl.signal,
+          onChunk: wrappedOnChunk
         });
+        this.recordProviderSuccess(target.provider);
+        return res;
       } catch (err) {
         lastError = err;
+        this.recordProviderFailure(target.provider);
         console.warn(`[Unified LLM Stream] Lỗi gọi ${target.provider} stream (${target.model}):`, err.message || err);
-        if (signal && signal.aborted) break;
+        if (options.signal && options.signal.aborted) break;
+      } finally {
+        providerCtrl.clear();
       }
     }
 
@@ -459,16 +535,17 @@ class UnifiedLlmService {
     const deprecated = new Set([
       "gemini-1.5-flash",
       "gemini-1.5-pro",
-      "gemini-2.0-flash",
       "gemini-2.0-flash-lite",
-      "gemini-2.5-flash",
       "gemini-2.5-flash-lite",
-      "gemini-flash-lite-latest" // trùng backend với gemini-3.5-flash-lite -> tránh nhân đôi thời gian chờ
+      "gemini-3.5-flash-lite",
+      "gemini-3.5-flash",
+      "gemini-3.1-flash-lite"
     ]);
-    // Chỉ giữ các model thực sự sống và nhanh (<3s), loại bỏ alias trùng lặp để không chờ nối tiếp
+    // Ưu tiên các model Google Gemini hợp lệ đang hoạt động thực tế trên API
     const fastCandidates = [
       this.resolvedGeminiModel,
-      "gemini-3.5-flash-lite",
+      "gemini-2.5-flash",
+      "gemini-2.0-flash",
       "gemini-3-flash-preview"
     ];
     if (configured && !deprecated.has(configured) && !fastCandidates.includes(configured)) {

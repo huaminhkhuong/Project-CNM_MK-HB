@@ -50,7 +50,7 @@ export function PaymentResultPage() {
 
   async function handleRetryPay() {
     if (!orderId) return;
-    if (method === "BANK_TRANSFER" || !reason?.startsWith("vnpay_")) {
+    if (method === "BANK_TRANSFER") {
       navigate(routeConfig.public.paymentVietQr.replace(":orderId", String(orderId)));
       return;
     }

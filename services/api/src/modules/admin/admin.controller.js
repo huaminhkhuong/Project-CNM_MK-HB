@@ -5,6 +5,7 @@ const attributeService = require("./admin-attributes.service");
 const skuService = require("./admin-skus.service");
 const adminSystemService = require("./admin-system.service");
 const adminReportsService = require("./admin-reports.service");
+const adminTagsService = require("./admin-tags.service");
 const { recordAuditLog } = require("../../services/audit-log.service");
 
 function getActorUserId(req) {
@@ -348,6 +349,56 @@ const getPublicStoreInfo = asyncHandler(async (_req, res) => {
   return sendSuccess(res, "Public store info fetched successfully", result);
 });
 
+const getAuditLogs = asyncHandler(async (req, res) => {
+  const result = await adminSystemService.getAuditLogs(req.query || {});
+  return sendSuccess(res, "Audit logs fetched successfully", result);
+});
+
+const getTags = asyncHandler(async (_req, res) => {
+  const result = await adminTagsService.listTags();
+  return sendSuccess(res, "Tags fetched successfully", result);
+});
+
+const createTag = asyncHandler(async (req, res) => {
+  const result = await adminTagsService.createTag(req.body || {});
+  await recordAuditLog({
+    actorUserId: getActorUserId(req),
+    actorRole: req.user?.role,
+    action: "TAG_CREATED",
+    entityType: "TAG",
+    entityId: result?.id,
+    description: `Created/updated tag ${result?.code || ""}`.trim()
+  });
+  return sendSuccess(res, "Tag created successfully", result, 201);
+});
+
+const deleteTag = asyncHandler(async (req, res) => {
+  const result = await adminTagsService.deleteTag(Number(req.params.tagId));
+  await recordAuditLog({
+    actorUserId: getActorUserId(req),
+    actorRole: req.user?.role,
+    action: "TAG_DELETED",
+    entityType: "TAG",
+    entityId: req.params.tagId,
+    description: `Deleted tag #${req.params.tagId}`
+  });
+  return sendSuccess(res, "Tag deleted successfully", result);
+});
+
+const setProductTags = asyncHandler(async (req, res) => {
+  const productId = Number(req.params.productId);
+  const tags = await adminTagsService.setProductTags(productId, req.body?.tags || []);
+  await recordAuditLog({
+    actorUserId: getActorUserId(req),
+    actorRole: req.user?.role,
+    action: "PRODUCT_TAGS_UPDATED",
+    entityType: "PRODUCT",
+    entityId: productId,
+    description: `Updated tags for product #${productId}: ${tags.join(", ") || "(none)"}`
+  });
+  return sendSuccess(res, "Product tags updated successfully", { productId, tags });
+});
+
 module.exports = {
   getDashboardSummary,
   getProducts,
@@ -381,5 +432,10 @@ module.exports = {
   getSalesReport,
   getSystemSettings,
   updateSystemSettings,
-  getPublicStoreInfo
+  getPublicStoreInfo,
+  getAuditLogs,
+  getTags,
+  createTag,
+  deleteTag,
+  setProductTags
 };

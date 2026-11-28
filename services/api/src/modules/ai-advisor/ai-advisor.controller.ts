@@ -455,8 +455,8 @@ export const suggestBuild = asyncHandler(async (req: Request, res: Response) => 
     throw new AppError("Vui lòng cung cấp 'requirements' và 'budget' hợp lệ", 400);
   }
 
-  // 1. Thu thập ngữ cảnh phần cứng thống nhất của khách hàng (nếu đã đăng nhập hoặc có session)
-  const userId = (req as any).user?.userId || (req as any).user?.id || req.body?.userId || req.query?.userId;
+  // 1. Thu thập ngữ cảnh phần cứng thống nhất của khách hàng (chỉ tin userId đã xác thực JWT)
+  const userId = (req as any).user?.userId || (req as any).user?.id || null;
   let userContext: UserHardwareContext | null = null;
   if (userId) {
     try {

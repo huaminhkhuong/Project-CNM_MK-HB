@@ -229,39 +229,18 @@ describe("AI Rule Engine, Normalization & Guardrails Unit Test Suite", () => {
     });
   });
 
-  describe("6. Synthesized Build Fallback Generator", () => {
-    it("generates a complete 8-component build within realistic budget limits", () => {
+  describe("6. Strict Catalog Grounding (No Synthesized Fake Builds)", () => {
+    it("never fabricates hardcoded products when DB catalog is empty", () => {
       const components = getSynthesizedBuildByBudget(15000000, "gaming");
-      assert.ok(Array.isArray(components), "Must return an array of components");
-      assert.strictEqual(components.length, 8, "Must contain exactly 8 parts");
-
-      const totalPrice = components.reduce((sum: number, c: any) => sum + Number(c.price || 0), 0);
-      assert.ok(totalPrice > 0);
-      assert.ok(totalPrice <= 17000000, "Total price should be close to 15M target");
-
-      const types = components.map((c: any) => c.componentType);
-      assert.ok(types.includes("cpu"), "Must include CPU");
-      assert.ok(types.includes("mainboard"), "Must include Mainboard");
-      assert.ok(types.includes("ram"), "Must include RAM");
-      assert.ok(types.includes("gpu"), "Must include GPU");
-      assert.ok(types.includes("storage"), "Must include Storage");
-      assert.ok(types.includes("psu"), "Must include PSU");
-      assert.ok(types.includes("case"), "Must include Case");
-      assert.ok(types.includes("cooling"), "Must include Cooling");
+      assert.ok(Array.isArray(components), "Must return an array");
+      assert.strictEqual(components.length, 0, "Must not synthesize ungrounded/fake catalog products");
     });
 
-    it("adjusts specs appropriately between 15M budget and 50M high-end budget", () => {
+    it("returns empty grounded array safely across different budgets and purposes", () => {
       const entryComponents = getSynthesizedBuildByBudget(15000000, "office");
       const highEndComponents = getSynthesizedBuildByBudget(50000000, "gaming");
-
-      const entryTotal = entryComponents.reduce((sum: number, c: any) => sum + Number(c.price || 0), 0);
-      const highTotal = highEndComponents.reduce((sum: number, c: any) => sum + Number(c.price || 0), 0);
-
-      assert.ok(highTotal > entryTotal, "50M build total must exceed 15M build total");
-
-      const entryGpu = entryComponents.find((c: any) => c.componentType === "gpu");
-      const highGpu = highEndComponents.find((c: any) => c.componentType === "gpu");
-      assert.ok(highGpu && entryGpu && highGpu.price > entryGpu.price, "High-end GPU price must exceed entry GPU price");
+      assert.deepStrictEqual(entryComponents, []);
+      assert.deepStrictEqual(highEndComponents, []);
     });
   });
 });

@@ -64,7 +64,7 @@ apiRouter.get("/health", async (_req, res) => {
 
 apiRouter.get("/system/public-info", adminController.getPublicStoreInfo);
 
-apiRouter.use("/auth", authRateLimiter, authRouter);
+apiRouter.use("/auth", authRouter);
 apiRouter.use("/users", usersRouter);
 apiRouter.use("/admin", adminRouter);
 apiRouter.use("/staff", staffRouter);
@@ -78,9 +78,9 @@ apiRouter.use("/pc-builder", pcBuilderRouter);
 apiRouter.use("/compatibility", compatibilityRouter);
 apiRouter.use("/tickets", ticketsRouter);
 apiRouter.use("/ai-advisor", aiRateLimiter, aiAdvisorRouter);
-apiRouter.use("/ai", aiRateLimiter, aiRouter);
+apiRouter.use("/ai", aiRouter);
 apiRouter.use("/warranties", warrantiesRouter);
-apiRouter.use("/chat", aiRateLimiter, chatRouter);
+apiRouter.use("/chat", chatRouter);
 apiRouter.use("/coupons", couponsRouter);
 apiRouter.use("/notifications", notificationsRouter);
 

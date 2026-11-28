@@ -2,6 +2,7 @@ import { Router } from "express";
 
 import { ROLES } from "../../constants/roles";
 import { authenticate, authorize, optionalAuthenticate } from "../../middlewares/auth.middleware";
+import { aiRateLimiter } from "../../middlewares/rate-limiter.middleware";
 import {
   acceptSession,
   closeSession,
@@ -22,7 +23,7 @@ chatRouter.post("/session", optionalAuthenticate, createSession);
 chatRouter.get("/session/:id", getSession);
 chatRouter.post("/session/:id/message", optionalAuthenticate, sendMessage);
 chatRouter.post("/session/:id/handoff", optionalAuthenticate, handoffToHuman);
-chatRouter.post("/ai-consultation", optionalAuthenticate, handleAiConsultation);
+chatRouter.post("/ai-consultation", aiRateLimiter, optionalAuthenticate, handleAiConsultation);
 
 // Staff (protected)
 chatRouter.get("/queue/stats", authenticate, authorize([ROLES.ADMIN, ROLES.SALES_STAFF]), getQueueStats);

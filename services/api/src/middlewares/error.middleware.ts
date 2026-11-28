@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { NextFunction, Request, Response } from "express";
 import { ZodError } from "zod";
 
+import { env } from "../config/env";
 import { AppError } from "../errors/app-error";
 import { logger } from "../utils/logger";
 
@@ -41,9 +42,16 @@ export function errorHandler(
     }
   }
 
+  if (err?.name === "MulterError") {
+    return res.status(400).json({
+      success: false,
+      message: (err as any).code === "LIMIT_FILE_SIZE" ? "Tệp tải lên vượt quá dung lượng cho phép" : (err.message || "Tải tệp thất bại")
+    });
+  }
+
   const statusCode = err instanceof AppError ? err.statusCode : ((err as any).statusCode || 500);
 
-  if (statusCode === 500) {
+  if (statusCode >= 500) {
     logger.error(err, {
       url: req.originalUrl || req.url,
       method: req.method,
@@ -52,8 +60,13 @@ export function errorHandler(
     });
   }
 
+  const safeMessage =
+    statusCode >= 500 && env.nodeEnv === "production"
+      ? "Internal server error"
+      : (err.message || "Internal server error");
+
   return res.status(statusCode).json({
     success: false,
-    message: err.message || "Internal server error"
+    message: safeMessage
   });
 }

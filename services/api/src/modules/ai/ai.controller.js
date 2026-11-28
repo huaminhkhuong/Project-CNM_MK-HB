@@ -34,13 +34,15 @@ function isPersonalizedQuery(message, req, userId) {
 }
 
 const chat = asyncHandler(async (req, res) => {
-  const userId = req.user?.userId || req.user?.id || req.body?.userId;
+  // Chỉ tin userId đã xác thực qua JWT (chống IDOR đọc/ghi lịch sử của người dùng khác)
+  const userId = req.user?.userId || req.user?.id || null;
   const userMessage = String(req.body?.message || "").trim();
   const isPersonal = isPersonalizedQuery(userMessage, req, userId);
 
-  // 1. Kiểm tra AI In-Memory LRU Cache cho câu hỏi tri thức chung (không áp dụng cho câu hỏi cá nhân)
+  // 1. Kiểm tra AI In-Memory LRU Cache cho câu hỏi tri thức chung (bỏ qua nếu có ngữ cảnh cá nhân hoặc hội thoại nhiều lượt)
+  const hasHistory = Array.isArray(req.body?.history) && req.body.history.length > 0;
   const cacheKey = aiQueryCache.normalizeKey(userMessage);
-  const canUseCache = Boolean(cacheKey && !req.body?.skipCache && !isPersonal);
+  const canUseCache = Boolean(cacheKey && !req.body?.skipCache && !isPersonal && !hasHistory);
 
   if (canUseCache) {
     const cachedResult = aiQueryCache.get(cacheKey);

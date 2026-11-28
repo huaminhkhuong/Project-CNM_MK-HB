@@ -23,23 +23,57 @@ export function WhatIfComparisonPanel({
   const diffPrice = simPrice - currentPrice;
   const isIncrease = deltaBudget >= 0;
 
-  const currentScore = currentBuildSnapshot.xaiReport?.score || currentBuildSnapshot.score || 92;
-  const simScore = simulatedBuild.compatibilityReport?.score || simulatedBuild.score || 96;
+  const currentScore = currentBuildSnapshot.xaiReport?.score ?? currentBuildSnapshot.score ?? 0;
+  const simScore = simulatedBuild.compatibilityReport?.score ?? simulatedBuild.score ?? 0;
 
-  // Compute FPS comparison
-  const currentFpsEsports = Math.round(currentPrice / 100000 * 1.1) + 120;
-  const simFpsEsports = Math.round(simPrice / 100000 * 1.1) + 120;
-  const diffFpsEsports = simFpsEsports - currentFpsEsports;
+  // Compute hardware-tier-based FPS comparison (based on GPU + CPU tier, not raw total price)
+  const estimateTierFps = (compsMap) => {
+    const getName = (key) => {
+      const entry = compsMap?.[key] || {};
+      const prod = entry.product || entry;
+      return String(prod.name || prod.product_name || prod.productName || "").toLowerCase();
+    };
+    const gpu = getName("gpu");
+    const cpu = getName("cpu");
 
-  const currentFpsAaa = Math.round(currentPrice / 250000) + 40;
-  const simFpsAaa = Math.round(simPrice / 250000) + 40;
-  const diffFpsAaa = simFpsAaa - currentFpsAaa;
+    let gpuScore = 25;
+    if (gpu.includes("5090") || gpu.includes("4090") || gpu.includes("7900 xtx")) gpuScore = 100;
+    else if (gpu.includes("5080") || gpu.includes("4080") || gpu.includes("7900 xt")) gpuScore = 92;
+    else if (gpu.includes("5070 ti") || gpu.includes("4070 ti") || gpu.includes("9070 xt") || gpu.includes("3090")) gpuScore = 85;
+    else if (gpu.includes("5070") || gpu.includes("4070") || gpu.includes("7800 xt") || gpu.includes("9070") || gpu.includes("3080")) gpuScore = 78;
+    else if (gpu.includes("5060 ti") || gpu.includes("4060 ti") || gpu.includes("7700 xt") || gpu.includes("3070")) gpuScore = 70;
+    else if (gpu.includes("5060") || gpu.includes("4060") || gpu.includes("3060") || gpu.includes("7600") || gpu.includes("6700")) gpuScore = 62;
+    else if (gpu.includes("5050") || gpu.includes("3050") || gpu.includes("6600") || gpu.includes("1660")) gpuScore = 50;
+    else if (gpu.includes("1650") || gpu.includes("6500") || gpu.includes("6400")) gpuScore = 40;
+    else if (gpu) gpuScore = 45;
+
+    let cpuScore = 55;
+    if (cpu.includes("285k") || cpu.includes("ultra 9") || cpu.includes("14900") || cpu.includes("13900") || cpu.includes("9950") || cpu.includes("7950")) cpuScore = 96;
+    else if (cpu.includes("265k") || cpu.includes("ultra 7") || cpu.includes("14700") || cpu.includes("13700") || cpu.includes("9800x3d") || cpu.includes("7800x3d")) cpuScore = 92;
+    else if (cpu.includes("245k") || cpu.includes("ultra 5") || cpu.includes("225") || cpu.includes("14600") || cpu.includes("13600") || cpu.includes("14400") || cpu.includes("13400") || cpu.includes("7600") || cpu.includes("7500f")) cpuScore = 78;
+    else if (cpu.includes("12400") || cpu.includes("5600") || cpu.includes("5700")) cpuScore = 68;
+    else if (cpu.includes("12100") || cpu.includes("13100") || cpu.includes("5500")) cpuScore = 56;
+
+    const esports = Math.round(cpuScore * 2.1 + gpuScore * 1.45);
+    const aaa = Math.max(25, Math.round(gpuScore * 1.15 + cpuScore * 0.22));
+    return { esports, aaa };
+  };
 
   // Compute component differences (Diff)
   const currentComps = currentBuildSnapshot.selectedItems || {};
   const simComps = Array.isArray(simulatedBuild.components)
     ? simulatedBuild.components.reduce((acc, c) => ({ ...acc, [(c.type || c.componentType).toLowerCase()]: c }), {})
     : simulatedBuild.components || {};
+
+  const curFps = estimateTierFps(currentComps);
+  const simFps = estimateTierFps(simComps);
+  const currentFpsEsports = curFps.esports;
+  const simFpsEsports = simFps.esports;
+  const diffFpsEsports = simFpsEsports - currentFpsEsports;
+
+  const currentFpsAaa = curFps.aaa;
+  const simFpsAaa = simFps.aaa;
+  const diffFpsAaa = simFpsAaa - currentFpsAaa;
 
   const allTypes = Array.from(new Set([...Object.keys(currentComps), ...Object.keys(simComps)]));
 

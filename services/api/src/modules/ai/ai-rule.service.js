@@ -1,13 +1,51 @@
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { normalizeVietnamese, cleanSearchText } = require("./ai-normalize-helpers");
 
 const STORE_PATH = path.resolve(__dirname, "../../data/ai-rules-store.json");
+const ENC_PREFIX = "enc:v1:";
+
+function getConfigEncryptionKey() {
+  const seed =
+    process.env.AI_CONFIG_ENCRYPTION_KEY ||
+    process.env.JWT_ACCESS_SECRET ||
+    "pcmall-ai-config-fallback-key";
+  return crypto.createHash("sha256").update(String(seed)).digest();
+}
+
+function encryptSecretValue(raw) {
+  const plain = String(raw || "").trim();
+  if (!plain || plain.startsWith(ENC_PREFIX)) return plain;
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", getConfigEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${ENC_PREFIX}${iv.toString("base64")}:${tag.toString("base64")}:${encrypted.toString("base64")}`;
+}
+
+function decryptSecretValue(stored) {
+  const val = String(stored || "").trim();
+  if (!val) return "";
+  if (!val.startsWith(ENC_PREFIX)) return val; // Legacy plaintext compatibility
+  try {
+    const parts = val.slice(ENC_PREFIX.length).split(":");
+    if (parts.length !== 3) return "";
+    const iv = Buffer.from(parts[0], "base64");
+    const tag = Buffer.from(parts[1], "base64");
+    const data = Buffer.from(parts[2], "base64");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", getConfigEncryptionKey(), iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
+  } catch {
+    return "";
+  }
+}
 
 // Cấu hình Hệ thống AI & Token mặc định (Tập trung toàn bộ tham số AI của PC Mall)
 const DEFAULT_SYSTEM_CONFIG = {
   provider: "gemini",
-  model: "gemini-3.5-flash-lite",
+  model: "gemini-2.5-flash",
   fallbackProvider: "groq",
   fallbackModel: "llama-3.3-70b-versatile",
   autoFailover: true,
@@ -345,6 +383,17 @@ class AiRuleService {
         };
         this.saveStore();
       }
+      // Giải mã các API key đã mã hóa AES-256-GCM (tương thích ngược plaintext cũ)
+      if (this.store.apiKey) {
+        this.store.apiKey = decryptSecretValue(this.store.apiKey);
+      }
+      if (this.store.providerKeys && typeof this.store.providerKeys === "object") {
+        for (const [k, v] of Object.entries(this.store.providerKeys)) {
+          if (typeof v === "string" && v) {
+            this.store.providerKeys[k] = decryptSecretValue(v);
+          }
+        }
+      }
       // Đồng bộ cấu hình từ store sang UnifiedLlmService ngay khi khởi động
       try {
         const { unifiedLlmService } = require("./unified-llm.service");
@@ -352,14 +401,15 @@ class AiRuleService {
         const deprecatedModels = new Set([
           "gemini-1.5-flash",
           "gemini-1.5-pro",
-          "gemini-2.0-flash",
           "gemini-2.0-flash-lite",
-          "gemini-2.5-flash",
-          "gemini-2.5-flash-lite"
+          "gemini-2.5-flash-lite",
+          "gemini-3.5-flash-lite",
+          "gemini-3.5-flash",
+          "gemini-3.1-flash-lite"
         ]);
         const resolvedModel = sysCfg.model && !deprecatedModels.has(sysCfg.model)
           ? sysCfg.model
-          : (sysCfg.provider === "groq" ? "llama-3.3-70b-versatile" : "gemini-3.5-flash-lite");
+          : (sysCfg.provider === "groq" ? "llama-3.3-70b-versatile" : "gemini-2.5-flash");
         const storedKeys = this.store.providerKeys || {};
         const providerKeys = {
           gemini: storedKeys.gemini || (sysCfg.provider === "gemini" ? this.store.apiKey : "") || process.env.GEMINI_API_KEY || "",
@@ -405,7 +455,19 @@ class AiRuleService {
         fs.mkdirSync(dir, { recursive: true });
       }
       this.store.lastUpdated = new Date().toISOString();
-      fs.writeFileSync(STORE_PATH, JSON.stringify(this.store, null, 2), "utf-8");
+      // Mã hóa AES-256-GCM cho toàn bộ API key trước khi ghi xuống đĩa (không bao giờ lưu plaintext)
+      const encryptedProviderKeys = {};
+      if (this.store.providerKeys && typeof this.store.providerKeys === "object") {
+        for (const [k, v] of Object.entries(this.store.providerKeys)) {
+          encryptedProviderKeys[k] = typeof v === "string" && v ? encryptSecretValue(v) : "";
+        }
+      }
+      const diskPayload = {
+        ...this.store,
+        apiKey: this.store.apiKey ? encryptSecretValue(this.store.apiKey) : "",
+        providerKeys: encryptedProviderKeys
+      };
+      fs.writeFileSync(STORE_PATH, JSON.stringify(diskPayload, null, 2), "utf-8");
     } catch (err) {
       console.error("[AiRuleService] Failed to save store to disk:", err);
     }
@@ -551,9 +613,9 @@ class AiRuleService {
 
     return {
       provider,
-      model: cfg.model || (provider === "groq" ? "llama-3.3-70b-versatile" : "gemini-3.5-flash-lite"),
+      model: cfg.model || (provider === "groq" ? "llama-3.3-70b-versatile" : "gemini-2.5-flash"),
       fallbackProvider,
-      fallbackModel: cfg.fallbackModel || (fallbackProvider === "groq" ? "llama-3.3-70b-versatile" : fallbackProvider === "gemini" ? "gemini-3.5-flash-lite" : ""),
+      fallbackModel: cfg.fallbackModel || (fallbackProvider === "groq" ? "llama-3.3-70b-versatile" : fallbackProvider === "gemini" ? "gemini-2.5-flash" : ""),
       autoFailover: cfg.autoFailover !== false,
       temperature: Number(cfg.temperature ?? 0.4),
       maxTokens: Number(cfg.maxTokens ?? 4096),
@@ -762,9 +824,15 @@ class AiRuleService {
       }
 
       if (isMatch) {
-        // Tăng đếm hit count
+        // Tăng đếm hit count & debounce lưu đĩa (tránh gọi fs.writeFileSync đồng bộ trên mọi request)
         rule.hitCount = (rule.hitCount || 0) + 1;
-        this.saveStore();
+        if (!this._hitFlushTimer) {
+          this._hitFlushTimer = setTimeout(() => {
+            this._hitFlushTimer = null;
+            try { this.saveStore(); } catch {}
+          }, 30000);
+          if (typeof this._hitFlushTimer.unref === "function") this._hitFlushTimer.unref();
+        }
 
         // Nếu là DIRECT_REPLY -> Trả lời tại chỗ ngay lập tức (Bypass AI)
         if (rule.action === "DIRECT_REPLY") {

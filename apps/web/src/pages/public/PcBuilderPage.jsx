@@ -121,7 +121,7 @@ export function calculateBuilderInsights(selectedItems = {}, selectedCount = 0, 
   const boardSocket = findSpec(mainboard, SPEC_ALIASES.socket);
   const ramType    = findSpec(ram, SPEC_ALIASES.ramType);
   const boardRam   = findSpec(mainboard, SPEC_ALIASES.ramType);
-  const psuWatt    = parseNumber(findSpec(psu, SPEC_ALIASES.psuWattage) || getProductName(psu), 0);
+  const psuWatt    = s.psu ? getPsuWattageValue(psu) : 0;
   
   // ── Tính toán Power / Thermal thực tế từ dữ liệu TDP trong DB ──
   const actualCpuTdp = parseNumber(findSpec(cpu, SPEC_ALIASES.tdp), 0);
@@ -139,7 +139,18 @@ export function calculateBuilderInsights(selectedItems = {}, selectedCount = 0, 
 
   const recommendedPsuWatt = Math.round(power * 1.25);
   const psuMarginPercent = psuWatt > 0 ? Math.round(((psuWatt - power) / psuWatt) * 100) : 0;
-  const isPsuMarginWarning = s.psu && psuWatt > 0 && psuMarginPercent < 20;
+  const isPsuSufficient = !s.psu || psuWatt === 0 || psuWatt >= power;
+  const isPsuMarginWarning = Boolean(s.psu && psuWatt > 0 && psuWatt >= power && psuMarginPercent < 20);
+
+  const normalizeSocket = (raw) => {
+    const str = String(raw || "").toUpperCase().replace(/[-\s]/g, "");
+    if (str.includes("AM5")) return "AM5";
+    if (str.includes("AM4")) return "AM4";
+    if (str.includes("1851")) return "LGA1851";
+    if (str.includes("1700")) return "LGA1700";
+    if (str.includes("1200")) return "LGA1200";
+    return normalizeText(raw);
+  };
 
   const coolingSelected = Boolean(s.cooling);
   const coolingDiag = getCoolingDiagnostics(cpu, cooling, caseProduct, coolingSelected);
@@ -176,7 +187,7 @@ export function calculateBuilderInsights(selectedItems = {}, selectedCount = 0, 
   const checks = [
     {
       label: "Socket CPU ↔ Mainboard [COMP-001]", icon: "🔌",
-      ok: !cpuSocket || !boardSocket || normalizeText(cpuSocket) === normalizeText(boardSocket),
+      ok: !cpuSocket || !boardSocket || normalizeSocket(cpuSocket) === normalizeSocket(boardSocket),
       detail: cpuSocket && boardSocket ? `${cpuSocket} / ${boardSocket}` : "Cần dữ liệu socket từ sản phẩm."
     },
     {
@@ -220,12 +231,14 @@ export function calculateBuilderInsights(selectedItems = {}, selectedCount = 0, 
     },
     {
       label: "Nguồn đủ công suất Watt [COMP-007]", icon: "⚡",
-      ok: !s.psu || psuWatt === 0 || isPsuMarginWarning || psuWatt >= power,
-      severity: !s.psu || psuWatt === 0 ? undefined : isPsuMarginWarning ? "WARNING" : psuWatt < power ? "BLOCKER" : undefined,
+      ok: isPsuSufficient,
+      severity: !s.psu || psuWatt === 0 ? undefined : psuWatt < power ? "BLOCKER" : isPsuMarginWarning ? "WARNING" : undefined,
       detail: s.psu
-        ? isPsuMarginWarning
-          ? `⚠️ PSU ${psuWatt}W chỉ dư ${psuMarginPercent}% dư địa (Nên dư ≥ 20% dự phòng tụt áp)`
-          : `${psuWatt}W PSU / Công suất thực tế ${power}W (Khuyên dùng ≥ ${recommendedPsuWatt}W)`
+        ? psuWatt < power
+          ? `⛔ THIẾU CÔNG SUẤT: Nguồn ${psuWatt}W nhỏ hơn công suất tải ${power}W (Khuyên dùng ≥ ${recommendedPsuWatt}W)`
+          : isPsuMarginWarning
+            ? `⚠️ PSU ${psuWatt}W chỉ dư ${psuMarginPercent}% dư địa (Nên dư ≥ 20% dự phòng tụt áp)`
+            : `${psuWatt}W PSU / Công suất thực tế ${power}W (Khuyên dùng ≥ ${recommendedPsuWatt}W)`
         : "Chưa chọn PSU."
     },
     {
@@ -1973,43 +1986,9 @@ export function PcBuilderPage() {
         throw new Error("Không lấy được dữ liệu simulation từ backend");
       }
     } catch (err) {
-      console.warn("What-If Simulation API warning, generating fallback simulation", err);
-
-      const simDraft = {};
-      const simComponentsList = [];
-      const presetKey = AUTO_RECOMMEND_PROFILES[selectedPresetId] ? selectedPresetId : normalizeText(suggestionForm.purpose) || "default";
-      const baseAlloc = AUTO_RECOMMEND_PROFILES[presetKey]?.allocations || AUTO_RECOMMEND_PROFILES.default.allocations;
-
-      for (const section of COMPONENT_SECTIONS) {
-        const products = optionsByComponent[section.componentType] || [];
-        if (products.length === 0) continue;
-        const targetPrice = simTargetBudget * (baseAlloc[section.componentType] || 0.1);
-        const sorted = [...products].sort((a, b) => Math.abs(getProductPrice(a) - targetPrice) - Math.abs(getProductPrice(b) - targetPrice));
-        const product = sorted[0];
-        if (product) {
-          const pId = getProductId(product);
-          simComponentsList.push({
-            type: section.componentType.toUpperCase(),
-            componentType: section.componentType,
-            id: pId,
-            productId: pId,
-            name: getProductName(product),
-            price: getProductPrice(product),
-            product
-          });
-        }
-      }
-
-      const simCalcPrice = simComponentsList.reduce((sum, item) => sum + item.price, 0) || simTargetBudget;
-
-      const simCandidate = {
-        totalPrice: simCalcPrice,
-        budgetUtilization: Math.round((simCalcPrice / simTargetBudget) * 100),
-        components: simComponentsList,
-        compatibilityReport: { score: 96, compatible: true }
-      };
-      setWhatIfSimulatedBuild(simCandidate);
-      setWhatIfModalOpen(true);
+      console.warn("What-If Simulation API error:", err);
+      setWhatIfModalOpen(false);
+      setLocalMessage("❌ Không thể chạy mô phỏng What-If lúc này do lỗi kết nối máy chủ. Vui lòng thử lại sau giây lát.");
     } finally {
       setIsWhatIfLoading(false);
     }

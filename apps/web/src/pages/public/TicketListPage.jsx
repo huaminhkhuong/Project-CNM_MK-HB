@@ -19,7 +19,8 @@ function formatDate(value) {
 }
 
 function getTicketPreview(ticket) {
-  const text = ticket.description || "Chưa có mô tả chi tiết.";
+  const firstMsg = Array.isArray(ticket?.messages) && ticket.messages.length > 0 ? ticket.messages[0]?.message : "";
+  const text = String(ticket?.description || firstMsg || "Chưa có mô tả chi tiết.").trim();
   return text.length > 150 ? `${text.slice(0, 150)}...` : text;
 }
 
@@ -97,6 +98,8 @@ export function TicketListPage() {
 
     if (isAuthenticated) {
       loadTickets();
+    } else {
+      setLoading(false);
     }
   }, [isAuthenticated]);
 

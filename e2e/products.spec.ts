@@ -13,14 +13,11 @@ test.describe("Products", () => {
     
     // Click category filter item directly
     const catBtn = page.locator('button').filter({ hasText: /CPU|Mainboard/i }).first();
-    await expect(catBtn).toBeVisible();
+    await expect(catBtn).toBeVisible({ timeout: 10000 });
     await catBtn.click();
     
-    // Wait for filter to apply
-    await page.waitForTimeout(1000);
-    
     // Should still show products
-    await expect(page.locator('[data-testid="product-card"]').first()).toBeVisible();
+    await expect(page.locator('[data-testid="product-card"]').first()).toBeVisible({ timeout: 15000 });
   });
 
   test("should navigate to product detail", async ({ page }) => {

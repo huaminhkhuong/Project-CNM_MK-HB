@@ -61,14 +61,24 @@ function isTechRole(role?: string) {
   return normalized === ROLES.TECH_STAFF || normalized === "TECHNICIAN";
 }
 
+function isSalesRole(role?: string) {
+  const normalized = String(role || "").toUpperCase();
+  return normalized === ROLES.SALES_STAFF || normalized === "SALES";
+}
+
+/**
+ * Only ADMIN and TECH_STAFF can manage technical tickets (PATCH status/assignee, post/read INTERNAL notes).
+ */
 function canManageTicketRole(role?: string) {
   const normalized = String(role || "").toUpperCase();
-  return (
-    normalized === ROLES.ADMIN ||
-    isTechRole(normalized) ||
-    normalized === ROLES.SALES_STAFF ||
-    normalized === "SALES"
-  );
+  return normalized === ROLES.ADMIN || isTechRole(normalized);
+}
+
+/**
+ * SALES_STAFF has read-only PUBLIC visibility on technical tickets for CSKH lookup.
+ */
+function canReadTicketRole(role?: string) {
+  return canManageTicketRole(role) || isSalesRole(role);
 }
 
 function isInternalMessage(message: { visibility?: string } | null | undefined) {
@@ -89,7 +99,7 @@ function filterTicketForViewer(ticket: any, user: { userId: string | number; rol
 }
 
 function canAccessTicket(ticket: { user_id?: number | null }, user: { userId: string | number; role?: string }) {
-  return Number(ticket.user_id) === Number(user.userId) || canManageTicketRole(user.role);
+  return Number(ticket.user_id) === Number(user.userId) || canReadTicketRole(user.role);
 }
 
 export const getTicketDetail = asyncHandler(async (req: Request, res: Response) => {
@@ -132,7 +142,7 @@ export const getAllTickets = asyncHandler(async (req: Request, res: Response) =>
 
   res.status(200).json({
     success: true,
-    data: tickets
+    data: tickets.map((ticket: any) => filterTicketForViewer(ticket, req.user!))
   });
 });
 
@@ -182,6 +192,26 @@ export const patchTicket = asyncHandler(async (req: Request, res: Response) => {
     assigned_to_id: payload.assignedToId
   });
 
+  try {
+    const { recordAuditLog } = require("../../services/audit-log.service");
+    await recordAuditLog({
+      actorUserId: req.user?.userId,
+      actorRole: req.user?.role,
+      action: "TICKET_UPDATED",
+      entityType: "TICKET",
+      entityId: req.params.id,
+      description: `Updated ticket #${req.params.id} (status=${payload.status || (ticket as any).status}, assignedTo=${payload.assignedToId ?? (ticket as any).assigned_to_id ?? "unassigned"})`,
+      metadata: {
+        previousStatus: (ticket as any).status,
+        nextStatus: payload.status || (ticket as any).status,
+        priority: payload.priority || (ticket as any).priority,
+        assignedToId: payload.assignedToId ?? null
+      }
+    });
+  } catch {
+    // non-fatal
+  }
+
   // 🔔 Real-time: Thông báo trạng thái thay đổi cho client trong room ticket (ẩn ghi chú INTERNAL với khách hàng)
   emitToTicketRoom(
     req.params.id,
@@ -222,8 +252,10 @@ export const postTicketMessage = asyncHandler(async (req: Request, res: Response
     throw new AppError("Ticket not found", 404);
   }
 
-  if (!canAccessTicket(ticket, req.user)) {
-    throw new AppError("Forbidden", 403);
+  const isOwner = Number((ticket as any).user_id) === Number(req.user.userId);
+  const isTechManager = canManageTicketRole(req.user.role);
+  if (!isOwner && !isTechManager) {
+    throw new AppError("Chỉ chủ ticket hoặc kỹ thuật viên mới có quyền gửi phản hồi kỹ thuật", 403);
   }
 
   const currentStatus = String((ticket as any).status || "OPEN").toUpperCase();
@@ -232,7 +264,7 @@ export const postTicketMessage = asyncHandler(async (req: Request, res: Response
   }
 
   const payload = addTicketMessageSchema.parse(req.body);
-  const isStaff = canManageTicketRole(req.user.role);
+  const isStaff = isTechManager;
   const visibility = isStaff && payload.visibility === "INTERNAL" ? "INTERNAL" : "PUBLIC";
   let updated = await createTicketMessage({
     ticketId: req.params.id,
@@ -291,4 +323,5 @@ export const postTicketMessage = asyncHandler(async (req: Request, res: Response
   });
 });
 
-export const ticketManageRoles = [ROLES.ADMIN, ROLES.TECHNICIAN, ROLES.SALES];
+export const ticketManageRoles = [ROLES.ADMIN, ROLES.TECHNICIAN];
+export const ticketReadRoles = [ROLES.ADMIN, ROLES.TECHNICIAN, ROLES.SALES];

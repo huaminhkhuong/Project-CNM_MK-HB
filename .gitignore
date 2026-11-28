@@ -76,3 +76,7 @@ nginx/ssl/*.key
 *.xlsx
 KLTN_*
 TASK_*
+
+# AI Vector Store runtime persistence & RAG test docs
+services/ai-service/data_store/chroma_db/
+services/ai-service/data_store/docs/*_test*

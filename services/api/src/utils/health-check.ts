@@ -20,7 +20,9 @@ export async function checkDatabaseConnection() {
     return {
       connected: false,
       latencyMs: Date.now() - startedAt,
-      error: error instanceof Error ? error.message : "Database ping failed"
+      error: process.env.NODE_ENV === "production"
+        ? "Database unavailable"
+        : (error instanceof Error ? error.message : "Database ping failed")
     };
   }
 }

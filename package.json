@@ -15,7 +15,7 @@
     "dev": "node scripts/dev.js",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
-    "check:all": "cd services/api && npx tsc --noEmit && cd ../apps/web && npx vite build && cd ../.. && npx playwright test e2e/pc-builder-qa-checklist.spec.ts",
+    "check:all": "cd services/api && npx tsc --noEmit && cd ../../apps/web && npx vite build && cd ../.. && npx playwright test e2e/pc-builder-qa-checklist.spec.ts",
     "dev:api": "npm run dev -w services/api",
     "dev:web": "npm run dev -w apps/web",
     "build": "npm run build -ws",

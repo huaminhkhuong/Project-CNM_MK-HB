@@ -10,6 +10,13 @@ const { validateCreatePayment, validateConfirmPayment } = require("./payments.va
 
 const router = express.Router();
 
+const ALLOWED_PROOF_MIME_TO_EXT = {
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/gif": ".gif",
+  "image/webp": ".webp"
+};
+
 // Multer storage for payment receipts
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -21,7 +28,8 @@ const storage = multer.diskStorage({
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, "proof-" + uniqueSuffix + path.extname(file.originalname));
+    const safeExt = ALLOWED_PROOF_MIME_TO_EXT[String(file.mimetype || "").toLowerCase()] || ".jpg";
+    cb(null, "proof-" + uniqueSuffix + safeExt);
   }
 });
 
@@ -31,7 +39,8 @@ const upload = multer({
     fileSize: 5 * 1024 * 1024 // 5MB limit
   },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith("image/")) {
+    const mime = String(file.mimetype || "").toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(ALLOWED_PROOF_MIME_TO_EXT, mime)) {
       cb(null, true);
     } else {
       cb(createError("Chỉ chấp nhận file hình ảnh (JPG, PNG, GIF, WEBP)", 400));

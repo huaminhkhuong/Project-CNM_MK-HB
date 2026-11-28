@@ -88,7 +88,8 @@ export const createSession = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: "Tin nhắn ban đầu vượt quá 2000 ký tự" });
     }
 
-    const userId = (req as any).user?.userId || (req as any).user?.id || req.body?.userId;
+    const authUser = (req as any).user;
+    const userId = authUser?.userId || authUser?.id || null;
 
     // 1. Phân phối phiên chat (Queue / Round-robin / Least-busy routing) tới nhân viên đang online
     const isHumanSupport = normalizedType === "SALES_CONSULTATION" || normalizedType === "HUMAN_SUPPORT";
@@ -227,7 +228,17 @@ export const sendMessage = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: "Phiên tư vấn đã kết thúc" });
     }
 
-    const normalizedSender: ChatSender = sender === "staff" ? "staff" : sender === "system" ? "system" : "customer";
+    const authRole = String((req as any).user?.role || "").toUpperCase();
+    const isPrivilegedSender = ["ADMIN", "SALES_STAFF", "SALES", "TECH_STAFF", "TECH", "STAFF"].includes(authRole);
+    if ((sender === "staff" || sender === "system") && !isPrivilegedSender) {
+      return res.status(403).json({ success: false, message: "Forbidden: không có quyền gửi tin nhắn với vai trò nhân viên/hệ thống" });
+    }
+    const normalizedSender: ChatSender =
+      sender === "staff" && isPrivilegedSender
+        ? "staff"
+        : sender === "system" && isPrivilegedSender
+          ? "system"
+          : "customer";
     const message = await prisma.chatMessage.create({
       data: {
         session_id: session.id,
@@ -427,7 +438,8 @@ export const handoffToHuman = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { aiHistory, criteria, clientBuild, note } = req.body || {};
-    const userId = (req as any).user?.userId || (req as any).user?.id || req.body?.userId;
+    const authUser = (req as any).user;
+    const userId = authUser?.userId || authUser?.id || null;
 
     const session = await prisma.chatSession.findUnique({
       where: { session_id: id },
@@ -556,7 +568,8 @@ export const handleAiConsultation = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: "Câu hỏi vượt quá 2000 ký tự" });
     }
 
-    const userId = (req as any).user?.userId || (req as any).user?.id || req.body?.userId;
+    const authUser = (req as any).user;
+    const userId = authUser?.userId || authUser?.id || null;
 
     const { aiAssistantService } = await import("./ai-assistant.service");
 

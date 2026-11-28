@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import jwt, { type SignOptions } from "jsonwebtoken";
 
 import { env } from "../config/env";
@@ -6,7 +7,8 @@ import type { AuthTokenPayload } from "../types/auth";
 
 export function signAccessToken(payload: AuthTokenPayload) {
   const options: SignOptions = {
-    expiresIn: env.jwtAccessExpiresIn as SignOptions["expiresIn"]
+    expiresIn: env.jwtAccessExpiresIn as SignOptions["expiresIn"],
+    jwtid: crypto.randomUUID()
   };
 
   return jwt.sign(payload, env.jwtAccessSecret, options);
@@ -14,7 +16,8 @@ export function signAccessToken(payload: AuthTokenPayload) {
 
 export function signRefreshToken(payload: AuthTokenPayload) {
   const options: SignOptions = {
-    expiresIn: env.jwtRefreshExpiresIn as SignOptions["expiresIn"]
+    expiresIn: env.jwtRefreshExpiresIn as SignOptions["expiresIn"],
+    jwtid: crypto.randomUUID()
   };
 
   return jwt.sign(payload, env.jwtRefreshSecret, options);

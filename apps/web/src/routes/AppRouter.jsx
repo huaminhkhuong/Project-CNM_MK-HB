@@ -33,6 +33,7 @@ const AdminProductsPage = load(() => import("../pages/admin/AdminProductsPage").
 const AdminSkusPage = load(() => import("../pages/admin/AdminSkusPage").then((m) => ({ default: m.AdminSkusPage })));
 const AdminSystemPage = load(() => import("../pages/admin/AdminSystemPage").then((m) => ({ default: m.AdminSystemPage })));
 const AdminUsersPage = load(() => import("../pages/admin/AdminUsersPage").then((m) => ({ default: m.AdminUsersPage })));
+const AdminCouponsPage = load(() => import("../pages/admin/AdminCouponsPage").then((m) => ({ default: m.AdminCouponsPage })));
 const AdminPaymentApprovalPage = load(() => import("../pages/admin/AdminPaymentApprovalPage").then((m) => ({ default: m.AdminPaymentApprovalPage })));
 
 // Public Pages (Code Split)
@@ -148,6 +149,7 @@ export function AppRouter() {
         { path: routeConfig.admin.skus.replace(/^\/admin\//, ""), element: <AdminSkusPage /> },
         { path: routeConfig.admin.compatibilityRules.replace(/^\/admin\//, ""), element: <AdminCompatibilityRulesPage /> },
         { path: routeConfig.admin.users.replace(/^\/admin\//, ""), element: <AdminUsersPage /> },
+        { path: routeConfig.admin.coupons.replace(/^\/admin\//, ""), element: <AdminCouponsPage /> },
         { path: routeConfig.admin.paymentApproval.replace(/^\/admin\//, ""), element: <AdminPaymentApprovalPage /> }
       ]
     },

@@ -301,21 +301,27 @@ export function ProductListPage() {
   }, [searchParams]);
 
   useEffect(() => {
+    let active = true;
     async function loadProducts() {
       try {
         setLoading(true); setErrorMessage("");
         const response = await getProducts(queryParams);
+        if (!active) return;
         const normalized = normalizeProductResponse(response);
         setProducts(normalized.items);
         setPagination(normalized.pagination);
       } catch (error) {
+        if (!active) return;
         setErrorMessage(axios.isAxiosError(error)
           ? error.response?.data?.message || "Không thể tải danh sách sản phẩm."
           : error.message || "Không thể tải danh sách sản phẩm.");
         setProducts([]);
-      } finally { setLoading(false); }
+      } finally {
+        if (active) setLoading(false);
+      }
     }
     loadProducts();
+    return () => { active = false; };
   }, [queryParams]);
 
   function handleFilterChange(eventOrE1, eventOrE2) {

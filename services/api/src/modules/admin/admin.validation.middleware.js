@@ -46,13 +46,17 @@ function validateCreateProduct(req, res, next) {
 }
 
 function validateUpdateProduct(req, res, next) {
-  const { name, categoryId, brandId, slug, warrantyMonths } = req.body || {};
-  const allowedKeys = ["name", "categoryId", "brandId", "slug", "description", "warrantyMonths", "warranty_months"];
+  const { name, categoryId, brandId, slug, warrantyMonths, tags } = req.body || {};
+  const allowedKeys = ["name", "categoryId", "brandId", "slug", "description", "warrantyMonths", "warranty_months", "tags"];
   const hasAnyField = allowedKeys.some((key) => Object.prototype.hasOwnProperty.call(req.body || {}, key));
   const errors = [];
 
   if (!hasAnyField) {
     errors.push({ field: "body", message: "At least one field is required to update product" });
+  }
+
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, "tags") && !Array.isArray(tags)) {
+    errors.push({ field: "tags", message: "tags must be an array of strings" });
   }
 
   if (Object.prototype.hasOwnProperty.call(req.body || {}, "name") && !isNonEmpty(name)) {
@@ -277,6 +281,8 @@ function validateSystemSettings(req, res, next) {
     "support_phone",
     "online_payment_mode",
     "shipping_mode",
+    "free_shipping_threshold",
+    "default_shipping_fee",
     "maintenance_mode",
     "bank_name",
     "bank_account_number",
@@ -304,6 +310,21 @@ function validateSystemSettings(req, res, next) {
       ]);
     }
     req.body.online_payment_mode = normalizedMode;
+  }
+
+  for (const numericKey of ["free_shipping_threshold", "default_shipping_fee"]) {
+    if (Object.prototype.hasOwnProperty.call(body, numericKey)) {
+      const val = Number(body[numericKey]);
+      if (!Number.isFinite(val) || val < 0) {
+        return sendValidationError(res, [
+          {
+            field: numericKey,
+            message: `${numericKey} must be a non-negative number`
+          }
+        ]);
+      }
+      req.body[numericKey] = String(Math.round(val));
+    }
   }
 
   return next();

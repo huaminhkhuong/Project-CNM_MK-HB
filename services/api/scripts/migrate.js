@@ -4,6 +4,7 @@
  */
 const fs = require("fs");
 const path = require("path");
+const { execFileSync } = require("child_process");
 const { getDbPool } = require("../src/config/database");
 
 const DEFAULT_SETTINGS = [
@@ -12,6 +13,8 @@ const DEFAULT_SETTINGS = [
   { key: "support_phone", value: "0900000000", description: "Số điện thoại hỗ trợ" },
   { key: "online_payment_mode", value: "sandbox", description: "Chế độ thanh toán online: sandbox/mock/live" },
   { key: "shipping_mode", value: "mock", description: "Chế độ vận chuyển: mock/live" },
+  { key: "free_shipping_threshold", value: "5000000", description: "Ngưỡng miễn phí giao hàng (VNĐ)" },
+  { key: "default_shipping_fee", value: "30000", description: "Phí giao hàng tiêu chuẩn cho đơn dưới ngưỡng miễn phí (VNĐ)" },
   { key: "maintenance_mode", value: "off", description: "Bật/tắt chế độ bảo trì" },
   { key: "bank_name", value: "Techcombank", description: "Tên ngân hàng nhận chuyển khoản" },
   { key: "bank_account_number", value: "8686868991", description: "Số tài khoản ngân hàng nhận thanh toán" },
@@ -20,6 +23,38 @@ const DEFAULT_SETTINGS = [
   { key: "store_tax_id", value: "0316888999", description: "Mã số thuế doanh nghiệp" },
   { key: "store_address", value: "123 Nguyễn Thị Minh Khai, Q.1, TP. Hồ Chí Minh", description: "Địa chỉ trụ sở / Showroom chính" }
 ];
+
+async function hasTable(connection, tableName) {
+  const [rows] = await connection.query(
+    `
+      SELECT TABLE_NAME
+      FROM INFORMATION_SCHEMA.TABLES
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+    `,
+    [tableName]
+  );
+  return Array.isArray(rows) && rows.length > 0;
+}
+
+async function executeSqlFileIfExists(connection, relativeMigrationPath, label) {
+  const fullPath = path.join(__dirname, "..", "prisma", "migrations", relativeMigrationPath);
+  if (!fs.existsSync(fullPath)) return;
+
+  const sqlContent = fs.readFileSync(fullPath, "utf-8");
+  const cleanSql = sqlContent
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/--.*$/gm, "");
+  const statements = cleanSql
+    .split(";")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  for (const statement of statements) {
+    await connection.query(statement);
+  }
+  console.log(`✅ [Migration] Executed ${label} (${statements.length} statements).`);
+}
 
 async function hasColumn(connection, tableName, columnName) {
   const [rows] = await connection.query(
@@ -49,6 +84,20 @@ async function hasIndex(connection, tableName, indexName) {
   return Array.isArray(rows) && rows.length > 0;
 }
 
+async function hasConstraint(connection, tableName, constraintName) {
+  const [rows] = await connection.query(
+    `
+      SELECT CONSTRAINT_NAME
+      FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+        AND CONSTRAINT_NAME = ?
+    `,
+    [tableName, constraintName]
+  );
+  return Array.isArray(rows) && rows.length > 0;
+}
+
 async function runCanonicalMigrations() {
   console.log("🚀 [Migration] Starting Canonical Database Migration...");
   const pool = getDbPool();
@@ -62,31 +111,51 @@ async function runCanonicalMigrations() {
   }
 
   try {
-    // 1. Execute consolidated DDL from canonical migration file
-    const migrationSqlPath = path.join(
-      __dirname,
-      "..",
-      "prisma",
-      "migrations",
-      "20261022170000_canonical_schema_consolidation",
-      "migration.sql"
-    );
+    // 0. Fresh database bootstrap: if core tables (users/orders/order_items) do not exist yet,
+    // push the canonical Prisma schema first so FK-dependent migrations never fail on empty volumes.
+    const [hasUsers, hasOrders, hasOrderItems] = await Promise.all([
+      hasTable(connection, "users"),
+      hasTable(connection, "orders"),
+      hasTable(connection, "order_items")
+    ]);
 
-    if (fs.existsSync(migrationSqlPath)) {
-      const sqlContent = fs.readFileSync(migrationSqlPath, "utf-8");
-      const cleanSql = sqlContent
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/--.*$/gm, "");
-      const statements = cleanSql
-        .split(";")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-
-      for (const statement of statements) {
-        await connection.query(statement);
+    if (!hasUsers || !hasOrders || !hasOrderItems) {
+      console.log("📦 [Migration] Fresh/empty database detected. Bootstrapping base schema via Prisma db push...");
+      const apiRoot = path.resolve(__dirname, "..");
+      const prismaCli = path.join(apiRoot, "node_modules", "prisma", "build", "index.js");
+      if (fs.existsSync(prismaCli)) {
+        execFileSync(process.execPath, [prismaCli, "db", "push", "--skip-generate"], {
+          cwd: apiRoot,
+          stdio: "inherit",
+          env: process.env
+        });
+      } else {
+        execFileSync("npx", ["prisma", "db", "push", "--skip-generate"], {
+          cwd: apiRoot,
+          stdio: "inherit",
+          env: process.env,
+          shell: process.platform === "win32"
+        });
       }
-      console.log(`✅ [Migration] Executed canonical schema consolidation DDL (${statements.length} statements).`);
+      console.log("✅ [Migration] Base Prisma schema bootstrapped successfully.");
     }
+
+    // 1. Execute consolidated DDL from canonical, audit_logs, and warranty_lifecycle migration files
+    await executeSqlFileIfExists(
+      connection,
+      path.join("20261022170000_canonical_schema_consolidation", "migration.sql"),
+      "canonical schema consolidation DDL"
+    );
+    await executeSqlFileIfExists(
+      connection,
+      path.join("20260601170000_create_audit_logs", "migration.sql"),
+      "audit_logs DDL"
+    );
+    await executeSqlFileIfExists(
+      connection,
+      path.join("20261021100000_warranty_lifecycle_master_schema", "migration.sql"),
+      "warranty_lifecycle master DDL"
+    );
 
     // 2. Ensure orders table columns
     if (!(await hasColumn(connection, "orders", "payment_proof"))) {
@@ -165,10 +234,31 @@ async function runCanonicalMigrations() {
       console.log("✅ [Migration] Added quantity to pc_build_items.");
     }
 
-    // 6. Ensure compatibility_rules name column
+    // 6. Ensure compatibility_rules name column & fix key-only rule edge cases (id=172 GT vs GTE, id=183 null is_compatible)
     if (!(await hasColumn(connection, "compatibility_rules", "name"))) {
       await connection.query("ALTER TABLE compatibility_rules ADD COLUMN name VARCHAR(255) NULL");
       console.log("✅ [Migration] Added name to compatibility_rules.");
+    }
+    if (await hasTable(connection, "compatibility_rules")) {
+      await connection.query(
+        `UPDATE compatibility_rules SET operator = 'GT' WHERE source_attribute_key = 'radiator_size' AND target_attribute_key = 'case_radiator_support' AND operator = 'GTE' AND is_compatible = 0`
+      );
+      await connection.query(
+        `UPDATE compatibility_rules SET is_compatible = 1 WHERE source_attribute_key = 'interface' AND target_attribute_key = 'm2_slot' AND is_compatible IS NULL`
+      );
+      // Deactivate corrupted seeded rules where attribute_value_1/2 contradict actual compatibility
+      // (e.g., Micro-ATX vs Micro-ATX/Mini-ITX case or 360mm AIO vs 240mm/360mm radiator case)
+      await connection.query(
+        `UPDATE compatibility_rules r
+         INNER JOIN attribute_values av1 ON av1.id = r.attribute_value_1
+         INNER JOIN attribute_values av2 ON av2.id = r.attribute_value_2
+         SET r.is_active = 0
+         WHERE r.is_compatible = 0
+           AND (
+             (r.source_category_id = 2 AND r.target_category_id = 7 AND av1.value LIKE '%Micro-ATX%' AND av2.value LIKE '%Micro-ATX%')
+             OR (r.source_category_id = 8 AND r.target_category_id = 7 AND av1.value LIKE '%360mm%' AND av2.value LIKE '%360mm%')
+           )`
+      );
     }
 
     // 7. Ensure product_reviews table
@@ -206,6 +296,121 @@ async function runCanonicalMigrations() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
     console.log("✅ [Migration] Ensured token_blacklist table.");
+
+    // 8b. Ensure tags and product_tags tables for normalized component tagging
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS tags (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        code VARCHAR(64) NOT NULL UNIQUE,
+        label VARCHAR(100) NOT NULL,
+        group_name VARCHAR(50) NOT NULL DEFAULT 'use_case',
+        description VARCHAR(255) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_tags_group (group_name)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS product_tags (
+        product_id INT NOT NULL,
+        tag_id INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (product_id, tag_id),
+        INDEX idx_product_tags_tag (tag_id),
+        CONSTRAINT fk_product_tags_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+        CONSTRAINT fk_product_tags_tag FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    console.log("✅ [Migration] Ensured tags and product_tags tables.");
+
+    // 8c. Ensure warranty_months column exists on products and product_skus to match schema.prisma
+    if (!(await hasColumn(connection, "products", "warranty_months"))) {
+      await connection.query(`ALTER TABLE products ADD COLUMN warranty_months INT NULL DEFAULT 24`);
+      console.log("✅ [Migration] Added products.warranty_months column.");
+    }
+    if (!(await hasColumn(connection, "product_skus", "warranty_months"))) {
+      await connection.query(`ALTER TABLE product_skus ADD COLUMN warranty_months INT NULL DEFAULT 24`);
+      console.log("✅ [Migration] Added product_skus.warranty_months column.");
+    }
+
+    // 8d. Widen Product.price & ProductSku.price from DECIMAL(10,2) to DECIMAL(12,2) (support >= 100M VND workstations/GPUs)
+    if (await hasColumn(connection, "products", "price")) {
+      await connection.query(`ALTER TABLE products MODIFY COLUMN price DECIMAL(12, 2) NULL`);
+    }
+    if (await hasColumn(connection, "product_skus", "price")) {
+      await connection.query(`ALTER TABLE product_skus MODIFY COLUMN price DECIMAL(12, 2) NULL`);
+    }
+
+    // 8e. [P2-02] Integrity constraints, unique keys, composite indexes, WarrantyRequest FK alignment & Y2038-safe DATETIME
+    // Deduplicate product_reviews (keep newest id per product_id + user_id) before adding unique constraint
+    if (await hasTable(connection, "product_reviews")) {
+      await connection.query(`
+        DELETE pr1 FROM product_reviews pr1
+        INNER JOIN product_reviews pr2
+          ON pr1.product_id = pr2.product_id
+         AND pr1.user_id = pr2.user_id
+         AND pr1.id < pr2.id
+      `);
+      if (!(await hasIndex(connection, "product_reviews", "uq_product_reviews_product_user"))) {
+        await connection.query(`ALTER TABLE product_reviews ADD UNIQUE INDEX uq_product_reviews_product_user (product_id, user_id)`);
+      }
+    }
+    if ((await hasTable(connection, "product_skus")) && !(await hasIndex(connection, "product_skus", "uq_product_skus_sku"))) {
+      await connection.query(`ALTER TABLE product_skus ADD UNIQUE INDEX uq_product_skus_sku (sku)`);
+    }
+    if ((await hasTable(connection, "products")) && !(await hasIndex(connection, "products", "uq_products_slug"))) {
+      await connection.query(`ALTER TABLE products ADD UNIQUE INDEX uq_products_slug (slug)`);
+    }
+    if ((await hasTable(connection, "carts")) && !(await hasIndex(connection, "carts", "uq_carts_user_id"))) {
+      await connection.query(`ALTER TABLE carts ADD UNIQUE INDEX uq_carts_user_id (user_id)`);
+    }
+    if ((await hasTable(connection, "cart_items")) && !(await hasIndex(connection, "cart_items", "uq_cart_items_cart_variant"))) {
+      await connection.query(`ALTER TABLE cart_items ADD UNIQUE INDEX uq_cart_items_cart_variant (cart_id, product_variant_id)`);
+    }
+    if ((await hasTable(connection, "sku_attributes")) && !(await hasIndex(connection, "sku_attributes", "uq_sku_attributes_sku_val"))) {
+      await connection.query(`ALTER TABLE sku_attributes ADD UNIQUE INDEX uq_sku_attributes_sku_val (sku_id, attribute_value_id)`);
+    }
+    if ((await hasTable(connection, "orders")) && !(await hasIndex(connection, "orders", "idx_orders_status_payment_created"))) {
+      await connection.query(`ALTER TABLE orders ADD INDEX idx_orders_status_payment_created (status, payment_status, created_at)`);
+    }
+    if (await hasTable(connection, "coupons")) {
+      await connection.query(`ALTER TABLE coupons MODIFY COLUMN start_date DATETIME NOT NULL, MODIFY COLUMN end_date DATETIME NOT NULL`);
+    }
+    if (await hasTable(connection, "warranty_requests")) {
+      if (!(await hasIndex(connection, "warranty_requests", "idx_warranty_requests_status_created"))) {
+        await connection.query(`ALTER TABLE warranty_requests ADD INDEX idx_warranty_requests_status_created (status, created_at)`);
+      }
+      if (await hasTable(connection, "warranty_request_events")) {
+        await connection.query(`DELETE FROM warranty_request_events WHERE request_id NOT IN (SELECT id FROM warranty_requests)`);
+        await connection.query(`ALTER TABLE warranty_request_events MODIFY COLUMN request_id BIGINT NOT NULL`);
+        if (!(await hasIndex(connection, "warranty_request_events", "idx_warranty_request_events_req"))) {
+          await connection.query(`ALTER TABLE warranty_request_events ADD INDEX idx_warranty_request_events_req (request_id)`);
+        }
+        if (!(await hasConstraint(connection, "warranty_request_events", "fk_warranty_events_request"))) {
+          await connection.query(`ALTER TABLE warranty_request_events ADD CONSTRAINT fk_warranty_events_request FOREIGN KEY (request_id) REFERENCES warranty_requests(id) ON DELETE CASCADE ON UPDATE RESTRICT`);
+        }
+      }
+      if (await hasTable(connection, "warranty_request_attachments")) {
+        await connection.query(`DELETE FROM warranty_request_attachments WHERE request_id NOT IN (SELECT id FROM warranty_requests)`);
+        await connection.query(`ALTER TABLE warranty_request_attachments MODIFY COLUMN request_id BIGINT NOT NULL`);
+        if (!(await hasIndex(connection, "warranty_request_attachments", "idx_warranty_request_attachments_req"))) {
+          await connection.query(`ALTER TABLE warranty_request_attachments ADD INDEX idx_warranty_request_attachments_req (request_id)`);
+        }
+        if (!(await hasConstraint(connection, "warranty_request_attachments", "fk_warranty_attachments_request"))) {
+          await connection.query(`ALTER TABLE warranty_request_attachments ADD CONSTRAINT fk_warranty_attachments_request FOREIGN KEY (request_id) REFERENCES warranty_requests(id) ON DELETE CASCADE ON UPDATE RESTRICT`);
+        }
+      }
+      if (await hasTable(connection, "warranty_notifications")) {
+        await connection.query(`UPDATE warranty_notifications SET request_id = NULL WHERE request_id IS NOT NULL AND request_id NOT IN (SELECT id FROM warranty_requests)`);
+        await connection.query(`ALTER TABLE warranty_notifications MODIFY COLUMN request_id BIGINT NULL`);
+        if (!(await hasIndex(connection, "warranty_notifications", "idx_warranty_notifications_req"))) {
+          await connection.query(`ALTER TABLE warranty_notifications ADD INDEX idx_warranty_notifications_req (request_id)`);
+        }
+        if (!(await hasConstraint(connection, "warranty_notifications", "fk_warranty_notifications_request"))) {
+          await connection.query(`ALTER TABLE warranty_notifications ADD CONSTRAINT fk_warranty_notifications_request FOREIGN KEY (request_id) REFERENCES warranty_requests(id) ON DELETE SET NULL ON UPDATE RESTRICT`);
+        }
+      }
+    }
+    console.log("✅ [Migration] Ensured P2-02 integrity constraints, unique indexes, WarrantyRequest FKs & DATETIME coupons.");
 
     // 9. Seed default system_settings
     for (const item of DEFAULT_SETTINGS) {
@@ -254,9 +459,14 @@ async function ensureEssentialSeedData(connection) {
       await seedHardwareSpecs();
     }
 
-    // 3. Check & Auto-seed Reviews if empty
+    // 3. Check & Auto-seed Reviews if empty (only when users and products already exist)
+    const [userRows] = await connection.query("SELECT COUNT(*) AS total FROM users");
     const [reviewRows] = await connection.query("SELECT COUNT(*) AS total FROM product_reviews");
-    if (reviewRows && reviewRows[0] && reviewRows[0].total === 0) {
+    if (
+      productRows && productRows[0].total > 0 &&
+      userRows && userRows[0].total > 0 &&
+      reviewRows && reviewRows[0].total === 0
+    ) {
       console.log("⚠️ [Migration] 'product_reviews' is empty. Auto-seeding verified reviews...");
       const { seedReviews } = require("../prisma/seed-reviews");
       await seedReviews();

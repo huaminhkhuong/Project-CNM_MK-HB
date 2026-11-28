@@ -245,7 +245,7 @@ function getCpuAudience(scores) {
 
 function getPrimarySkuId(product) {
   const variant = getPrimaryVariant(product);
-  return variant?.id || variant?.sku_id || variant?.skuId || null;
+  return variant?.variant_id || variant?.id || variant?.sku_id || variant?.skuId || null;
 }
 
 export function CompareProductsPage() {

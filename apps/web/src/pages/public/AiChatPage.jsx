@@ -67,8 +67,17 @@ function normalizeApiData(response) {
   return response?.data?.data || response?.data || response || {};
 }
 
+function escapeHtml(raw) {
+  return String(raw || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function renderContent(content) {
-  return String(content || "")
+  return escapeHtml(content)
     .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
     .replace(/\n/g, "<br/>");
 }
@@ -114,7 +123,8 @@ function getBuildComponents(build) {
 export function AiChatPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user, isAuthenticated } = useAuth();
+  const { authState, isAuthenticated } = useAuth();
+  const user = authState?.user || null;
 
   const [aiMessages, setAiMessages] = useState(() => {
     try {

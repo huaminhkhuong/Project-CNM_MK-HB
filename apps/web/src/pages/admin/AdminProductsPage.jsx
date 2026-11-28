@@ -6,8 +6,10 @@ import { formatAdminNumber, getAdminErrorMessage, normalizeAdminList } from "../
 import {
   changeAdminProductStatus,
   createAdminProduct,
+  createAdminTag,
   deleteAdminProduct,
   getAdminProducts,
+  getAdminTags,
   updateAdminProduct
 } from "../../services/admin-products.service";
 import "../../styles/admin-ai-studio.css";
@@ -30,6 +32,7 @@ function normalizeProductRow(product) {
     brandId: product?.brand_id || product?.brand?.id || "",
     brandName: product?.brand_name || product?.brand?.name || "",
     status: String(product?.status || "ACTIVE").toUpperCase(),
+    tags: Array.isArray(product?.tags) ? product.tags : [],
     variants: Array.isArray(product?.variants) ? product.variants : []
   };
 }
@@ -41,7 +44,8 @@ function createInitialFormState() {
     description: "",
     warrantyMonths: "24",
     categoryId: "",
-    brandId: ""
+    brandId: "",
+    tags: []
   };
 }
 
@@ -75,9 +79,13 @@ export function AdminProductsPage() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [brands, setBrands] = useState([]);
+  const [availableTags, setAvailableTags] = useState([]);
   const [keyword, setKeyword] = useState("");
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [selectedBrandId, setSelectedBrandId] = useState("");
+  const [selectedTag, setSelectedTag] = useState("");
+  const [newTagLabel, setNewTagLabel] = useState("");
+  const [creatingTag, setCreatingTag] = useState(false);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ page: 1, limit: 30, totalItems: 0, totalPages: 1 });
   const [formValues, setFormValues] = useState(createInitialFormState());
@@ -98,9 +106,15 @@ export function AdminProductsPage() {
     [products]
   );
 
-  const hasActiveFilters = Boolean(keyword.trim() || selectedCategoryId || selectedBrandId);
+  const hasActiveFilters = Boolean(keyword.trim() || selectedCategoryId || selectedBrandId || selectedTag);
 
-  async function loadProductsData(targetPage = 1, catId = selectedCategoryId, bId = selectedBrandId, kw = keyword) {
+  async function loadProductsData(
+    targetPage = 1,
+    catId = selectedCategoryId,
+    bId = selectedBrandId,
+    kw = keyword,
+    tagCode = selectedTag
+  ) {
     try {
       setLoading(true);
       setErrorMessage("");
@@ -109,6 +123,7 @@ export function AdminProductsPage() {
       if (catId) params.categoryId = catId;
       if (bId) params.brandId = bId;
       if (kw?.trim()) params.keyword = kw.trim();
+      if (tagCode) params.tag = tagCode;
 
       const response = await getAdminProducts(params);
       const items = normalizeAdminList(response).map(normalizeProductRow);
@@ -137,13 +152,15 @@ export function AdminProductsPage() {
       try {
         setLoading(true);
         setErrorMessage("");
-        const [categoriesResponse, brandsResponse] = await Promise.all([
+        const [categoriesResponse, brandsResponse, tagsResponse] = await Promise.all([
           getCategories(),
-          getBrands()
+          getBrands(),
+          getAdminTags().catch(() => ({ data: [] }))
         ]);
         setCategories(normalizeEntityList(categoriesResponse));
         setBrands(normalizeEntityList(brandsResponse));
-        await loadProductsData(1, "", "", "");
+        setAvailableTags(normalizeEntityList(tagsResponse));
+        await loadProductsData(1, "", "", "", "");
       } catch (error) {
         setErrorMessage(getAdminErrorMessage(error, "Không thể tải dữ liệu ban đầu."));
       } finally {
@@ -156,33 +173,77 @@ export function AdminProductsPage() {
   function handleCategoryFilterChange(newCatId) {
     setSelectedCategoryId(newCatId);
     setPage(1);
-    loadProductsData(1, newCatId, selectedBrandId, keyword);
+    loadProductsData(1, newCatId, selectedBrandId, keyword, selectedTag);
   }
 
   function handleBrandFilterChange(newBrandId) {
     setSelectedBrandId(newBrandId);
     setPage(1);
-    loadProductsData(1, selectedCategoryId, newBrandId, keyword);
+    loadProductsData(1, selectedCategoryId, newBrandId, keyword, selectedTag);
+  }
+
+  function handleTagFilterChange(newTag) {
+    setSelectedTag(newTag);
+    setPage(1);
+    loadProductsData(1, selectedCategoryId, selectedBrandId, keyword, newTag);
   }
 
   function handleSearchSubmit(event) {
     event.preventDefault();
     setPage(1);
-    loadProductsData(1, selectedCategoryId, selectedBrandId, keyword);
+    loadProductsData(1, selectedCategoryId, selectedBrandId, keyword, selectedTag);
   }
 
   function handleClearFilters() {
     setKeyword("");
     setSelectedCategoryId("");
     setSelectedBrandId("");
+    setSelectedTag("");
     setPage(1);
-    loadProductsData(1, "", "", "");
+    loadProductsData(1, "", "", "", "");
   }
 
   function handlePageChange(newPage) {
     if (newPage < 1 || (pagination.totalPages && newPage > pagination.totalPages)) return;
     setPage(newPage);
-    loadProductsData(newPage, selectedCategoryId, selectedBrandId, keyword);
+    loadProductsData(newPage, selectedCategoryId, selectedBrandId, keyword, selectedTag);
+  }
+
+  function handleToggleFormTag(code) {
+    setFormValues((prev) => {
+      const current = Array.isArray(prev.tags) ? prev.tags : [];
+      const exists = current.includes(code);
+      return {
+        ...prev,
+        tags: exists ? current.filter((t) => t !== code) : [...current, code]
+      };
+    });
+  }
+
+  async function handleQuickCreateTag() {
+    const label = newTagLabel.trim();
+    if (!label) return;
+    try {
+      setCreatingTag(true);
+      setErrorMessage("");
+      const res = await createAdminTag({ label, code: label, groupName: "use_case" });
+      const created = res?.data || res;
+      if (created?.code) {
+        setAvailableTags((prev) => {
+          if (prev.some((t) => t.code === created.code)) return prev;
+          return [...prev, { ...created, productCount: 0 }];
+        });
+        setFormValues((prev) => {
+          const cur = Array.isArray(prev.tags) ? prev.tags : [];
+          return cur.includes(created.code) ? prev : { ...prev, tags: [...cur, created.code] };
+        });
+        setNewTagLabel("");
+      }
+    } catch (error) {
+      setErrorMessage(getAdminErrorMessage(error, "Không thể tạo tag mới."));
+    } finally {
+      setCreatingTag(false);
+    }
   }
 
   function resetForm() {
@@ -223,18 +284,25 @@ export function AdminProductsPage() {
 
       const response = await getProductDetail(productId);
       const detail = response?.data || response;
+      const listMatch = products.find((p) => Number(p.id) === Number(productId));
       const detailName = detail.name || detail.product_name || "";
       const detailCategoryId = detail.category?.id || detail.category_id || "";
       const detailBrandId = detail.brand?.id || detail.brand_id || "";
+      const detailTags = Array.isArray(detail.tags)
+        ? detail.tags
+        : Array.isArray(listMatch?.tags)
+        ? listMatch.tags
+        : [];
 
-      setEditingProductId(detail.id);
+      setEditingProductId(detail.id ?? detail.product_id ?? productId);
       setFormValues({
         name: detailName,
         slug: detail.slug || "",
         description: detail.description || "",
         warrantyMonths: String(detail.warrantyMonths ?? detail.warranty_months ?? 24),
         categoryId: String(detailCategoryId),
-        brandId: String(detailBrandId)
+        brandId: String(detailBrandId),
+        tags: detailTags
       });
       setFormErrors({});
       setIsDrawerOpen(true);
@@ -262,7 +330,8 @@ export function AdminProductsPage() {
         description: String(formValues.description || "").trim(),
         warrantyMonths: Number(formValues.warrantyMonths) || 24,
         categoryId: Number(formValues.categoryId),
-        brandId: Number(formValues.brandId)
+        brandId: Number(formValues.brandId),
+        tags: Array.isArray(formValues.tags) ? formValues.tags : []
       };
 
       const response = editingProductId
@@ -479,6 +548,17 @@ export function AdminProductsPage() {
               ))}
             </select>
 
+            <select
+              className="cat-select"
+              value={selectedTag}
+              onChange={(e) => handleTagFilterChange(e.target.value)}
+            >
+              <option value="">Tất cả Tag nhu cầu ({availableTags.length})</option>
+              {availableTags.map((t) => (
+                <option key={t.code} value={t.code}>#{t.code} — {t.label}</option>
+              ))}
+            </select>
+
             <button type="submit" className="cat-btn-dark">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
               <span>Tìm kiếm</span>
@@ -525,6 +605,26 @@ export function AdminProductsPage() {
                           {product.description && (
                             <div className="cat-prod-desc" title={product.description}>
                               {product.description}
+                            </div>
+                          )}
+                          {Array.isArray(product.tags) && product.tags.length > 0 && (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6 }}>
+                              {product.tags.map((code) => (
+                                <span
+                                  key={code}
+                                  style={{
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    padding: "2px 8px",
+                                    borderRadius: 999,
+                                    background: "#eef2ff",
+                                    color: "#4338ca",
+                                    border: "1px solid #c7d2fe"
+                                  }}
+                                >
+                                  #{code}
+                                </span>
+                              ))}
                             </div>
                           )}
                         </td>
@@ -738,6 +838,47 @@ export function AdminProductsPage() {
                           {m} tháng
                         </button>
                       ))}
+                    </div>
+                  </div>
+
+                  <div className="sys-field">
+                    <label className="sys-field-label">Tag nhu cầu Smart PC Builder (0..N tag)</label>
+                    <p style={{ margin: "0 0 8px", fontSize: 12, color: "#64748b" }}>
+                      Để trống (0 tag) = linh kiện dùng chung mọi nhu cầu. Gắn tag để thuật toán GPU-first / Tag-aware ưu tiên đúng phân khúc.
+                    </p>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                      {availableTags.map((tag) => {
+                        const active = Array.isArray(formValues.tags) && formValues.tags.includes(tag.code);
+                        return (
+                          <button
+                            key={tag.code}
+                            type="button"
+                            onClick={() => handleToggleFormTag(tag.code)}
+                            title={tag.description || tag.label}
+                            className={`cat-warranty-chip${active ? " is-active" : ""}`}
+                          >
+                            {active ? "✓ " : ""}#{tag.code} ({tag.label})
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input
+                        className="cat-input"
+                        value={newTagLabel}
+                        onChange={(e) => setNewTagLabel(e.target.value)}
+                        placeholder="Thêm tag mới (VD: Mini ITX, Livestream)..."
+                        style={{ flex: 1 }}
+                      />
+                      <button
+                        type="button"
+                        className="cat-btn-dark"
+                        disabled={creatingTag || !newTagLabel.trim()}
+                        onClick={handleQuickCreateTag}
+                        style={{ whiteSpace: "nowrap" }}
+                      >
+                        {creatingTag ? "Đang tạo..." : "+ Tạo tag"}
+                      </button>
                     </div>
                   </div>
 

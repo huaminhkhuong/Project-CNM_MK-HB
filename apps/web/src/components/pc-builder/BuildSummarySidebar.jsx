@@ -237,19 +237,23 @@ export function BuildSummarySidebar({
         <div className="scorecard-grid">
           <div className="scorecard-item">
             <span className="scorecard-label">Tương thích</span>
-            <span className="scorecard-val">{xaiReport.scores?.compatibilityScore || 90}%</span>
+            <span className="scorecard-val">{xaiReport.scores?.compatibilityScore ?? xaiReport.score ?? 0}%</span>
           </div>
           <div className="scorecard-item">
             <span className="scorecard-label">Hiệu năng</span>
-            <span className="scorecard-val">{xaiReport.scores?.performanceScore || 85}%</span>
+            <span className="scorecard-val">{xaiReport.scores?.performanceScore ?? 0}%</span>
           </div>
           <div className="scorecard-item">
             <span className="scorecard-label">P/P Giá trị</span>
-            <span className="scorecard-val">{xaiReport.scores?.valueScore || 88}%</span>
+            <span className="scorecard-val">{xaiReport.scores?.valueScore ?? 0}%</span>
           </div>
           <div className="scorecard-item">
             <span className="scorecard-label">Điện / Tản</span>
-            <span className="scorecard-val">{xaiReport.scores?.powerThermalScore || 92}%</span>
+            <span className="scorecard-val">{xaiReport.scores?.powerThermalScore ?? 0}%</span>
+          </div>
+          <div className="scorecard-item">
+            <span className="scorecard-label">Nâng cấp</span>
+            <span className="scorecard-val">{xaiReport.scores?.upgradeScore ?? 0}%</span>
           </div>
         </div>
 

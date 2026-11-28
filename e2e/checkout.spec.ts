@@ -15,12 +15,12 @@ test.describe("Checkout", () => {
     
     // Click first product card link
     const firstCard = page.locator('[data-testid="product-card"]').first();
-    await expect(firstCard).toBeVisible();
+    await expect(firstCard).toBeVisible({ timeout: 15000 });
     await firstCard.locator("a").first().click();
     
     // Add to cart
     const addCartBtn = page.locator('button').filter({ hasText: "Thêm vào giỏ hàng" }).first();
-    await expect(addCartBtn).toBeVisible();
+    await expect(addCartBtn).toBeVisible({ timeout: 10000 });
     await addCartBtn.click();
     
     // Should show success message

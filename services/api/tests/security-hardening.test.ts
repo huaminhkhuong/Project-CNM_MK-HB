@@ -2,7 +2,8 @@ import test, { describe, after } from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
 import { createApp } from "../src/app";
-import { closePool } from "../src/config/database";
+import { closePool, getDbPool } from "../src/config/database";
+import { signAccessToken } from "../src/services/token.service";
 import { sanitizeString, sanitizeDeep } from "../src/middlewares/sanitize.middleware";
 
 const app = createApp();
@@ -107,6 +108,46 @@ describe("Stage 1: Security Hardening & Infrastructure Tests", () => {
       if (res.headers["x-ratelimit-limit"]) {
         assert.ok(Number(res.headers["x-ratelimit-limit"]) > 0);
       }
+    });
+  });
+
+  describe("5. Authoritative Server-Side Shipping Fee (Anti-Tampering)", () => {
+    test("ignores client-supplied shippingFee=0 on orders below 5,000,000 VND and applies 30,000 VND server-side", async () => {
+      const pool = getDbPool();
+      const [users]: any = await pool.execute("SELECT id, email FROM users ORDER BY id ASC LIMIT 1");
+      const [cheapSkus]: any = await pool.execute(
+        "SELECT id, product_id, price, stock FROM product_skus WHERE is_active = 1 AND stock >= 2 AND price > 0 AND price < 4000000 ORDER BY price ASC LIMIT 1"
+      );
+      if (!users.length || !cheapSkus.length) return;
+
+      const user = users[0];
+      const sku = cheapSkus[0];
+      const token = signAccessToken({ userId: String(user.id), email: user.email, role: "CUSTOMER" });
+
+      const checkoutRes = await request(app)
+        .post("/api/orders/checkout")
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          paymentMethod: "COD",
+          shippingAddress: "Test Anti-Tamper Shipping - 0909111222 - Q1 HCM",
+          shippingFee: 0,
+          items: [{ productId: sku.product_id, productVariantId: sku.id, quantity: 1 }]
+        });
+
+      assert.equal(checkoutRes.status, 201);
+      const order = checkoutRes.body.data;
+      assert.equal(Number(order.shipping_fee), 30000, "Server must enforce 30,000 VND shipping fee below 5M threshold");
+      assert.equal(
+        Number(order.final_amount),
+        Number(sku.price) + 30000,
+        "final_amount must reflect server-calculated shipping fee"
+      );
+
+      // Clean up created test order & restore stock
+      await pool.execute("DELETE FROM payments WHERE order_id = ?", [order.id]);
+      await pool.execute("DELETE FROM order_items WHERE order_id = ?", [order.id]);
+      await pool.execute("DELETE FROM orders WHERE id = ?", [order.id]);
+      await pool.execute("UPDATE product_skus SET stock = stock + 1 WHERE id = ?", [sku.id]);
     });
   });
 });

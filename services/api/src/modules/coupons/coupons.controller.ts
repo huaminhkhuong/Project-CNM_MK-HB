@@ -164,6 +164,21 @@ export const adminCreateCoupon = asyncHandler(async (req: Request, res: Response
     }
   });
 
+  try {
+    const { recordAuditLog } = require("../../services/audit-log.service");
+    await recordAuditLog({
+      actorUserId: req.user?.userId,
+      actorRole: req.user?.role,
+      action: "COUPON_CREATED",
+      entityType: "COUPON",
+      entityId: newCoupon.id,
+      description: `Created coupon ${newCoupon.code} (${newCoupon.discount_type}: ${newCoupon.discount_value})`,
+      metadata: { code: newCoupon.code, discountType: newCoupon.discount_type, discountValue: Number(newCoupon.discount_value) }
+    });
+  } catch {
+    // non-fatal
+  }
+
   res.status(201).json({
     success: true,
     message: "Tạo mã giảm giá thành công",
@@ -203,6 +218,21 @@ export const adminUpdateCoupon = asyncHandler(async (req: Request, res: Response
       ...(payload.is_active !== undefined ? { is_active: Boolean(payload.is_active) } : {})
     }
   });
+
+  try {
+    const { recordAuditLog } = require("../../services/audit-log.service");
+    await recordAuditLog({
+      actorUserId: req.user?.userId,
+      actorRole: req.user?.role,
+      action: "COUPON_UPDATED",
+      entityType: "COUPON",
+      entityId: updated.id,
+      description: `Updated coupon ${updated.code} (active=${updated.is_active})`,
+      metadata: { code: updated.code, isActive: updated.is_active }
+    });
+  } catch {
+    // non-fatal
+  }
 
   res.status(200).json({
     success: true,

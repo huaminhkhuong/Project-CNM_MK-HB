@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AdminAlerts, AdminPage, useAdminToast } from "../../components/admin/AdminUi";
-import { getAdminSystemOverview, updateAdminSystemSettings } from "../../services/admin-system.service";
+import { getAdminAuditLogs, getAdminSystemOverview, updateAdminSystemSettings } from "../../services/admin-system.service";
 import { invalidateStoreInfoCache } from "../../services/store-info.service";
 import { formatAdminDateTime, formatAdminNumber, getAdminEnvelopeData, getAdminErrorMessage } from "../../utils/adminUi";
 import "../../styles/admin-ai-studio.css";
@@ -13,6 +13,8 @@ const FIELD_LABELS = {
   support_phone: "Số điện thoại hỗ trợ",
   online_payment_mode: "Thanh toán online",
   shipping_mode: "Vận chuyển",
+  free_shipping_threshold: "Ngưỡng miễn phí ship (VNĐ)",
+  default_shipping_fee: "Phí giao hàng tiêu chuẩn (VNĐ)",
   maintenance_mode: "Chế độ bảo trì",
   bank_name: "Ngân hàng nhận chuyển khoản",
   bank_account_number: "Số tài khoản ngân hàng",
@@ -25,7 +27,7 @@ const FIELD_LABELS = {
 const SETTING_GROUPS = {
   store: ["store_name", "support_email", "support_phone", "store_hotline", "store_tax_id", "store_address"],
   bank: ["bank_name", "bank_account_number", "bank_account_holder"],
-  ops: ["online_payment_mode", "shipping_mode", "maintenance_mode"]
+  ops: ["online_payment_mode", "shipping_mode", "free_shipping_threshold", "default_shipping_fee", "maintenance_mode"]
 };
 
 const SELECT_OPTIONS = {
@@ -50,6 +52,8 @@ const INITIAL_FORM = {
   support_phone: "",
   online_payment_mode: "sandbox",
   shipping_mode: "mock",
+  free_shipping_threshold: "5000000",
+  default_shipping_fee: "30000",
   maintenance_mode: "off",
   bank_name: "",
   bank_account_number: "",
@@ -111,13 +115,42 @@ export function AdminSystemPage() {
   const [initialSavedState, setInitialSavedState] = useState(INITIAL_FORM);
   const [formState, setFormState] = useState(INITIAL_FORM);
 
-  // Registry & Audit filters
+  // Registry & Audit filters + server-side pagination
   const [registrySearch, setRegistrySearch] = useState("");
   const [registryGroup, setRegistryGroup] = useState("all");
   const [auditSearch, setAuditSearch] = useState("");
   const [auditRoleFilter, setAuditRoleFilter] = useState("ALL");
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditLogsData, setAuditLogsData] = useState({
+    items: [],
+    pagination: { page: 1, limit: 20, total: 0, totalPages: 1 }
+  });
 
   useAdminToast(successMessage, () => setSuccessMessage(""));
+
+  const loadAuditLogs = useCallback(async (page = 1, role = "ALL", search = "") => {
+    try {
+      setAuditLoading(true);
+      const response = await getAdminAuditLogs({
+        page,
+        limit: 20,
+        role: role !== "ALL" ? role : undefined,
+        search: search.trim() || undefined
+      });
+      const payload = getAdminEnvelopeData(response, null);
+      if (payload && Array.isArray(payload.items)) {
+        setAuditLogsData({
+          items: payload.items,
+          pagination: payload.pagination || { page, limit: 20, total: payload.items.length, totalPages: 1 }
+        });
+      }
+    } catch {
+      // Fallback to overview auditLogs if endpoint temporarily unavailable
+    } finally {
+      setAuditLoading(false);
+    }
+  }, []);
 
   const loadOverview = useCallback(async (isManualRefresh = false) => {
     try {
@@ -145,10 +178,17 @@ export function AdminSystemPage() {
     loadOverview(false);
   }, [loadOverview]);
 
+  useEffect(() => {
+    loadAuditLogs(auditPage, auditRoleFilter, auditSearch);
+  }, [auditPage, auditRoleFilter, auditSearch, loadAuditLogs]);
+
   const settingsList = useMemo(() => overview?.settings || [], [overview]);
   const metrics = overview?.metrics || {};
   const health = overview?.health || {};
-  const auditLogs = overview?.auditLogs || [];
+  const auditLogs = auditLogsData.items.length > 0 || auditLogsData.pagination.total > 0
+    ? auditLogsData.items
+    : (overview?.auditLogs || []);
+  const auditPagination = auditLogsData.pagination;
 
   const isDirty = useMemo(() => {
     return Object.keys(INITIAL_FORM).some(
@@ -173,8 +213,16 @@ export function AdminSystemPage() {
   const filteredAuditLogs = useMemo(() => {
     const q = auditSearch.trim().toLowerCase();
     return auditLogs.filter((log) => {
-      const role = String(log.actorRole || "HỆ THỐNG").toUpperCase();
-      if (auditRoleFilter !== "ALL" && role !== auditRoleFilter) return false;
+      const role = String(log.actorRole || "SYSTEM").toUpperCase();
+      if (auditRoleFilter !== "ALL") {
+        if (auditRoleFilter === "SALES_STAFF") {
+          if (role !== "SALES_STAFF" && role !== "SALES" && role !== "STAFF") return false;
+        } else if (auditRoleFilter === "TECH_STAFF") {
+          if (role !== "TECH_STAFF" && role !== "TECH" && role !== "TECHNICIAN") return false;
+        } else if (role !== auditRoleFilter) {
+          return false;
+        }
+      }
       if (!q) return true;
       return (
         String(log.action || "").toLowerCase().includes(q) ||
@@ -435,6 +483,8 @@ export function AdminSystemPage() {
                         {renderField("online_payment_mode")}
                         {renderField("shipping_mode")}
                         {renderField("maintenance_mode")}
+                        {renderField("free_shipping_threshold")}
+                        {renderField("default_shipping_fee")}
                       </div>
                       {maintenanceOn && (
                         <div style={{
@@ -583,7 +633,7 @@ export function AdminSystemPage() {
                     <h3 className="ai-studio-panel-title">
                       Nhật Ký Kiểm Toán Thao Tác (Audit Logs){" "}
                       <span style={{ fontSize: 11.5, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "#eff6ff", color: "#1d4ed8" }}>
-                        {filteredAuditLogs.length} sự kiện
+                        {auditPagination.total || filteredAuditLogs.length} sự kiện
                       </span>
                     </h3>
                     <p className="ai-studio-panel-sub">Theo dõi thời gian thực các thao tác quản trị của Admin, Nhân viên bán hàng và Kỹ thuật viên</p>
@@ -592,14 +642,23 @@ export function AdminSystemPage() {
 
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <div className="sys-filter-pills" style={{ marginBottom: 0 }}>
-                    {["ALL", "ADMIN", "STAFF", "TECH"].map((r) => (
+                    {[
+                      { value: "ALL", label: "Tất cả vai trò" },
+                      { value: "ADMIN", label: "ADMIN" },
+                      { value: "SALES_STAFF", label: "SALES_STAFF" },
+                      { value: "TECH_STAFF", label: "TECH_STAFF" },
+                      { value: "SYSTEM", label: "SYSTEM" }
+                    ].map((r) => (
                       <button
-                        key={r}
+                        key={r.value}
                         type="button"
-                        className={`sys-pill-btn${auditRoleFilter === r ? " is-active" : ""}`}
-                        onClick={() => setAuditRoleFilter(r)}
+                        className={`sys-pill-btn${auditRoleFilter === r.value ? " is-active" : ""}`}
+                        onClick={() => {
+                          setAuditRoleFilter(r.value);
+                          setAuditPage(1);
+                        }}
                       >
-                        {r === "ALL" ? "Tất cả vai trò" : r}
+                        {r.label}
                       </button>
                     ))}
                   </div>
@@ -613,7 +672,10 @@ export function AdminSystemPage() {
                       className="ai-doc-search"
                       placeholder="Tìm action hoặc mô tả..."
                       value={auditSearch}
-                      onChange={(e) => setAuditSearch(e.target.value)}
+                      onChange={(e) => {
+                        setAuditSearch(e.target.value);
+                        setAuditPage(1);
+                      }}
                     />
                   </div>
                 </div>
@@ -669,9 +731,35 @@ export function AdminSystemPage() {
                           <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
                             {formatAdminDateTime(log.createdAt)}
                           </div>
-                        </div>
+                      </div>
                       );
                     })}
+                  </div>
+                )}
+
+                {auditPagination.totalPages > 1 && (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 16, paddingTop: 14, borderTop: "1px solid #e2e8f0", gap: 12, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 12.5, color: "#64748b", fontWeight: 600 }}>
+                      Trang <strong>{auditPagination.page}</strong> / {auditPagination.totalPages} (Tổng {auditPagination.total} bản ghi)
+                    </span>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        type="button"
+                        className="sys-pill-btn"
+                        disabled={auditLoading || auditPage <= 1}
+                        onClick={() => setAuditPage((p) => Math.max(1, p - 1))}
+                      >
+                        ← Trang trước
+                      </button>
+                      <button
+                        type="button"
+                        className="sys-pill-btn"
+                        disabled={auditLoading || auditPage >= auditPagination.totalPages}
+                        onClick={() => setAuditPage((p) => Math.min(auditPagination.totalPages, p + 1))}
+                      >
+                        Trang sau →
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

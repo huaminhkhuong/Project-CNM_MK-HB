@@ -12,6 +12,7 @@ const ADMIN_NAV_ITEMS = [
   { to: "/admin/attributes", label: "Thuộc tính", icon: "✨" },
   { to: "/admin/skus", label: "SKU", icon: "📦" },
   { to: "/admin/users", label: "Người dùng", icon: "👥" },
+  { to: "/admin/coupons", label: "Mã giảm giá", icon: "🎟️" },
   { to: "/admin/payment-approval", label: "Duyệt thanh toán", icon: "💳" },
   { to: "/admin/compatibility-rules", label: "Tương thích", icon: "🔗" },
   { to: "/staff/orders", label: "Đơn hàng", icon: "🛒" },

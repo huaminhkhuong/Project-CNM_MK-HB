@@ -1,6 +1,10 @@
+import crypto from "crypto";
 import { Request, Response } from "express";
+import jwt from "jsonwebtoken";
 
+import { env } from "../../config/env";
 import { AppError } from "../../errors/app-error";
+import { invalidateUserAuthCache } from "../../middlewares/auth.middleware";
 import { createUser, findUserByEmail, findUserByPhone, findUserById } from "../../repositories/user.repository";
 import { hashPassword, verifyPassword } from "../../services/password.service";
 import {
@@ -117,6 +121,13 @@ export const refresh = asyncHandler(async (req: Request, res: Response) => {
     throw new AppError("Account is not active", 403);
   }
 
+  // Rotate refresh token: revoke the consumed refresh token before issuing a fresh pair
+  try {
+    await blacklistToken(payload.refreshToken);
+  } catch {
+    // Non-blocking fallback if blacklist table unavailable
+  }
+
   res.status(200).json({
     success: true,
     data: buildAuthResponse(user)
@@ -130,11 +141,25 @@ export const logout = asyncHandler(async (req: Request, res: Response) => {
     throw new AppError("refreshToken is required", 400);
   }
 
-  // Blacklist the token — ignores invalid/expired tokens gracefully
+  // Blacklist refresh token (best-effort)
   try {
     await blacklistToken(refreshToken);
   } catch {
     // If blacklist fails (e.g. DB issue) we still log out the client
+  }
+
+  // Also blacklist the active Bearer access token if valid so logout revokes immediate API access
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const accessToken = authHeader.slice(7).trim();
+    if (accessToken) {
+      try {
+        jwt.verify(accessToken, env.jwtAccessSecret);
+        await blacklistToken(accessToken);
+      } catch {
+        // Ignore expired or malformed access token on logout
+      }
+    }
   }
 
   res.status(200).json({
@@ -196,17 +221,28 @@ export const me = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const googleMock = asyncHandler(async (req: Request, res: Response) => {
-  const { email, fullName } = req.body;
+  if (env.nodeEnv === "production" || !env.enableMockGoogleAuth) {
+    throw new AppError("Đăng nhập Google giả lập đã bị vô hiệu hóa (yêu cầu ENABLE_MOCK_GOOGLE_AUTH=true ở môi trường phát triển)", 403);
+  }
+
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  const fullName = req.body?.fullName;
   if (!email) throw new AppError("Email is required", 400);
 
   let user = await findUserByEmail(email);
-  
-  if (!user) {
-    // Create a new user for this mock google account
+
+  if (user) {
+    const existingRole = String((user as any).Role?.name || "CUSTOMER").toUpperCase();
+    if (["ADMIN", "SALES_STAFF", "SALES", "TECH_STAFF", "TECH", "TECHNICIAN", "STAFF"].includes(existingRole)) {
+      throw new AppError("Không cho phép đăng nhập mock vào tài khoản quản trị hoặc nhân viên", 403);
+    }
+  } else {
+    // Create a new customer user with a securely hashed random password
+    const randomPasswordHash = await hashPassword(crypto.randomBytes(24).toString("hex"));
     user = await createUser({
       email,
       fullName: fullName || "Google User",
-      password: "google-mock-password-" + Math.random().toString(36).slice(-8),
+      password: randomPasswordHash
     });
   }
 
@@ -216,10 +252,10 @@ export const googleMock = asyncHandler(async (req: Request, res: Response) => {
     throw new AppError("Tài khoản đã bị khóa hoặc tạm ngừng hoạt động", 403);
   }
 
-  const tokenPayload = { 
-    userId: String(user.id), 
-    email: user.email || "", 
-    role: (user as any).Role?.name || "USER" 
+  const tokenPayload = {
+    userId: String(user.id),
+    email: user.email || "",
+    role: (user as any).Role?.name || "USER"
   };
 
   res.status(200).json({
@@ -379,6 +415,29 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
       updated_at: new Date()
     }
   });
+
+  invalidateUserAuthCache(req.user.userId);
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const activeToken = authHeader.slice(7).trim();
+    if (activeToken) {
+      await blacklistToken(activeToken).catch(() => {});
+    }
+  }
+
+  try {
+    const { recordAuditLog } = require("../../services/audit-log.service");
+    await recordAuditLog({
+      actorUserId: Number(req.user.userId),
+      actorRole: req.user.role,
+      action: "USER_PASSWORD_CHANGED",
+      entityType: "USER",
+      entityId: req.user.userId,
+      description: `User #${req.user.userId} changed account password`
+    });
+  } catch {
+    // non-fatal
+  }
 
   res.status(200).json({
     success: true,

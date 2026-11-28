@@ -132,7 +132,8 @@ const STORAGE_KEYS = {
 
 const PAYMENT_METHOD_OPTIONS = [
   { value: "COD", label: "Thanh toán khi nhận hàng (COD)" },
-  { value: "BANK_TRANSFER", label: "Chuyển khoản VietQR tự động (SePay)" }
+  { value: "BANK_TRANSFER", label: "Chuyển khoản VietQR tự động (SePay)" },
+  { value: "VNPAY", label: "Cổng thanh toán VNPay (ATM / QR / Thẻ quốc tế)" }
 ];
 
 const PAYMENT_METHOD_CARDS = [
@@ -153,12 +154,22 @@ const PAYMENT_METHOD_CARDS = [
     badge: "Tự động 24/7",
     icon: QrIcon,
     tone: "#2563eb"
+  },
+  {
+    value: "VNPAY",
+    label: "Cổng thanh toán VNPay",
+    shortLabel: "VNPay",
+    description: "Thanh toán trực tuyến an toàn qua cổng VNPay (Thẻ ATM nội địa, QR VNPay, Visa/Mastercard).",
+    badge: "VNPay Gateway",
+    icon: CreditCardIcon,
+    tone: "#d97706"
   }
 ];
 
 const PAYMENT_METHOD_GUIDANCE = {
   COD: "Bạn sẽ kiểm tra sản phẩm và thanh toán tiền mặt trực tiếp khi nhận hàng.",
-  BANK_TRANSFER: "Sau khi bấm Đặt hàng, hệ thống tạo mã VietQR kèm nội dung riêng PCMALL<Mã đơn>. Ngay khi tiền vào tài khoản, SePay tự động xác nhận và duyệt đơn trong 2–5 giây — không cần gửi ảnh biên lai."
+  BANK_TRANSFER: "Sau khi bấm Đặt hàng, hệ thống tạo mã VietQR kèm nội dung riêng PCMALL<Mã đơn>. Ngay khi tiền vào tài khoản, SePay tự động xác nhận và duyệt đơn trong 2–5 giây — không cần gửi ảnh biên lai.",
+  VNPAY: "Sau khi bấm Đặt hàng, bạn sẽ được chuyển hướng sang cổng thanh toán VNPay để xác nhận giao dịch an toàn."
 };
 
 const VALID_PAYMENT_METHODS = PAYMENT_METHOD_CARDS.map((option) => option.value);
@@ -381,7 +392,9 @@ export function CheckoutPage() {
 
   const items = useMemo(() => cart?.items || [], [cart]);
   const totalAmount = Number(cart?.totalAmount || 0);
-  const shippingFee = Number(formValues.shippingFee || 0);
+  const freeShippingThreshold = Number(storeInfo?.freeShippingThreshold ?? 5000000);
+  const defaultShippingFee = Number(storeInfo?.defaultShippingFee ?? 30000);
+  const shippingFee = totalAmount <= 0 || totalAmount >= freeShippingThreshold ? 0 : defaultShippingFee;
   const discountAmount = Number(appliedCoupon?.discountAmount || 0);
   const finalAmount = useMemo(() => Math.max(0, totalAmount - discountAmount + shippingFee), [shippingFee, totalAmount, discountAmount]);
   const selectedPaymentOption = useMemo(
@@ -746,7 +759,6 @@ export function CheckoutPage() {
         shippingAddress: shippingAddressStr,
         addressId: Number(formValues.addressId),
         paymentMethod: formValues.paymentMethod,
-        shippingFee: Number(formValues.shippingFee || 0),
         couponCode: appliedCoupon?.code || undefined,
         note: String(formValues.note || "").trim() || undefined,
         ...(orderItemsPayload ? { items: orderItemsPayload } : {})
@@ -1664,10 +1676,10 @@ export function CheckoutPage() {
       </div>
 
       {/* Two Column Content */}
-      <div className="checkout-layout" style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 32, alignItems: "start" }}>
+      <div className="checkout-layout" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.65fr) minmax(0, 1fr)", gap: 32, alignItems: "start" }}>
         
         {/* Step Content Side */}
-        <div style={{ display: "grid", gap: 32 }}>
+        <div style={{ display: "grid", gap: 32, minWidth: 0 }}>
 
           {/* STEP 1: CUSTOMER INFO */}
           {activeStep === 1 && (
@@ -1988,6 +2000,7 @@ export function CheckoutPage() {
                       return (
                         <label
                           key={option.value}
+                          id={`payment-method-card-${option.value.toLowerCase()}`}
                           className={`payment-method-card ${selected ? "selected" : ""} ${isSubmitting ? "disabled" : ""}`}
                           style={{ "--payment-tone": option.tone }}
                         >
@@ -2234,7 +2247,7 @@ export function CheckoutPage() {
         </div>
 
         {/* Sidebar Order Summary (Requirement 10) */}
-        <aside style={{ position: "sticky", top: 40 }}>
+        <aside style={{ position: "sticky", top: 40, minWidth: 0 }}>
             <div style={{ ...SECTION_STYLE, padding: 28, animationDelay: "0.3s" }}>
                 <h2 style={{ fontSize: 20, fontWeight: 900, marginBottom: 20, letterSpacing: "-0.02em", color: "#0f172a" }}>Tóm tắt linh kiện</h2>
                 
@@ -2361,10 +2374,19 @@ export function CheckoutPage() {
                       <span>Tổng tiền hàng</span>
                       <span style={{ color: "#1e293b" }}>{formatCurrency(totalAmount)} đ</span>
                     </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", color: "#64748b", fontWeight: 700, fontSize: 14 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "#64748b", fontWeight: 700, fontSize: 14 }}>
                       <span>Phí giao hàng</span>
-                      <span style={{ color: "#059669", background: "rgba(5, 150, 105, 0.08)", padding: "2px 8px", borderRadius: 6, fontSize: "12px", fontWeight: 800 }}>Miễn phí</span>
+                      {shippingFee === 0 ? (
+                        <span style={{ color: "#059669", background: "rgba(5, 150, 105, 0.08)", padding: "2px 8px", borderRadius: 6, fontSize: "12px", fontWeight: 800 }}>Miễn phí</span>
+                      ) : (
+                        <span style={{ color: "#1e293b", fontWeight: 800 }}>{formatCurrency(shippingFee)} đ</span>
+                      )}
                     </div>
+                    {shippingFee > 0 && (
+                      <div style={{ fontSize: 11, color: "#64748b", textAlign: "right", marginTop: -8 }}>
+                        Miễn phí giao hàng cho đơn từ {formatCurrency(freeShippingThreshold)} đ
+                      </div>
+                    )}
                     {discountAmount > 0 && (
                       <div style={{ display: "flex", justifyContent: "space-between", color: "#16a34a", fontWeight: 700, fontSize: 14 }}>
                         <span>Giảm giá ({appliedCoupon?.code})</span>

@@ -1,4 +1,4 @@
-﻿import jwt from "jsonwebtoken";
+import jwt from "jsonwebtoken";
 import { query } from "../config/database";
 
 function decodeToken(token: string): { userId?: string; exp?: number } {
@@ -7,13 +7,18 @@ function decodeToken(token: string): { userId?: string; exp?: number } {
 }
 
 export async function blacklistToken(token: string): Promise<void> {
+  if (!token || typeof token !== "string") return;
   const { userId, exp } = decodeToken(token);
-  const expiresAt = exp
-    ? new Date(exp * 1000).toISOString().slice(0, 19).replace("T", " ")
-    : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace("T", " ");
+  const expiresUnix =
+    typeof exp === "number" && Number.isFinite(exp) && exp > 0
+      ? Math.floor(exp)
+      : Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60;
   try {
-    const sql = "INSERT IGNORE INTO token_blacklist (token, user_id, expires_at) VALUES (?, ?, ?)";
-    await query(sql, [token, userId ? Number(userId) : null, expiresAt]);
+    // Use FROM_UNIXTIME(?) so MySQL stores expires_at in the active session timezone (+07:00),
+    // matching NOW() identically for short-lived 15m access tokens and 7d refresh tokens.
+    const sql =
+      "INSERT IGNORE INTO token_blacklist (token, user_id, expires_at) VALUES (?, ?, FROM_UNIXTIME(?))";
+    await query(sql, [token, userId ? Number(userId) : null, expiresUnix]);
   } catch (err: any) {
     if (err?.code === "ER_NO_SUCH_TABLE") {
       console.warn("[token-blacklist] table not found");

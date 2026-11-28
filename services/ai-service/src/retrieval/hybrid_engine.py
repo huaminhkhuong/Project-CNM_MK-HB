@@ -29,28 +29,53 @@ class HybridRAGEngine:
         self.bm25 = BM25Okapi(self.tokenized_corpus)
         print(f"✅ Đã sẵn sàng Hybrid Search cho {len(documents)} tài liệu.")
 
-    def search(self, query: str, top_k: int = 5, doc_type_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+    def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        doc_type_filter: Optional[str] = None,
+        target_service: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         query_clean = query.strip()
         if not query_clean:
             return []
 
-        search_k = min(len(self.documents), top_k * 3)
+        search_k = min(len(self.documents), max(top_k * 3, 15))
+        norm_target = (target_service or "").strip().lower()
+        if norm_target == "all":
+            norm_target = ""
+
+        def matches_filters(doc_meta: Dict[str, Any]) -> bool:
+            if doc_type_filter and doc_meta.get("doc_type") != doc_type_filter:
+                return False
+            if norm_target:
+                doc_svc = str(doc_meta.get("target_service") or "all").strip().lower()
+                if doc_svc not in ("", "all", norm_target):
+                    return False
+            return True
 
         # 1. Luồng 1: Dense Retrieval (Vector Search)
         where_filter = {"doc_type": doc_type_filter} if doc_type_filter else None
-        vector_results = self.chroma_store.search(query=query_clean, top_k=search_k, where=where_filter)
+        raw_vector_results = self.chroma_store.search(query=query_clean, top_k=search_k, where=where_filter)
+        vector_results = [
+            item for item in raw_vector_results
+            if matches_filters(item.get("metadata") or {})
+        ]
 
-        # 2. Luồng 2: Sparse Retrieval (BM25 Tokenized)
+        # 2. Luồng 2: Sparse Retrieval (BM25 Tokenized) — lọc metadata TRƯỚC khi cắt top search_k
         tokenized_q = word_tokenize(query_clean.lower())
         bm25_scores = self.bm25.get_scores(tokenized_q)
-        top_indices = np.argsort(bm25_scores)[::-1][:search_k]
-        
+        sorted_indices = np.argsort(bm25_scores)[::-1]
+
         bm25_results = []
-        for idx in top_indices:
-            if bm25_scores[idx] > 0:
-                doc = self.documents[idx]
-                if not doc_type_filter or doc.get("metadata", {}).get("doc_type") == doc_type_filter:
-                    bm25_results.append(doc)
+        for idx in sorted_indices:
+            if bm25_scores[idx] <= 0:
+                break
+            doc = self.documents[idx]
+            if matches_filters(doc.get("metadata") or {}):
+                bm25_results.append(doc)
+                if len(bm25_results) >= search_k:
+                    break
 
         # 3. Thuật toán Hợp Nhất Xếp Hạng Nghịch Đảo (Reciprocal Rank Fusion - RRF)
         # Score(d) = sum( 1 / (k + rank_i) )

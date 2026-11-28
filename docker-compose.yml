@@ -51,8 +51,9 @@ services:
       - JWT_REFRESH_EXPIRES_IN=${JWT_REFRESH_EXPIRES_IN:-7d}
       - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
       - LLM_API_KEY=${LLM_API_KEY:-}
-      - LLM_MODEL=${LLM_MODEL:-gemini-1.5-flash}
+      - LLM_MODEL=${LLM_MODEL:-gemini-2.5-flash}
       - AI_SERVICE_URL=${AI_SERVICE_URL:-http://ai-service:5001}
+      - AI_SERVICE_INTERNAL_KEY=${AI_SERVICE_INTERNAL_KEY:-}
       - PAYMENT_MOCK_MODE=${PAYMENT_MOCK_MODE:-true}
       - SHIPPING_MOCK_MODE=${SHIPPING_MOCK_MODE:-true}
     depends_on:
@@ -69,6 +70,7 @@ services:
       - "5001:5001"
     environment:
       - PORT=5001
+      - AI_SERVICE_INTERNAL_KEY=${AI_SERVICE_INTERNAL_KEY:-}
     volumes:
       - ./services/ai-service/data_store:/app/data_store
       - ./data:/app/data:ro

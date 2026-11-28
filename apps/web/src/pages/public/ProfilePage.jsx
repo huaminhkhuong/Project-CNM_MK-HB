@@ -82,8 +82,6 @@ export function ProfilePage() {
   const [profileForm, setProfileForm] = useState({
     fullName: "",
     phone: "",
-    birthDate: "",
-    gender: "",
     defaultAddressId: ""
   });
   const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
@@ -112,7 +110,7 @@ export function ProfilePage() {
         setProfile(data);
         setOrders(Array.isArray(orderData) ? orderData : []);
         setWarranties(Array.isArray(warrantyData) ? warrantyData : []);
-        const storedDefaultAddr = localStorage.getItem("checkout_addressId") || "";
+        const storedDefaultAddr = localStorage.getItem("checkout_address_id") || localStorage.getItem("checkout_addressId") || "";
         const validStoredDefault = (data?.addresses || []).some((a) => String(a.id) === storedDefaultAddr);
         setProfileForm((prev) => ({
           ...prev,
@@ -159,7 +157,8 @@ export function ProfilePage() {
       });
       const data = normalizeProfile(response);
       if (profileForm.defaultAddressId) {
-        localStorage.setItem("checkout_addressId", String(profileForm.defaultAddressId));
+        localStorage.setItem("checkout_address_id", String(profileForm.defaultAddressId));
+        localStorage.removeItem("checkout_addressId");
       }
       setProfile(data);
       await refreshProfile();
@@ -330,8 +329,6 @@ export function ProfilePage() {
                   <label className="profile-field"><span>Họ tên</span><input className="profile-input" value={profileForm.fullName} onChange={(event) => setProfileForm((prev) => ({ ...prev, fullName: event.target.value }))} /></label>
                   <label className="profile-field"><span>Email</span><input className="profile-input" value={profile?.email || ""} disabled /></label>
                   <label className="profile-field"><span>Số điện thoại</span><input className="profile-input" value={profileForm.phone} onChange={(event) => setProfileForm((prev) => ({ ...prev, phone: event.target.value }))} /></label>
-                  <label className="profile-field"><span>Ngày sinh</span><input className="profile-input" type="date" value={profileForm.birthDate} onChange={(event) => setProfileForm((prev) => ({ ...prev, birthDate: event.target.value }))} /></label>
-                  <label className="profile-field"><span>Giới tính</span><select className="profile-select" value={profileForm.gender} onChange={(event) => setProfileForm((prev) => ({ ...prev, gender: event.target.value }))}><option value="">Chưa cập nhật</option><option value="male">Nam</option><option value="female">Nữ</option><option value="other">Khác</option></select></label>
                   <label className="profile-field"><span>Địa chỉ mặc định</span><select className="profile-select" value={profileForm.defaultAddressId} onChange={(event) => setProfileForm((prev) => ({ ...prev, defaultAddressId: event.target.value }))}><option value="">Chưa chọn</option>{(profile?.addresses || []).map((address) => <option key={address.id} value={address.id}>{address.addressLine || address.province || `Địa chỉ #${address.id}`}</option>)}</select></label>
                   <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                     <div style={{ color: "#64748b", fontSize: 14 }}>Địa chỉ mặc định: <strong>{defaultAddress ? [defaultAddress.addressLine, defaultAddress.ward, defaultAddress.district, defaultAddress.province].filter(Boolean).join(", ") : "Chưa cập nhật"}</strong></div>

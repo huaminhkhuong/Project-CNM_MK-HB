@@ -400,9 +400,9 @@ async function deleteSku(skuId) {
   }
 
   const [orderItemCount, warrantyCount, serialCount] = await Promise.all([
-    prisma.orderItem.count({ where: { sku_id: parsedSkuId } }).catch(() => 0),
-    prisma.warranty.count({ where: { sku_id: parsedSkuId } }).catch(() => 0),
-    prisma.inventorySerial.count({ where: { sku_id: parsedSkuId } }).catch(() => 0)
+    prisma.orderItem.count({ where: { product_variant_id: parsedSkuId } }).catch(() => 0),
+    prisma.warrantyItem.count({ where: { sku_id: parsedSkuId } }).catch(() => 0),
+    prisma.orderItemSerial.count({ where: { sku_id: parsedSkuId } }).catch(() => 0)
   ]);
 
   if (orderItemCount > 0 || warrantyCount > 0 || serialCount > 0) {
@@ -413,7 +413,7 @@ async function deleteSku(skuId) {
   }
 
   await prisma.$transaction([
-    prisma.cartItem.deleteMany({ where: { sku_id: parsedSkuId } }),
+    prisma.cartItem.deleteMany({ where: { product_variant_id: parsedSkuId } }),
     prisma.pcBuildItem.deleteMany({ where: { sku_id: parsedSkuId } }),
     prisma.skuAttribute.deleteMany({ where: { sku_id: parsedSkuId } }),
     prisma.productSku.delete({ where: { id: parsedSkuId } })

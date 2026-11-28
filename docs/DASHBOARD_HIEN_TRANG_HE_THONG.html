@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PC Mall — Dashboard Nghiệm Thu Cuối Cùng (Final Go/No-Go Audit)</title>
+  <style>
+    :root {
+      --bg: #0b1120;
+      --bg-soft: #111827;
+      --card: #161f33;
+      --card-hover: #1c2740;
+      --border: #26334d;
+      --text: #e5edf7;
+      --muted: #94a3b8;
+      --green: #10b981;
+      --green-bg: rgba(16, 185, 129, 0.14);
+      --amber: #f59e0b;
+      --amber-bg: rgba(245, 158, 11, 0.14);
+      --red: #ef4444;
+      --red-bg: rgba(239, 68, 68, 0.14);
+      --blue: #3b82f6;
+      --blue-bg: rgba(59, 130, 246, 0.14);
+      --indigo: #818cf8;
+      --shadow: 0 12px 32px rgba(2, 6, 23, 0.45);
+      --radius: 14px;
+    }
+    [data-theme="light"] {
+      --bg: #f1f5f9;
+      --bg-soft: #e2e8f0;
+      --card: #ffffff;
+      --card-hover: #f8fafc;
+      --border: #cbd5e1;
+      --text: #0f172a;
+      --muted: #475569;
+      --green: #059669;
+      --green-bg: rgba(5, 150, 105, 0.12);
+      --amber: #d97706;
+      --amber-bg: rgba(217, 119, 6, 0.12);
+      --red: #dc2626;
+      --red-bg: rgba(220, 38, 38, 0.12);
+      --blue: #2563eb;
+      --blue-bg: rgba(37, 99, 235, 0.12);
+      --indigo: #4f46e5;
+      --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      min-height: 100vh;
+      transition: background 0.2s, color 0.2s;
+    }
+    .container { max-width: 1320px; margin: 0 auto; padding: 24px 20px 64px; }
+    header.hero {
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(59, 130, 246, 0.12) 55%, rgba(16, 185, 129, 0.12));
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 26px 28px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+      margin-bottom: 22px;
+    }
+    .hero-left { max-width: 780px; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--indigo); margin-bottom: 8px;
+    }
+    h1 { font-size: 26px; font-weight: 800; line-height: 1.25; margin-bottom: 8px; }
+    .hero-sub { color: var(--muted); font-size: 14px; }
+    .hero-right { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+    .verdict-badge {
+      display: inline-flex; align-items: center; gap: 10px;
+      padding: 12px 20px; border-radius: 14px;
+      background: var(--amber-bg); border: 1.5px solid var(--amber);
+      color: var(--amber); font-weight: 800; font-size: 16px;
+    }
+    .verdict-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 12px var(--amber); }
+    .theme-btn {
+      background: var(--card); color: var(--text); border: 1px solid var(--border);
+      padding: 7px 14px; border-radius: 999px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+    }
+    .theme-btn:hover { background: var(--card-hover); }
+
+    .alert-blocker {
+      background: var(--red-bg);
+      border: 1.5px solid var(--red);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      margin-bottom: 22px;
+    }
+    .alert-blocker h3 { color: var(--red); font-size: 15.5px; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+    .alert-blocker p { font-size: 13.5px; margin-bottom: 10px; }
+    .code-box {
+      background: #090e1a; color: #e2e8f0; border: 1px solid #334155;
+      border-radius: 10px; padding: 12px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12.5px; overflow-x: auto; position: relative;
+    }
+    .copy-btn {
+      background: var(--blue); color: #fff; border: none; border-radius: 8px;
+      padding: 5px 11px; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .copy-btn:hover { opacity: 0.9; }
+
+    .kpi-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px; margin-bottom: 24px;
+    }
+    .kpi-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 18px 20px; box-shadow: var(--shadow);
+    }
+    .kpi-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+    .kpi-value { font-size: 30px; font-weight: 800; margin: 6px 0 4px; display: flex; align-items: baseline; gap: 8px; }
+    .kpi-delta { font-size: 12.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+    .delta-up { background: var(--green-bg); color: var(--green); }
+    .delta-warn { background: var(--amber-bg); color: var(--amber); }
+    .delta-err { background: var(--red-bg); color: var(--red); }
+    .kpi-note { font-size: 12.5px; color: var(--muted); }
+
+    section.panel {
+      background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 22px 24px; box-shadow: var(--shadow); margin-bottom: 22px;
+    }
+    .panel-head {
+      display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+      gap: 12px; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 12px;
+    }
+    .panel-title { font-size: 17px; font-weight: 800; }
+    .panel-sub { font-size: 13px; color: var(--muted); }
+
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 18px; }
+
+    /* Services Live Cards */
+    .svc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+    .svc-card {
+      background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px; padding: 15px 16px;
+    }
+    .svc-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .svc-name { font-weight: 800; font-size: 14.5px; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+      border-radius: 999px; font-size: 11.5px; font-weight: 700; white-space: nowrap;
+    }
+    .pill-green { background: var(--green-bg); color: var(--green); border: 1px solid rgba(16,185,129,0.35); }
+    .pill-amber { background: var(--amber-bg); color: var(--amber); border: 1px solid rgba(245,158,11,0.35); }
+    .pill-red { background: var(--red-bg); color: var(--red); border: 1px solid rgba(239,68,68,0.35); }
+    .pill-blue { background: var(--blue-bg); color: var(--blue); border: 1px solid rgba(59,130,246,0.35); }
+    .svc-meta { font-size: 12.5px; color: var(--muted); list-style: none; display: grid; gap: 4px; }
+
+    /* PC Builder 3 Cards */
+    .cand-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 14px; }
+    .cand-card {
+      background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px; padding: 16px;
+    }
+    .cand-score { font-size: 24px; font-weight: 800; color: var(--green); }
+    .cand-parts { margin-top: 10px; font-size: 12.5px; color: var(--muted); display: grid; gap: 4px; }
+
+    /* SVG Chart */
+    .chart-wrap { width: 100%; overflow-x: auto; }
+    .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
+    .legend-item { display: inline-flex; align-items: center; gap: 6px; }
+    .legend-swatch { width: 12px; height: 12px; border-radius: 3px; }
+
+    /* Filters & Table */
+    .filter-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+    .filter-btn {
+      background: var(--bg-soft); color: var(--text); border: 1px solid var(--border);
+      padding: 6px 13px; border-radius: 999px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+    }
+    .filter-btn.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+    .search-input {
+      margin-left: auto; background: var(--bg-soft); color: var(--text); border: 1px solid var(--border);
+      padding: 7px 12px; border-radius: 999px; font-size: 13px; min-width: 240px;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); background: var(--bg-soft); }
+    tr:hover td { background: var(--card-hover); }
+    .code-tag {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-weight: 800; font-size: 12px; padding: 2px 7px; border-radius: 6px;
+      background: var(--bg-soft); border: 1px solid var(--border); display: inline-block;
+    }
+
+    /* Demo Checklist */
+    .demo-list { display: grid; gap: 10px; }
+    .demo-item {
+      display: grid; grid-template-columns: 24px 1fr auto; gap: 12px; align-items: start;
+      padding: 13px 15px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px;
+    }
+    .demo-item input[type="checkbox"] { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--green); cursor: pointer; }
+    .demo-item.checked { opacity: 0.72; }
+    .demo-title { font-weight: 700; font-size: 14px; margin-bottom: 3px; }
+    .demo-desc { font-size: 12.5px; color: var(--muted); }
+
+    footer { text-align: center; color: var(--muted); font-size: 12.5px; margin-top: 24px; }
+    @media (max-width: 720px) {
+      .hero-right { align-items: flex-start; }
+      .search-input { margin-left: 0; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- HERO -->
+    <header class="hero">
+      <div class="hero-left">
+        <div class="eyebrow">🏛️ HỘI ĐỒNG NGHIỆM THU ĐỘC LẬP · FINAL PRE-DEFENSE AUDIT · 27/11/2026</div>
+        <h1>Dự án PC Mall — Bảng Điều Khiển Nghiệm Thu Cuối Cùng</h1>
+        <p class="hero-sub">
+          Tổng hợp 100% bằng chứng thực thi trực tiếp trên MySQL <code>:3307</code>, Python Hybrid RAG <code>:5001</code>, Express API in-process, bộ kiểm thử tự động & rà soát hồi quy 29/29 hạng mục (tuyệt đối không sửa mã nguồn dự án).
+        </p>
+      </div>
+      <div class="hero-right">
+        <div class="verdict-badge">
+          <span class="verdict-dot"></span>
+          <span>CONDITIONAL GO — 89%</span>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span style="font-size:12px; color:var(--muted);">Vá 1 lỗi 3 dòng → <strong>🟢 GO (91%+)</strong></span>
+          <button class="theme-btn" id="themeToggle" type="button">☀️ Sáng / 🌙 Tối</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- CRITICAL BLOCKER BANNER -->
+    <div class="alert-blocker">
+      <h3>🔴 CẢNH BÁO CHẶN DEMO (REGRESSION MỚI PHÁT HIỆN): Crash trắng trang <code>/admin/dashboard</code></h3>
+      <p>
+        Tại <code>apps/web/src/pages/admin/AdminDashboardPage.jsx:242-292</code>, trường <code>trend</code> đã được gỡ khỏi 6 KPI cards để bỏ số liệu giả, nhưng <code>AdminKpiGrid</code> tại <strong>dòng 113–115</strong> vẫn đọc trực tiếp <code>kpi.trend.positive</code> → gây lỗi <strong><code>TypeError: Cannot read properties of undefined (reading 'positive')</code></strong> ngay khi đăng nhập Admin!
+      </p>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <span style="font-size:12px; font-weight:700; color:var(--red);">Bản vá nhanh 3 dòng (AdminDashboardPage.jsx:111-116):</span>
+        <button class="copy-btn" type="button" onclick="copyPatch()">📋 Sao chép đoạn vá</button>
+      </div>
+      <pre class="code-box" id="patchCode">&lt;div className="admin-command-kpi__top"&gt;
+  &lt;span className={`admin-command-kpi__icon admin-command-kpi__icon--${kpi.accent}`}&gt;{kpi.icon}&lt;/span&gt;
+  {kpi.trend ? (
+    &lt;span className={`admin-command-trend admin-command-trend--${kpi.trend.positive ? "up" : "down"}`}&gt;
+      {kpi.trend.positive ? "+" : "-"}{kpi.trend.value}%
+    &lt;/span&gt;
+  ) : null}
+&lt;/div&gt;</pre>
+    </div>
+
+    <!-- KPI CARDS -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Điểm Sẵn Sàng Bảo Vệ</div>
+        <div class="kpi-value">89% <span class="kpi-delta delta-up">+15% vs V2</span></div>
+        <div class="kpi-note">Vòng 1: 55% → Vòng 2: 74% → Vòng 3: <strong>89%</strong> (+34% tổng)</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Kết Quả 29 Hạng Mục</div>
+        <div class="kpi-value">25<span style="font-size:18px;color:var(--muted);">/29</span> <span class="kpi-delta delta-up">86.2% Đạt</span></div>
+        <div class="kpi-note">🟢 25 Đạt · 🟡 3 Cảnh báo · 🔴 1 Lỗi (0 hồi quy trên 12 mục V2)</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Kiểm Thử Tự Động</div>
+        <div class="kpi-value">242<span style="font-size:18px;color:var(--muted);">/242</span> <span class="kpi-delta delta-up">0 Skip</span></div>
+        <div class="kpi-note">API 230/230 (DB test riêng) · Web 11/11 · Pytest 1/1 · ESLint 0 err</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Dữ Liệu Live & Vector RAG</div>
+        <div class="kpi-value">1.513 <span class="kpi-delta delta-up">Vectors</span></div>
+        <div class="kpi-note">1.357 SKU · 2.690 thuộc tính EAV · 41 luật tương thích active</div>
+      </div>
+    </div>
+
+    <!-- 7 PILLARS CHART -->
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">📊 Biểu Đồ So Sánh 7 Trụ Cột Qua 3 Vòng Kiểm Toán</div>
+          <div class="panel-sub">Đo trực tiếp trên cùng hệ quy chiếu 7 trụ cột từ Vòng 1 (55%) → Vòng 2 (74%) → Vòng 3 (89%)</div>
+        </div>
+        <div class="legend">
+          <span class="legend-item"><span class="legend-swatch" style="background:#64748b;"></span>Vòng 1 (55%)</span>
+          <span class="legend-item"><span class="legend-swatch" style="background:#3b82f6;"></span>Vòng 2 (74%)</span>
+          <span class="legend-item"><span class="legend-swatch" style="background:#10b981;"></span>Vòng 3 — Đạt (89%)</span>
+          <span class="legend-item"><span class="legend-swatch" style="background:#ef4444;"></span>Vòng 3 — Rớt do Regression</span>
+        </div>
+      </div>
+      <div class="chart-wrap" id="pillarChartWrap"></div>
+    </section>
+
+    <!-- 4 LIVE SERVICES + SMART PC BUILDER 20TR -->
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">🩺 Đèn Trạng Thái 4 Dịch Vụ Live & Kết Quả Smart PC Builder (20tr Gaming)</div>
+          <div class="panel-sub">Gọi HTTP/SQL thực tế tại thời điểm nghiệm thu (27/11/2026)</div>
+        </div>
+        <span class="pill pill-blue">cnm_api_prod crash-loop: ĐÃ GỠ SẠCH</span>
+      </div>
+
+      <div class="svc-grid">
+        <div class="svc-card">
+          <div class="svc-top">
+            <span class="svc-name">MySQL 8.0 (:3307)</span>
+            <span class="pill pill-green">● UP healthy</span>
+          </div>
+          <ul class="svc-meta">
+            <li>Container: <code>cnm_mysql</code> (Up 4h)</li>
+            <li>Schema: <strong>40 bảng</strong> · <code>decimal(12,2)</code> · <code>DATETIME</code></li>
+            <li>Cô lập DB: <code>cnm_mk_hb</code> (dev, bất biến 100%) &amp; <code>cnm_mk_hb_test</code></li>
+          </ul>
+        </div>
+        <div class="svc-card">
+          <div class="svc-top">
+            <span class="svc-name">Python AI RAG (:5001)</span>
+            <span class="pill pill-green">● UP healthy</span>
+          </div>
+          <ul class="svc-meta">
+            <li>Container: <code>cnm_ai_service</code> (Up 23m)</li>
+            <li>Vector: <strong>1.513 vectors</strong> (<code>pcmall_knowledge</code> · Local ONNX)</li>
+            <li><code>X-Internal-Key</code>: <strong>401</strong> khi thiếu/sai · <strong>200</strong> khi hợp lệ (9/9 route)</li>
+          </ul>
+        </div>
+        <div class="svc-card">
+          <div class="svc-top">
+            <span class="svc-name">Express API (:4000)</span>
+            <span class="pill pill-amber">● STOPPED (Cần bật)</span>
+          </div>
+          <ul class="svc-meta">
+            <li>In-process probe: <code>GET /api/health</code> → <strong>200 OK</strong> (DB 3ms)</li>
+            <li>Node→Python: 4/4 hàm gửi đủ <code>X-Internal-Key</code> → <strong>200 OK</strong></li>
+            <li>Tests: <strong>230/230 PASS</strong> · 0 skip · <code>tsc</code> 0 errors</li>
+          </ul>
+        </div>
+        <div class="svc-card">
+          <div class="svc-top">
+            <span class="svc-name">Web SPA (:5173)</span>
+            <span class="pill pill-amber">● STOPPED (Cần bật)</span>
+          </div>
+          <ul class="svc-meta">
+            <li><code>vite build</code>: <strong>PASS</strong> (272 modules, 14.16s)</li>
+            <li><code>eslint src</code>: <strong>0 errors</strong> (148 warnings) · Vitest: <strong>11/11</strong></li>
+            <li>⚠️ Cần vá 3 dòng <code>AdminDashboardPage.jsx:113</code> trước khi bật</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 style="margin-top:20px; font-size:15px; font-weight:800;">🖥️ Kết Quả Gọi Thật <code>POST /api/pc-builder/suggest</code> (Ngân sách: 20.000.000đ · Gaming)</h3>
+      <div class="cand-grid">
+        <div class="cand-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong>1. Best Value</strong>
+            <span class="pill pill-green">READY · 100% Khớp</span>
+          </div>
+          <div class="cand-score">100 / 100</div>
+          <div style="font-size:13px;font-weight:700;margin-bottom:6px;">20.839.000đ · Bottleneck: 15% GPU (BALANCED)</div>
+          <div class="cand-parts">
+            <span>• CPU: Intel Core Ultra 5 225F (LGA1851)</span>
+            <span>• Main: Gigabyte B860M EAGLE PLUS WIFI 6E</span>
+            <span>• GPU: NVIDIA RTX 4060 8GB · RAM 16GB DDR5</span>
+            <span>• Luật DB kích hoạt: <strong>4 luật</strong> (<code>rule_173..176</code>)</span>
+          </div>
+        </div>
+        <div class="cand-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong>2. Best Performance</strong>
+            <span class="pill pill-green">READY · 100% Khớp</span>
+          </div>
+          <div class="cand-score">100 / 100</div>
+          <div style="font-size:13px;font-weight:700;margin-bottom:6px;">22.729.000đ · Bottleneck: 15% GPU (BALANCED)</div>
+          <div class="cand-parts">
+            <span>• CPU: Intel Core i5 14400 (LGA1700)</span>
+            <span>• Main: ASUS Prime H610M-K (Micro-ATX)</span>
+            <span>• GPU: NVIDIA RTX 4060 8GB · SSD 990 Pro 1TB</span>
+            <span>• Luật DB kích hoạt: <strong>10 luật</strong> (kể cả key-only <code>rule_173..183</code>)</span>
+          </div>
+        </div>
+        <div class="cand-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong>3. Budget Safe</strong>
+            <span class="pill pill-green">READY · 100% Khớp</span>
+          </div>
+          <div class="cand-score">100 / 100</div>
+          <div style="font-size:13px;font-weight:700;margin-bottom:6px;">17.580.000đ · Bottleneck: 3% BALANCED (OPTIMAL)</div>
+          <div class="cand-parts">
+            <span>• CPU: Intel Core i5-12400F (LGA1700)</span>
+            <span>• Main: ASUS Prime H610M-K (Micro-ATX)</span>
+            <span>• GPU: MSI RTX 3060 12GB · Case MIK MORAX</span>
+            <span>• Luật DB kích hoạt: <strong>6 luật</strong> (<code>rule_139, 150, 173..176</code>)</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 29 ITEMS MATRIX WITH INTERACTIVE FILTERS -->
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">📋 Ma Trận Nghiệm Thu Trọn Bộ 29/29 Hạng Mục (P0-01..P2-03)</div>
+          <div class="panel-sub">Lọc nhanh theo trạng thái Vòng 3, mức độ ưu tiên hoặc tìm kiếm từ khóa</div>
+        </div>
+      </div>
+      <div class="filter-bar">
+        <button class="filter-btn active" data-filter="ALL">Tất cả (29)</button>
+        <button class="filter-btn" data-filter="PASS">🟢 Đạt (25)</button>
+        <button class="filter-btn" data-filter="WARN">🟡 Cảnh báo (3)</button>
+        <button class="filter-btn" data-filter="FAIL">🔴 Lỗi (1)</button>
+        <button class="filter-btn" data-filter="P0">Nhóm P0 (15)</button>
+        <button class="filter-btn" data-filter="P1">Nhóm P1 (11)</button>
+        <button class="filter-btn" data-filter="P2">Nhóm P2 (3)</button>
+        <input class="search-input" id="matrixSearch" type="search" placeholder="Tìm mã lỗi, file, từ khóa..." />
+      </div>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:82px;">Mã</th>
+              <th style="width:92px;">Vòng 1</th>
+              <th style="width:108px;">Vòng 2</th>
+              <th style="width:128px;">Vòng 3 (Nay)</th>
+              <th>Hạng mục &amp; Bằng chứng thực tế Vòng 3</th>
+            </tr>
+          </thead>
+          <tbody id="matrixBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- DEMO 8 FLOWS CHECKLIST + THESIS SYNC -->
+    <div class="grid-2">
+      <section class="panel" style="margin-bottom:0;">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">🎬 Checklist Cổng Kiểm Duyệt Demo (8 Luồng Hội Đồng)</div>
+            <div class="panel-sub">Tích chọn khi tự bấm kiểm tra lại trước giờ bảo vệ (tự lưu trình duyệt)</div>
+          </div>
+          <span class="pill pill-blue" id="demoProgress">0 / 8 đã kiểm</span>
+        </div>
+        <div class="demo-list" id="demoList"></div>
+      </section>
+
+      <section class="panel" style="margin-bottom:0;">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">📐 Bảng Con Số Chuẩn Đồng Bộ Báo Cáo KLTN (Word)</div>
+            <div class="panel-sub">Số liệu đo trực tiếp trên code &amp; DB live — khớp 100%</div>
+          </div>
+          <button class="copy-btn" type="button" onclick="copySyncTable()">📋 Copy Markdown</button>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Chỉ số hệ thống</th><th>Giá trị thực tế chuẩn</th></tr>
+          </thead>
+          <tbody id="syncTableBody"></tbody>
+        </table>
+      </section>
+    </div>
+
+    <footer>
+      PC Mall Final Pre-Defense Independent Go/No-Go Dashboard · Tự chứa 100% (Offline HTML/CSS/SVG/JS) · Không phụ thuộc Internet hay Server.
+    </footer>
+  </div>
+
+  <script>
+    const PILLARS = [
+      { name: "1. Kiến trúc, DB & Docker", v1: 58, v2: 74, v3: 86, status: "PASS" },
+      { name: "2. Smart PC Builder", v1: 48, v2: 68, v3: 94, status: "PASS" },
+      { name: "3. AI & Hybrid RAG", v1: 52, v2: 66, v3: 85, status: "WARN" },
+      { name: "4. E-Commerce & Hậu mãi", v1: 68, v2: 84, v3: 94, status: "PASS" },
+      { name: "5. RBAC & Bảo mật", v1: 42, v2: 75, v3: 93, status: "PASS" },
+      { name: "6. UI/UX & Demo (Regression)", v1: 60, v2: 81, v3: 78, status: "FAIL" },
+      { name: "7. Kiểm thử & Chất lượng", v1: 55, v2: 71, v3: 91, status: "PASS" }
+    ];
+
+    const ITEMS = [
+      { id: "P0-01", v1: "FAIL", v2: "WARN", v3: "PASS", title: "Chiếm quyền qua /auth/google-mock", ev: "auth.controller.ts:224-238 khóa cứng theo cờ opt-in ENABLE_MOCK_GOOGLE_AUTH=true & cấm prod. Probe trực tiếp: cả admin@cnm.local & customer đều trả 403." },
+      { id: "P0-02", v1: "FAIL", v2: "PASS", v3: "PASS", title: "Giả mạo thanh toán 0đ MoMo IPN", ev: "(Không hồi quy) Xóa DEFAULT_SECRET_KEY, fail-closed, timingSafeEqual, FOR UPDATE. Probe IPN giả: 400 Invalid MoMo signature." },
+      { id: "P0-03", v1: "FAIL", v2: "PASS", v3: "PASS", title: "Token Blacklist lệch múi giờ UTC/+07:00", ev: "(Không hồi quy) token-blacklist.service.ts:20 dùng FROM_UNIXTIME(?), token-blacklist.test.ts PASS." },
+      { id: "P0-04", v1: "FAIL", v2: "WARN", v3: "PASS", title: "Smart PC Builder 20tr ra 0/100 BLOCKED", ev: "Cả 3/3 phương án (bestValue 20.84tr, bestPerformance 22.73tr, budgetSafe 17.58tr) đạt 100/100 READY; H610M-K = Micro-ATX; RTX 5060 Ti 4% ở 1080p." },
+      { id: "P0-05", v1: "FAIL", v2: "WARN", v3: "PASS", title: "Luật tương thích DB key-only bị bỏ qua", ev: "pc-builder.service.ts:2306-2450 có 18 nhóm alias Anh↔Việt + check targetCategoryId + sửa rule_172/183; kích hoạt thực 4–10 luật DB mỗi build." },
+      { id: "P0-06", v1: "FAIL", v2: "PASS", v3: "PASS", title: "PSU Blocker trên FE ngược dấu", ev: "(Không hồi quy) calculateBuilderInsights.js:189 giữ đúng psuWatt >= power && psuMarginPercent < 20; vitest 11/11 PASS." },
+      { id: "P0-07", v1: "FAIL", v2: "FAIL", v3: "PASS", title: "ChromaDB 0 vector & /v1/rag/models giả", ev: "Live GET :5001/health → 200 healthy, chroma_vectors_count: 1513 (Local ONNX Fallback); /v1/rag/models trả dữ liệu thật & chặn 401 khi thiếu key." },
+      { id: "P0-08", v1: "FAIL", v2: "WARN", v3: "PASS", title: "Socket.IO Auth & Reconnect Regression", ev: "socket.service.js + useSocket.js lưu activeRoomSubscriptions tự re-join 100% room khi connect/refresh JWT; server io.use() kiểm tra liveUser.status === 'ACTIVE'." },
+      { id: "P0-09", v1: "FAIL", v2: "PASS", v3: "PASS", title: "IDOR req.body.userId & giả danh staff chat", ev: "(Không hồi quy) Grep req.body.userId trong ai/chat/ai-advisor = 0 hit; chặn 403 giả danh staff." },
+      { id: "P0-10", v1: "FAIL", v2: "PASS", v3: "PASS", title: "Stored XSS upload .svg/.html & Chat XSS", ev: "(Không hồi quy) Grep svg+xml trong modules = 0 hit; allowlist MIME + nosniff/sandbox/attachment + escape HTML giữ nguyên." },
+      { id: "P0-11", v1: "FAIL", v2: "PASS", v3: "PASS", title: "Hủy đơn không idempotent & restoreInventory", ev: "(Không hồi quy) ORDER_STATUS_TRANSITIONS + FOR UPDATE + transactional restoreOrderInventory pass test." },
+      { id: "P0-12", v1: "FAIL", v2: "WARN", v3: "PASS", title: "Guest Warranty lộ PII & cướp RMA", ev: "warranties.controller.ts:374-398,894 che cả timeline[].actorName và chặn khi ownerPhone rỗng. Live probe: lookup/1 → 404, lookup mã thật che kín PII." },
+      { id: "P0-13", v1: "FAIL", v2: "WARN", v3: "WARN", title: "Fresh Database Migration từ DB trống", ev: "Đã xóa 2 migration PascalCase, sửa cờ migrate.js (--skip-generate), gỡ cnm_api_prod, tạo sạch 40 bảng cnm_mk_hb_test; nhưng prisma migrate deploy thuần chưa có baseline SQL." },
+      { id: "P0-14", v1: "FAIL", v2: "PASS", v3: "PASS", title: "5 lỗi chết Demo (Admin/Tech/Compare/Socket)", ev: "(Không hồi quy) Cả 5 lỗi gốc vẫn pass (lỗi mới trên AdminDashboardPage thuộc hồi quy P1-06)." },
+      { id: "P0-15", v1: "FAIL", v2: "PASS", v3: "PASS", title: "Nginx CORS reflection mọi Origin + Credentials", ev: "(Không hồi quy) Grep Access-Control-Allow-Origin trong nginx/ = 0 hit." },
+      { id: "P1-01", v1: "WARN", v2: "PASS", v3: "PASS", title: "Khóa/hạ quyền user vẫn dùng Access Token cũ", ev: "(Không hồi quy) auth.middleware.ts:33-96 live DB lookup + cache 2s + invalidateUserAuthCache 0ms, đồng bộ sang Socket.IO." },
+      { id: "P1-02", v1: "WARN", v2: "WARN", v3: "PASS", title: "Công thức SMART (5D, Bottleneck 4K, Auto-Fix)", ev: "Đã thêm đủ RTX 50xx/RX 9070, Bottleneck 4K đúng vật lý (4% → 46%), findReplacementProducts lọc theo currentBuild, ngưỡng case SFF >= 150mm." },
+      { id: "P1-03", v1: "WARN", v2: "WARN", v3: "WARN", title: "AI Grounding, Model thật, Key nội bộ & Gateway", ev: "Đạt stock>0, xóa hàng giả, hợp nhất ai-llm.provider.ts, đủ X-Internal-Key 9/9 route & 4 hàm rag-client, dọn default gemini-3.5-flash-lite. Còn sót: store để gemini-3-flash-preview (dễ hết quota), fallback string gemini-1.5-flash (:3297), retriever.service.ts cũ, tải ONNX 22s lần đầu." },
+      { id: "P1-04", v1: "WARN", v2: "WARN", v3: "PASS", title: "Guardrails, Cache nhiều lượt & Mã hóa API Key", ev: "ai.controller.js:43-45 bỏ cache khi có history; ai-rule.service.js:17-43,458-470 mã hóa AES-256-GCM (enc:v1:) trước khi ghi đĩa." },
+      { id: "P1-05", v1: "WARN", v2: "PASS", v3: "PASS", title: "65 lỗi ESLint react-hooks/rules-of-hooks", ev: "(Không hồi quy) npx eslint src (không --quiet) → 0 errors, 148 warnings; 0 eslint-disable cho rules-of-hooks." },
+      { id: "P1-06", v1: "WARN", v2: "WARN", v3: "FAIL", title: "Admin Dashboard bịa số liệu & Audit Logs", ev: "REGRESSION CRASH: Đã xóa calculateTrend & thêm phân trang Audit Logs, nhưng AdminDashboardPage.jsx:113-115 vẫn đọc kpi.trend.positive trên undefined → sập trắng trang /admin/dashboard!" },
+      { id: "P1-07", v1: "WARN", v2: "WARN", v3: "PASS", title: "Admin Coupons UI + VNPay + E2E selector", ev: "Đủ trang /admin/coupons, đủ 3 phương thức thanh toán trên CheckoutPage.jsx:139-167 và có đúng id='payment-method-card-vnpay' (:2003)." },
+      { id: "P1-08", v1: "WARN", v2: "WARN", v3: "PASS", title: "Serial 100%, RMA state machine & ShippingFee", ev: "shipping-fee.service.js tính phí ship cứng phía server (<5tr: 30.000đ, >=5tr/PICKUP: 0đ) tại cả orders.controller.ts & order-creation.service.js." },
+      { id: "P1-09", v1: "WARN", v2: "WARN", v3: "PASS", title: "DECIMAL(12,2), cloneBuild IDOR & SALES Ticket", ev: "tickets.controller.ts:72-99,326-327 tách ticketManageRoles=[ADMIN,TECH] khỏi SALES (chỉ đọc PUBLIC, chặn 403 khi PATCH/INTERNAL); price=decimal(12,2)." },
+      { id: "P1-10", v1: "WARN", v2: "PASS", v3: "PASS", title: "trust proxy, Rate Limiter, 500 error & Docker Prod", ev: "(Không hồi quy) app.ts:22 trust proxy, ẩn raw 500 prod, Nginx 25m upload & /health HTTP intact." },
+      { id: "P1-11", v1: "WARN", v2: "WARN", v3: "PASS", title: "Bộ Test tự động, compatibility thật & Cô lập DB", ev: "npm test 230/230 PASS (0 skip) trên cnm_mk_hb_test (DB dev bất biến 100%); compatibility.test.ts gọi logic thật; Pytest 1/1 PASS." },
+      { id: "P2-01", v1: "WARN", v2: "WARN", v3: "WARN", title: "Dọn rác kiến trúc, Dual ORM & Vệ sinh Git", ev: "Đã gỡ chroma.sqlite3 khỏi index, xóa *_rag_test.*, cập nhật .gitignore, không lộ .env. Còn 41 file docs/ ở trạng thái D trong git status & Dual ORM." },
+      { id: "P2-02", v1: "WARN", v2: "PASS", v3: "PASS", title: "Ràng buộc toàn vẹn & kiểu dữ liệu schema.prisma", ev: "(Không hồi quy) DB live đủ decimal(12,2), DATETIME coupons, BIGINT + FK trên 3 bảng con warranty_requests, đủ 6 unique index." },
+      { id: "P2-03", v1: "WARN", v2: "WARN", v3: "PASS", title: "Audit Logs, UI tiểu tiết & SSE JWT query string", ev: "orders.controller.ts:404-445 & order-events.service.js:31-41 dùng one-time SSE ticket 30s; gọi ?token=... bị chặn 401." }
+    ];
+
+    const DEMOS = [
+      { id: "d1", risk: "FAIL", badge: "🔴 DỄ CHẾT DEMO", title: "1. Đăng nhập / RBAC 5 vai trò & Admin Dashboard", desc: "Auth/RBAC/Lock 0ms đạt 100%, NHƯNG cần vá 3 dòng kpi.trend tại AdminDashboardPage.jsx:113-115 kẻo crash trắng trang ngay khi Admin đăng nhập!" },
+      { id: "d2", risk: "PASS", badge: "🟢 AN TOÀN DEMO", title: "2. Catalog EAV, Lọc thuộc tính & So sánh SKU", desc: "1.357 SKU sẵn hàng, 2.690 thuộc tính EAV, sửa SP Admin không tạo trùng, xóa SKU hết 500, Compare đọc đúng variant_id." },
+      { id: "d3", risk: "PASS", badge: "🟢 AN TOÀN DEMO", title: "3. Smart PC Builder 20tr Gaming (3 Phương án)", desc: "3/3 phương án đạt 100/100 READY, RTX 5060 Ti 4% (1080p) → 46% GPU (4K), H610M-K = mATX, kích hoạt 4–10 luật DB thật." },
+      { id: "d4", risk: "WARN", badge: "🟡 RỦI RO NHẸ", title: "4. AI Chat + Guardrail + Hybrid RAG (:5001)", desc: "RAG 1.513 vectors (182–303ms), Guardrail chuẩn. Nên đổi model store sang gemini-2.5-flash + kiểm tra Groq failover & gọi ấm 1 câu nếu mới restart Docker." },
+      { id: "d5", risk: "PASS", badge: "🟢 AN TOÀN DEMO", title: "5. Checkout COD / VietQR / VNPay + Coupon + Ship", desc: "Đủ 3 thẻ thanh toán (#payment-method-card-vnpay), UI /admin/coupons, phí ship 30k/0đ tính cứng phía server, FOR UPDATE chống đúp." },
+      { id: "d6", risk: "PASS", badge: "🟢 AN TOÀN DEMO", title: "6. Staff Xuất kho 100% Serial → e-Warranty", desc: "Khóa chặt cổng Serial 100% ở mọi endpoint, tự sinh bảo hành điện tử, tra cứu ẩn danh chặn enumeration & che kín timeline[].actorName." },
+      { id: "d7", risk: "PASS", badge: "🟢 AN TOÀN DEMO", title: "7. Tech RMA 6 bước + Ticket đính kèm file", desc: "FormData giữ ảnh/PDF, chặn .svg/.html, RMA 1 chiều, poll 20s không mất chữ đang nhập, cô lập hoàn toàn ghi chú INTERNAL khỏi Customer & Sales." },
+      { id: "d8", risk: "PASS", badge: "🟢 AN TOÀN DEMO", title: "8. Live Chat Human Handoff & Realtime Socket.IO", desc: "Auto re-join đủ 5 loại room khi refresh JWT/reconnect, server io.use() kiểm tra status === ACTIVE, SSE chuyển sang one-time ticket 30s." }
+    ];
+
+    const SYNC_METRICS = [
+      ["Tổng số bảng MySQL (cnm_mk_hb)", "40 bảng (cnm_mk_hb_test cô lập: 40 bảng)"],
+      ["Sản phẩm / SKU đang hoạt động", "1.356 sản phẩm · 1.357 SKU (100% còn tồn kho)"],
+      ["Danh mục / Thương hiệu / Tags", "12 danh mục · 104 thương hiệu · 10 tags (0 product_tags)"],
+      ["Hệ thống thuộc tính EAV", "2.690 attributes · 9.021 values · 18.722 sku_attributes"],
+      ["Quy tắc tương thích PC Builder", "46 tổng · 41 đang bật (12 key-only + 29 value-pair)"],
+      ["Kho tri thức & Vector ChromaDB", "1.217 tài liệu cached · 1.513 vectors (ONNX MiniLM-L6 384d)"],
+      ["Model AI thực tế", "gemini-2.5-flash / 2.0-flash · Failover: Groq llama-3.3-70b"],
+      ["Phương thức thanh toán Checkout", "3 phương thức: COD, VietQR tự động (SePay), VNPay"],
+      ["Cổng / Trang / Route Frontend", "4 cổng · 38 trang (23 Public, 10 Admin, 2 Staff, 3 Tech) · 48 routes"],
+      ["REST API Endpoints", "116 endpoints + Socket.IO JWT + SSE one-time ticket"],
+      ["Kiểm thử tự động Backend API", "230 / 230 PASS (72 suites, 0 fail, 0 skip) · tsc 0 err"],
+      ["Kiểm thử & Build Frontend / AI", "ESLint 0 err (148 warn) · Vitest 11/11 · Vite 272 mod · Pytest 1/1"]
+    ];
+
+    // Render SVG Grouped Bar Chart
+    function renderPillarChart() {
+      const wrap = document.getElementById("pillarChartWrap");
+      const w = 1120, h = 320, padL = 46, padR = 20, padT = 26, padB = 64;
+      const plotW = w - padL - padR, plotH = h - padT - padB;
+      const groupW = plotW / PILLARS.length;
+      const barW = 24, gap = 6;
+      const yFor = (val) => padT + plotH - (val / 100) * plotH;
+
+      let grid = "";
+      [0, 25, 50, 75, 100].forEach((tick) => {
+        const y = yFor(tick);
+        grid += `<line x1="${padL}" y1="${y}" x2="${w - padR}" y2="${y}" stroke="currentColor" stroke-opacity="0.14" stroke-dasharray="4 4"/>`;
+        grid += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" font-size="11" fill="currentColor" fill-opacity="0.65">${tick}%</text>`;
+      });
+
+      let bars = "";
+      PILLARS.forEach((p, idx) => {
+        const cx = padL + idx * groupW + groupW / 2;
+        const startX = cx - (barW * 3 + gap * 2) / 2;
+        const v3Color = p.status === "FAIL" ? "#ef4444" : p.status === "WARN" ? "#f59e0b" : "#10b981";
+        const series = [
+          { val: p.v1, col: "#64748b", lbl: "V1" },
+          { val: p.v2, col: "#3b82f6", lbl: "V2" },
+          { val: p.v3, col: v3Color, lbl: "V3" }
+        ];
+        series.forEach((s, si) => {
+          const x = startX + si * (barW + gap);
+          const y = yFor(s.val);
+          const bh = padT + plotH - y;
+          bars += `<g>
+            <rect x="${x}" y="${y}" width="${barW}" height="${bh}" rx="5" fill="${s.col}">
+              <title>${p.name} — ${s.lbl}: ${s.val}%</title>
+            </rect>
+            <text x="${x + barW / 2}" y="${y - 6}" text-anchor="middle" font-size="10.5" font-weight="700" fill="${si === 2 ? v3Color : "currentColor"}" fill-opacity="${si === 2 ? 1 : 0.72}">${s.val}%</text>
+          </g>`;
+        });
+        const words = p.name.split(" ");
+        const line1 = words.slice(0, 3).join(" ");
+        const line2 = words.slice(3).join(" ");
+        bars += `<text x="${cx}" y="${h - 36}" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">${line1}</text>`;
+        if (line2) {
+          bars += `<text x="${cx}" y="${h - 20}" text-anchor="middle" font-size="11" fill="currentColor" fill-opacity="0.72">${line2}</text>`;
+        }
+      });
+
+      wrap.innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="100%" style="min-width:760px; display:block;">${grid}${bars}</svg>`;
+    }
+
+    function statusBadge(st) {
+      if (st === "PASS") return `<span class="pill pill-green">🟢 ĐẠT</span>`;
+      if (st === "WARN") return `<span class="pill pill-amber">🟡 CẢNH BÁO</span>`;
+      return `<span class="pill pill-red">🔴 LỖI</span>`;
+    }
+
+    let activeFilter = "ALL";
+    function renderMatrix() {
+      const q = (document.getElementById("matrixSearch").value || "").trim().toLowerCase();
+      const tbody = document.getElementById("matrixBody");
+      const filtered = ITEMS.filter((it) => {
+        if (activeFilter === "PASS" && it.v3 !== "PASS") return false;
+        if (activeFilter === "WARN" && it.v3 !== "WARN") return false;
+        if (activeFilter === "FAIL" && it.v3 !== "FAIL") return false;
+        if ((activeFilter === "P0" || activeFilter === "P1" || activeFilter === "P2") && !it.id.startsWith(activeFilter)) return false;
+        if (q && !`${it.id} ${it.title} ${it.ev}`.toLowerCase().includes(q)) return false;
+        return true;
+      });
+      tbody.innerHTML = filtered.length
+        ? filtered.map((it) => `
+          <tr>
+            <td><span class="code-tag">${it.id}</span></td>
+            <td>${statusBadge(it.v1)}</td>
+            <td>${statusBadge(it.v2)}</td>
+            <td>${statusBadge(it.v3)}</td>
+            <td><strong>${it.title}</strong><div style="color:var(--muted);font-size:12.5px;margin-top:3px;">${it.ev}</div></td>
+          </tr>
+        `).join("")
+        : `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px;">Không có hạng mục nào khớp bộ lọc.</td></tr>`;
+    }
+
+    function renderDemos() {
+      const saved = JSON.parse(localStorage.getItem("pcmall_final_demo_checks") || "{}");
+      const list = document.getElementById("demoList");
+      list.innerHTML = DEMOS.map((d) => {
+        const checked = Boolean(saved[d.id]);
+        const cls = d.risk === "FAIL" ? "pill-red" : d.risk === "WARN" ? "pill-amber" : "pill-green";
+        return `
+          <label class="demo-item ${checked ? "checked" : ""}">
+            <input type="checkbox" ${checked ? "checked" : ""} onchange="toggleDemo('${d.id}', this.checked)" />
+            <div>
+              <div class="demo-title">${d.title}</div>
+              <div class="demo-desc">${d.desc}</div>
+            </div>
+            <span class="pill ${cls}">${d.badge}</span>
+          </label>
+        `;
+      }).join("");
+      const done = Object.values(saved).filter(Boolean).length;
+      document.getElementById("demoProgress").textContent = `${done} / ${DEMOS.length} đã kiểm`;
+    }
+
+    window.toggleDemo = function(id, val) {
+      const saved = JSON.parse(localStorage.getItem("pcmall_final_demo_checks") || "{}");
+      saved[id] = val;
+      localStorage.setItem("pcmall_final_demo_checks", JSON.stringify(saved));
+      renderDemos();
+    };
+
+    function renderSyncTable() {
+      document.getElementById("syncTableBody").innerHTML = SYNC_METRICS.map(
+        ([k, v]) => `<tr><td style="color:var(--muted);font-weight:600;">${k}</td><td><strong>${v}</strong></td></tr>`
+      ).join("");
+    }
+
+    window.copyPatch = function() {
+      navigator.clipboard?.writeText(document.getElementById("patchCode").textContent);
+    };
+
+    window.copySyncTable = function() {
+      const md = "| Chỉ số hệ thống | Giá trị thực tế chuẩn |\n|---|---|\n" + SYNC_METRICS.map(([k, v]) => `| ${k} | ${v} |`).join("\n");
+      navigator.clipboard?.writeText(md);
+    };
+
+    document.querySelectorAll(".filter-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".filter-btn").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        activeFilter = btn.dataset.filter;
+        renderMatrix();
+      });
+    });
+    document.getElementById("matrixSearch").addEventListener("input", renderMatrix);
+    document.getElementById("themeToggle").addEventListener("click", () => {
+      const html = document.documentElement;
+      html.setAttribute("data-theme", html.getAttribute("data-theme") === "dark" ? "light" : "dark");
+    });
+
+    renderPillarChart();
+    renderMatrix();
+    renderDemos();
+    renderSyncTable();
+  </script>
+</body>
+</html>
+

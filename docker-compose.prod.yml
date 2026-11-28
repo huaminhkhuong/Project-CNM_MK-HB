@@ -7,7 +7,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-password}
       MYSQL_DATABASE: ${DB_NAME:-cnm_mk_hb}
-      MYSQL_USER: ${DB_USER:-cnm_user}
+      MYSQL_USER: ${DB_APP_USER:-cnm_user}
       MYSQL_PASSWORD: ${DB_PASSWORD:-password}
     ports:
       - "127.0.0.1:3306:3306"
@@ -70,13 +70,16 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
       LLM_API_KEY: ${LLM_API_KEY:-${GEMINI_API_KEY:-}}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-${LLM_API_KEY:-}}
-      LLM_MODEL: ${LLM_MODEL:-gemini-1.5-flash}
+      LLM_MODEL: ${LLM_MODEL:-gemini-2.5-flash}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai-service:5001}
+      AI_SERVICE_INTERNAL_KEY: ${AI_SERVICE_INTERNAL_KEY:-}
     volumes:
       - ./services/api/data:/app/data
+      - ./data/images:/app/data/images:ro
+      - ./services/api/src/data:/app/services/api/src/data
       - ./services/api/uploads:/app/services/api/uploads
     networks:
       - cnm_network
@@ -96,6 +99,7 @@ services:
     environment:
       PORT: 5001
       GEMINI_API_KEY: ${GEMINI_API_KEY:-${LLM_API_KEY:-}}
+      AI_SERVICE_INTERNAL_KEY: ${AI_SERVICE_INTERNAL_KEY:-}
     volumes:
       - ./services/ai-service/data_store:/app/data_store
       - ./data:/app/data:ro

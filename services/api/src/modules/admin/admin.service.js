@@ -1,6 +1,7 @@
 const { getDbPool, query } = require("../../config/database");
 const { prisma } = require("../../config/prisma");
 const { env } = require("../../config/env");
+const adminTagsService = require("./admin-tags.service");
 const {
   createError,
   toNonNegativeNumber,
@@ -21,7 +22,7 @@ function slugify(input) {
     .replace(/-+/g, "-");
 }
 
-function normalizeListParams(params = {}, defaultLimit = 20, maxLimit = 100) {
+function normalizeListParams(params = {}, defaultLimit = 20, maxLimit = 200) {
   const page = toPositiveNumber(params.page, 1);
   const limit = Math.min(toPositiveNumber(params.limit, defaultLimit), maxLimit);
 
@@ -204,12 +205,14 @@ async function getProductDetail(productId) {
   }
 
   const variants = await findProductVariants(productId);
+  const tags = await adminTagsService.getProductTags(product.id);
 
   return {
     id: product.id,
     name: product.name,
     slug: product.slug,
     description: product.description,
+    tags,
     warrantyMonths: Number(product.warrantyMonths || 24),
     category: {
       id: product.categoryId,
@@ -227,8 +230,8 @@ async function getProductDetail(productId) {
 }
 
 async function getProducts(params = {}) {
-  const filters = normalizeListParams(params, 20, 100);
-  const safeLimit = Math.max(1, Math.min(Number(filters.limit) || 20, 100));
+  const filters = normalizeListParams(params, 20, 200);
+  const safeLimit = Math.max(1, Math.min(Number(filters.limit) || 20, 200));
   const safeOffset = Math.max(0, Number(filters.offset) || 0);
   const whereClauses = [];
   const queryParams = [];
@@ -259,6 +262,16 @@ async function getProducts(params = {}) {
   if (statusFilter === "ACTIVE" || statusFilter === "INACTIVE") {
     whereClauses.push("(UPPER(COALESCE(p.status, '')) = ? OR p.is_active = ?)");
     queryParams.push(statusFilter, statusFilter === "ACTIVE" ? 1 : 0);
+  }
+
+  const tagFilter = adminTagsService.normalizeTagCode(String(params.tag || ""));
+  if (tagFilter) {
+    whereClauses.push(`EXISTS (
+      SELECT 1 FROM product_tags pt
+      INNER JOIN tags tg ON tg.id = pt.tag_id
+      WHERE pt.product_id = p.id AND tg.code = ?
+    )`);
+    queryParams.push(tagFilter);
   }
 
   const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
@@ -306,6 +319,8 @@ async function getProducts(params = {}) {
   ]);
 
   const totalItems = Number(totalRows[0]?.totalItems || 0);
+  const productIds = items.map((row) => Number(row.id)).filter(Boolean);
+  const tagsMap = await adminTagsService.getProductTagsMap(productIds);
 
   return {
     items: items.map((row) => ({
@@ -313,6 +328,7 @@ async function getProducts(params = {}) {
       name: row.name,
       slug: row.slug,
       description: row.description,
+      tags: tagsMap.get(Number(row.id)) || [],
       warrantyMonths: Number(row.warrantyMonths || 24),
       category: {
         id: row.categoryId,
@@ -362,6 +378,10 @@ async function createProduct(payload) {
       is_active: true
     }
   });
+
+  if (Array.isArray(payload.tags)) {
+    await adminTagsService.setProductTags(product.id, payload.tags);
+  }
 
   return getProductDetail(product.id);
 }
@@ -415,20 +435,28 @@ async function updateProduct(productId, payload) {
     params.push(warrantyMonths);
   }
 
-  if (updates.length === 0) {
+  const hasTagsUpdate = Object.prototype.hasOwnProperty.call(payload, "tags");
+
+  if (updates.length === 0 && !hasTagsUpdate) {
     throw createError("No valid product fields provided for update", 400);
   }
 
-  params.push(parsedProductId);
+  if (updates.length > 0) {
+    params.push(parsedProductId);
 
-  await query(
-    `
-      UPDATE products
-      SET ${updates.join(", ")}, updated_at = NOW()
-      WHERE id = ?
-    `,
-    params
-  );
+    await query(
+      `
+        UPDATE products
+        SET ${updates.join(", ")}, updated_at = NOW()
+        WHERE id = ?
+      `,
+      params
+    );
+  }
+
+  if (hasTagsUpdate) {
+    await adminTagsService.setProductTags(parsedProductId, payload.tags);
+  }
 
   return getProductDetail(parsedProductId);
 }
@@ -550,8 +578,8 @@ function formatUser(row) {
 
 async function getUsers(params = {}) {
   const roleIdentifierColumn = await getRoleIdentifierColumn();
-  const filters = normalizeListParams(params, 20, 100);
-  const safeLimit = Math.max(1, Math.min(Number(filters.limit) || 20, 100));
+  const filters = normalizeListParams(params, 20, 200);
+  const safeLimit = Math.max(1, Math.min(Number(filters.limit) || 20, 200));
   const safeOffset = Math.max(0, Number(filters.offset) || 0);
   const whereClauses = [];
   const queryParams = [];
@@ -627,6 +655,11 @@ async function changeUserStatus(userId, status, actorUserId = null) {
     [status, parsedUserId]
   );
 
+  try {
+    const { invalidateUserAuthCache } = require("../../middlewares/auth.middleware");
+    if (typeof invalidateUserAuthCache === "function") invalidateUserAuthCache(parsedUserId);
+  } catch {}
+
   return formatUser(await findUserById(parsedUserId));
 }
 
@@ -660,6 +693,11 @@ async function changeUserRole(userId, role, actorUserId = null) {
     `UPDATE users SET role_id = ?, updated_at = NOW() WHERE id = ?`,
     [roleRows[0].id, parsedUserId]
   );
+
+  try {
+    const { invalidateUserAuthCache } = require("../../middlewares/auth.middleware");
+    if (typeof invalidateUserAuthCache === "function") invalidateUserAuthCache(parsedUserId);
+  } catch {}
 
   return formatUser(await findUserById(parsedUserId));
 }
@@ -852,6 +890,14 @@ async function updateCompatibilityRule(ruleId, payload) {
   if (Object.prototype.hasOwnProperty.call(payload, "ruleType")) {
     updates.push(`operator = ?`);
     params.push(ruleTypeToOperator(normalizeRuleType(payload.ruleType)));
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "isCompatible") || Object.prototype.hasOwnProperty.call(payload, "is_compatible")) {
+    const rawCompatible = Object.prototype.hasOwnProperty.call(payload, "isCompatible")
+      ? payload.isCompatible
+      : payload.is_compatible;
+    updates.push(`is_compatible = ?`);
+    params.push(rawCompatible ? 1 : 0);
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, "description")) {

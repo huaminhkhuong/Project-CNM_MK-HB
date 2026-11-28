@@ -55,13 +55,15 @@ const envSchema = z.object({
   LLM_MAX_TOKENS: z.coerce.number().default(2048),
   // Backward compatibility keys
   GEMINI_API_KEY: z.string().optional(),
-  GEMINI_MODEL: z.string().default("gemini-1.5-flash"),
+  GEMINI_MODEL: z.string().default("gemini-2.5-flash"),
   GROQ_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
-  // Public/Gateway URLs and timeout
+  // Public/Gateway URLs, internal service auth, and feature flags
   BACKEND_URL: z.string().optional(),
   API_BASE_URL: z.string().optional(),
   AI_SERVICE_URL: z.string().default("http://127.0.0.1:5001"),
+  AI_SERVICE_INTERNAL_KEY: z.string().optional(),
+  ENABLE_MOCK_GOOGLE_AUTH: booleanEnvSchema.default(false),
   PAYMENT_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(30)
 });
 
@@ -69,6 +71,22 @@ const parsedEnv = envSchema.safeParse(process.env);
 
 if (!parsedEnv.success) {
   throw new Error(`Invalid environment configuration: ${parsedEnv.error.message}`);
+}
+
+if (parsedEnv.data.NODE_ENV === "production") {
+  const weakPrefixes = ["change_me", "your_", "replace_", "dev_", "test_"];
+  for (const [key, val] of [
+    ["JWT_ACCESS_SECRET", parsedEnv.data.JWT_ACCESS_SECRET],
+    ["JWT_REFRESH_SECRET", parsedEnv.data.JWT_REFRESH_SECRET]
+  ] as const) {
+    const trimmed = String(val || "").trim();
+    const isWeak = trimmed.length < 24 || weakPrefixes.some((p) => trimmed.toLowerCase().startsWith(p));
+    if (isWeak) {
+      throw new Error(
+        `[Security Alert] ${key} must be a strong production secret (minimum 24 characters, cannot use default/placeholder values).`
+      );
+    }
+  }
 }
 
 let dbHost = process.env.DB_HOST || "127.0.0.1";
@@ -126,7 +144,7 @@ export const env = {
   sepayTransferPrefix: parsedEnv.data.SEPAY_TRANSFER_PREFIX || "PCMALL",
   llmProvider: parsedEnv.data.LLM_PROVIDER || "gemini",
   llmApiKey: parsedEnv.data.LLM_API_KEY || parsedEnv.data.GEMINI_API_KEY || parsedEnv.data.GROQ_API_KEY || parsedEnv.data.OPENAI_API_KEY || "",
-  llmModel: parsedEnv.data.LLM_MODEL || parsedEnv.data.GEMINI_MODEL || "gemini-1.5-flash",
+  llmModel: parsedEnv.data.LLM_MODEL || parsedEnv.data.GEMINI_MODEL || "gemini-2.5-flash",
   llmEndpoint: parsedEnv.data.LLM_ENDPOINT || "",
   llmTemperature: parsedEnv.data.LLM_TEMPERATURE,
   llmMaxTokens: parsedEnv.data.LLM_MAX_TOKENS,
@@ -137,6 +155,8 @@ export const env = {
   backendUrl: parsedEnv.data.BACKEND_URL || parsedEnv.data.API_BASE_URL || `http://localhost:${parsedEnv.data.PORT}`,
   apiBaseUrl: parsedEnv.data.API_BASE_URL || parsedEnv.data.BACKEND_URL || `http://localhost:${parsedEnv.data.PORT}`,
   aiServiceUrl: parsedEnv.data.AI_SERVICE_URL || "http://127.0.0.1:5001",
+  aiServiceInternalKey: parsedEnv.data.AI_SERVICE_INTERNAL_KEY || "",
+  enableMockGoogleAuth: parsedEnv.data.ENABLE_MOCK_GOOGLE_AUTH,
   paymentTimeoutMinutes: parsedEnv.data.PAYMENT_TIMEOUT_MINUTES
 };
 

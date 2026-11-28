@@ -20,21 +20,15 @@ function normalizeProductsResponse(data) {
 }
 
 function enrichProducts(products) {
-  return products.map((product, index) => {
-    const basePrice = Number(product?.price || 0);
-    const discount = [10, 15, 8, 18, 12][index % 5];
-    const oldPrice = Math.round(basePrice * (100 / (100 - discount)));
-
-    return {
-      ...product,
-      oldPrice,
-      discountPercent: discount,
-      rating: 4.6 + ((index % 3) * 0.1),
-      soldCount: 120 + index * 37,
-      isMall: index % 2 === 0,
-      isFreeShip: index % 3 !== 1
-    };
-  });
+  return products.map((product) => ({
+    ...product,
+    oldPrice: Number(product?.oldPrice || product?.original_price || 0) || null,
+    discountPercent: Number(product?.discountPercent || product?.discount_percent || 0) || 0,
+    rating: Number(product?.rating || product?.averageRating || 0) || null,
+    soldCount: Number(product?.soldCount || product?.sold_count || 0) || 0,
+    isMall: true,
+    isFreeShip: Number(product?.price || 0) >= 5000000
+  }));
 }
 
 // Module-level cache: survives component unmount → instant back-navigation

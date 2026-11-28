@@ -2,10 +2,64 @@ import { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 
 import { env } from "../config/env";
+import { prisma } from "../config/prisma";
 import { AppError } from "../errors/app-error";
 import type { AuthTokenPayload } from "../types/auth";
 import { ROLES, type Role } from "../constants/roles";
 import { isTokenBlacklisted } from "../services/token-blacklist.service";
+
+interface CachedUserAuthState {
+  status: string;
+  roleName: string | null;
+  email: string | null;
+  expiresAt: number;
+}
+
+const USER_AUTH_CACHE_TTL_MS = 2000;
+// Share cache across CJS (.js) and ESM (.ts) module instances via globalThis
+const globalScope = globalThis as typeof globalThis & {
+  __pcmallUserAuthCache?: Map<number, CachedUserAuthState>;
+};
+const userAuthCache: Map<number, CachedUserAuthState> =
+  globalScope.__pcmallUserAuthCache ?? (globalScope.__pcmallUserAuthCache = new Map<number, CachedUserAuthState>());
+
+export function invalidateUserAuthCache(userId: number | string) {
+  const numId = Number(userId);
+  if (Number.isInteger(numId) && numId > 0) {
+    userAuthCache.delete(numId);
+  }
+}
+
+export async function getLiveUserAuthState(userId: number): Promise<CachedUserAuthState | null> {
+  const now = Date.now();
+  const cached = userAuthCache.get(userId);
+  if (cached && cached.expiresAt > now) {
+    return cached;
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        status: true,
+        email: true,
+        Role: { select: { name: true } }
+      }
+    });
+    if (!user) return null;
+
+    const entry: CachedUserAuthState = {
+      status: String(user.status || "ACTIVE").toUpperCase(),
+      roleName: user.Role?.name || null,
+      email: user.email || null,
+      expiresAt: now + USER_AUTH_CACHE_TTL_MS
+    };
+    userAuthCache.set(userId, entry);
+    return entry;
+  } catch {
+    return null;
+  }
+}
 
 export async function authenticate(req: Request, _res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
@@ -22,10 +76,30 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     if (revoked) {
       return next(new AppError("Token has been revoked", 401));
     }
+
+    const numericUserId = Number(payload.userId);
+    let effectiveRole = payload.role;
+    if (Number.isInteger(numericUserId) && numericUserId > 0) {
+      const liveUser = await getLiveUserAuthState(numericUserId);
+      if (liveUser) {
+        if (liveUser.status !== "ACTIVE") {
+          return next(new AppError("Tài khoản đã bị khóa hoặc tạm ngừng hoạt động", 403));
+        }
+        // Sync live role when JWT belongs to this exact DB user (immediate role-demotion enforcement)
+        if (
+          liveUser.roleName &&
+          (!payload.email || !liveUser.email || payload.email.toLowerCase() === liveUser.email.toLowerCase())
+        ) {
+          effectiveRole = liveUser.roleName as Role;
+        }
+      }
+    }
+
     req.user = {
       ...payload,
-      userId: Number(payload.userId) || payload.userId,
-      id: Number(payload.userId) || payload.userId
+      role: effectiveRole,
+      userId: numericUserId || payload.userId,
+      id: numericUserId || payload.userId
     } as any;
     return next();
   } catch (_error) {
@@ -66,7 +140,7 @@ export function authorize(allowedRoles: Role[]) {
   };
 }
 
-export function optionalAuthenticate(req: Request, _res: Response, next: NextFunction) {
+export async function optionalAuthenticate(req: Request, _res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return next();
@@ -74,10 +148,31 @@ export function optionalAuthenticate(req: Request, _res: Response, next: NextFun
   const token = authHeader.split(" ")[1];
   try {
     const payload = jwt.verify(token, env.jwtAccessSecret) as AuthTokenPayload;
+    const revoked = await isTokenBlacklisted(token).catch(() => false);
+    if (revoked) {
+      return next();
+    }
+    const numericUserId = Number(payload.userId);
+    let effectiveRole = payload.role;
+    if (Number.isInteger(numericUserId) && numericUserId > 0) {
+      const liveUser = await getLiveUserAuthState(numericUserId);
+      if (liveUser) {
+        if (liveUser.status !== "ACTIVE") {
+          return next();
+        }
+        if (
+          liveUser.roleName &&
+          (!payload.email || !liveUser.email || payload.email.toLowerCase() === liveUser.email.toLowerCase())
+        ) {
+          effectiveRole = liveUser.roleName as Role;
+        }
+      }
+    }
     req.user = {
       ...payload,
-      userId: Number(payload.userId) || payload.userId,
-      id: Number(payload.userId) || payload.userId
+      role: effectiveRole,
+      userId: numericUserId || payload.userId,
+      id: numericUserId || payload.userId
     } as any;
   } catch (_error) {
     // Non-blocking: continue as guest if token is invalid or expired

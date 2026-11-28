@@ -339,17 +339,72 @@ function formatWarranty(warranty: any, latestRequest?: any) {
   };
 }
 
-function buildLookupWhere(value: string) {
+function normalizePhoneDigits(phone?: string | null): string {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (digits.startsWith("84") && digits.length >= 10) {
+    return `0${digits.slice(2)}`;
+  }
+  return digits;
+}
+
+function maskPhone(phone?: string | null): string | null {
+  const raw = String(phone || "").trim();
+  if (!raw) return null;
+  if (raw.length <= 4) return "****";
+  return `${raw.slice(0, 3)}****${raw.slice(-3)}`;
+}
+
+function maskEmail(email?: string | null): string | null {
+  const raw = String(email || "").trim();
+  const atIdx = raw.indexOf("@");
+  if (atIdx <= 0) return raw ? "***" : null;
+  const local = raw.slice(0, atIdx);
+  const domain = raw.slice(atIdx);
+  return `${local.slice(0, Math.min(2, local.length))}***${domain}`;
+}
+
+function maskName(name?: string | null): string | null {
+  const raw = String(name || "").trim();
+  if (!raw) return null;
+  const parts = raw.split(/\s+/);
+  if (parts.length === 1) return `${parts[0][0]}***`;
+  return `${parts[0]} *** ${parts[parts.length - 1]}`;
+}
+
+function maskRequestPii(request: any) {
+  if (!request) return null;
+  const maskedTimeline = Array.isArray(request.timeline)
+    ? request.timeline.map((step: any) => ({
+        ...step,
+        actorName: step?.actorName
+          ? step.key === "RECEIVED"
+            ? maskName(step.actorName)
+            : "Kỹ thuật viên PC Mall"
+          : null
+      }))
+    : [];
+  return {
+    ...request,
+    userId: undefined,
+    customerName: maskName(request.customerName),
+    customerPhone: maskPhone(request.customerPhone),
+    customerEmail: maskEmail(request.customerEmail),
+    accountName: undefined,
+    accountPhone: undefined,
+    accountEmail: undefined,
+    lastEmailMock: null,
+    timeline: maskedTimeline
+  };
+}
+
+function buildLookupWhere(value: string, isAuthenticated = false) {
+  // Guest/public lookup strictly requires EXACT warranty_code or serial_number (no substring/phone/orderId enumeration)
   const clauses: any[] = [
     { warranty_code: value },
-    { serial_number: value },
-    { serial_number: { contains: value } },
-    { warranty_code: { contains: value } },
-    { OrderItem: { sku_snapshot: { contains: value } } },
-    { User: { phone: { contains: value } } }
+    { serial_number: value }
   ];
 
-  if (/^\d+$/.test(value)) {
+  if (isAuthenticated && /^\d+$/.test(value)) {
     clauses.push({ order_id: Number(value) });
   }
 
@@ -724,14 +779,15 @@ export const lookupWarranty = asyncHandler(async (req: Request, res: Response) =
   };
 
   const currentUserId = getAuthenticatedUserId(req);
-  const where = currentUserId
+  const isAuthenticated = currentUserId !== null;
+  const where = currentUserId !== null
     ? {
         AND: [
-          buildLookupWhere(lookupValue),
+          buildLookupWhere(lookupValue, true),
           { user_id: currentUserId }
         ]
       }
-    : buildLookupWhere(lookupValue);
+    : buildLookupWhere(lookupValue, false);
 
   const warranty = await prisma.warrantyItem.findFirst({
     where,
@@ -745,7 +801,8 @@ export const lookupWarranty = asyncHandler(async (req: Request, res: Response) =
   assertWarrantyOwnership(req, warranty);
 
   const requestRows = await getWarrantyRequestsBase("wr.warranty_id = ?", [warranty.id]);
-  const latestRequest = requestRows[0] || null;
+  const rawLatestRequest = requestRows[0] || null;
+  const latestRequest = isAuthenticated ? rawLatestRequest : maskRequestPii(rawLatestRequest);
 
   res.status(200).json({
     success: true,
@@ -770,12 +827,40 @@ export const submitWarrantyRequest = asyncHandler(async (req: Request, res: Resp
     throw new AppError("Vui lòng mô tả lỗi cần bảo hành", 400);
   }
 
+  const authenticatedUserId = getAuthenticatedUserId(req);
   let warrantyId: number | null = req.body?.warrantyId ? Number(req.body.warrantyId) : null;
   let warranty: any = null;
 
-  if (!warrantyId && lookupValue) {
+  if (!authenticatedUserId && warrantyId && !lookupValue) {
+    throw new AppError("Vui lòng đăng nhập hoặc cung cấp chính xác mã bảo hành/Serial cùng số điện thoại đặt hàng", 403);
+  }
+
+  if (authenticatedUserId && warrantyId) {
     warranty = await prisma.warrantyItem.findFirst({
-      where: buildLookupWhere(lookupValue),
+      where: { id: warrantyId, user_id: authenticatedUserId },
+      include: {
+        OrderItem: {
+          include: {
+            ProductSku: {
+              include: {
+                Product: {
+                  include: {
+                    Category: true
+                  }
+                }
+              }
+            }
+          }
+        },
+        User: true
+      }
+    });
+  } else if (lookupValue) {
+    const whereClause = authenticatedUserId
+      ? { AND: [buildLookupWhere(lookupValue, true), { user_id: authenticatedUserId }] }
+      : buildLookupWhere(lookupValue, false);
+    warranty = await prisma.warrantyItem.findFirst({
+      where: whereClause,
       include: {
         OrderItem: {
           include: {
@@ -794,26 +879,6 @@ export const submitWarrantyRequest = asyncHandler(async (req: Request, res: Resp
       }
     });
     warrantyId = warranty?.id || null;
-  } else if (warrantyId) {
-    warranty = await prisma.warrantyItem.findFirst({
-      where: { id: warrantyId },
-      include: {
-        OrderItem: {
-          include: {
-            ProductSku: {
-              include: {
-                Product: {
-                  include: {
-                    Category: true
-                  }
-                }
-              }
-            }
-          }
-        },
-        User: true
-      }
-    });
   }
 
   if (!warranty) {
@@ -822,27 +887,20 @@ export const submitWarrantyRequest = asyncHandler(async (req: Request, res: Resp
 
   assertWarrantyOwnership(req, warranty);
 
+  // Guest RMA submissions MUST prove ownership by matching owner phone number (prevents RMA hijack / 409 DoS)
+  if (!authenticatedUserId) {
+    const providedPhone = normalizePhoneDigits(req.body?.customerPhone || req.body?.phone);
+    const ownerPhone = normalizePhoneDigits(warranty?.User?.phone);
+    if (!providedPhone || !ownerPhone || providedPhone !== ownerPhone) {
+      throw new AppError("Số điện thoại xác minh không khớp với chủ sở hữu bảo hành. Vui lòng đăng nhập hoặc nhập đúng SĐT đặt hàng.", 403);
+    }
+  }
+
   if (!isWarrantyRequestable(warranty)) {
     throw new AppError("Sản phẩm đã hết hạn hoặc không còn hiệu lực bảo hành", 400);
   }
 
-  const openRequests = await queryRows<{ id: number; status: string }>(
-    `
-      SELECT id, status
-      FROM warranty_requests
-      WHERE warranty_id = ?
-        AND status <> 'COMPLETED'
-      ORDER BY id DESC
-      LIMIT 1
-    `,
-    warranty.id
-  );
-
-  if (openRequests.length > 0) {
-    throw new AppError("Sản phẩm này đã có yêu cầu bảo hành đang được xử lý", 409);
-  }
-
-  const userId = getAuthenticatedUserId(req) || warranty.user_id || null;
+  const userId = authenticatedUserId || warranty.user_id || null;
   const customerName = String(req.body?.customerName || req.body?.fullName || warranty?.User?.full_name || "").trim() || null;
   const customerPhone = String(req.body?.customerPhone || req.body?.phone || warranty?.User?.phone || "").trim() || null;
   const customerEmail = String(req.body?.customerEmail || req.body?.email || warranty?.User?.email || "").trim() || null;
@@ -850,44 +908,121 @@ export const submitWarrantyRequest = asyncHandler(async (req: Request, res: Resp
   const serialNumber = String(warranty?.serial_number || req.body?.serialNumber || warranty?.OrderItem?.sku_snapshot || lookupValue || "").trim() || null;
   const orderId = warranty?.order_id || (req.body?.orderId ? Number(req.body.orderId) : null);
 
-  await execute(
-    `
-      INSERT INTO warranty_requests
-        (warranty_id, user_id, lookup_value, customer_name, customer_phone, customer_email, product_name, serial_number, order_id, severity, issue_description, extra_note, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RECEIVED')
-    `,
-    warrantyId,
-    userId,
-    lookupValue || warranty.warranty_code || null,
-    customerName,
-    customerPhone,
-    customerEmail,
-    productName,
-    serialNumber,
-    orderId,
-    severity,
-    issueDescription,
-    extraNote
-  );
+  // Execute open-request check, INSERT, LAST_INSERT_ID(), attachments, events & notification on ONE transactional connection
+  const requestId = await prisma.$transaction(async (tx: any) => {
+    await tx.$queryRawUnsafe(`SELECT id FROM warranties WHERE id = ? FOR UPDATE`, warranty.id);
 
-  const insertedRow = await queryRows<{ id: number }>("SELECT LAST_INSERT_ID() AS id");
-  const requestId = Number(insertedRow[0]?.id || 0);
+    const openRequests = sanitizeBigInts(
+      await tx.$queryRawUnsafe(
+        `
+          SELECT id, status
+          FROM warranty_requests
+          WHERE warranty_id = ?
+            AND status <> 'COMPLETED'
+          ORDER BY id DESC
+          LIMIT 1
+        `,
+        warranty.id
+      )
+    ) as Array<{ id: number; status: string }>;
 
-  await attachFilesToRequest(requestId, files, "CUSTOMER");
-  await addRequestEvent(requestId, "RECEIVED", issueDescription, "CUSTOMER", customerName || "Khách hàng");
-  await createWarrantyNotification(userId, requestId, "Yêu cầu bảo hành đã được tiếp nhận", `Yêu cầu bảo hành cho ${productName || "sản phẩm"} đã được ghi nhận.`);
+    if (openRequests.length > 0) {
+      throw new AppError("Sản phẩm này đã có yêu cầu bảo hành đang được xử lý", 409);
+    }
+
+    await tx.$executeRawUnsafe(
+      `
+        INSERT INTO warranty_requests
+          (warranty_id, user_id, lookup_value, customer_name, customer_phone, customer_email, product_name, serial_number, order_id, severity, issue_description, extra_note, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RECEIVED')
+      `,
+      warranty.id,
+      userId,
+      lookupValue || warranty.warranty_code || null,
+      customerName,
+      customerPhone,
+      customerEmail,
+      productName,
+      serialNumber,
+      orderId,
+      severity,
+      issueDescription,
+      extraNote
+    );
+
+    const insertedRows = sanitizeBigInts(await tx.$queryRawUnsafe("SELECT LAST_INSERT_ID() AS id")) as Array<{ id: number }>;
+    const nextRequestId = Number(insertedRows[0]?.id || 0);
+    if (!nextRequestId) {
+      throw new AppError("Không thể khởi tạo mã yêu cầu bảo hành", 500);
+    }
+
+    if (Array.isArray(files) && files.length > 0) {
+      for (const file of files) {
+        await tx.$executeRawUnsafe(
+          `
+            INSERT INTO warranty_request_attachments (request_id, source, file_url, mime_type)
+            VALUES (?, ?, ?, ?)
+          `,
+          nextRequestId,
+          "CUSTOMER",
+          `/uploads/warranty-requests/${file.filename}`,
+          file.mimetype || null
+        );
+      }
+    }
+
+    await tx.$executeRawUnsafe(
+      `
+        INSERT INTO warranty_request_events (request_id, status, note, actor_role, actor_name)
+        VALUES (?, ?, ?, ?, ?)
+      `,
+      nextRequestId,
+      "RECEIVED",
+      issueDescription,
+      "CUSTOMER",
+      customerName || "Khách hàng"
+    );
+
+    if (userId) {
+      await tx.$executeRawUnsafe(
+        `
+          INSERT INTO warranty_notifications (user_id, request_id, title, message)
+          VALUES (?, ?, ?, ?)
+        `,
+        userId,
+        nextRequestId,
+        "Yêu cầu bảo hành đã được tiếp nhận",
+        `Yêu cầu bảo hành cho ${productName || "sản phẩm"} đã được ghi nhận.`
+      );
+    }
+
+    return nextRequestId;
+  });
+
+  if (userId) {
+    sendWarrantyNotification({
+      userId,
+      requestId,
+      title: "Yêu cầu bảo hành đã được tiếp nhận",
+      message: `Yêu cầu bảo hành cho ${productName || "sản phẩm"} đã được ghi nhận.`
+    }).catch((err: Error) => console.warn("[Notification] Warranty notification sync failed:", err.message));
+  }
 
   const requests = await getWarrantyRequestsBase("wr.id = ?", [requestId]);
+  const createdData = requests[0]
+    ? (authenticatedUserId ? requests[0] : maskRequestPii(requests[0]))
+    : {
+        id: requestId,
+        warrantyId: warranty.id,
+        lookupValue,
+        status: "RECEIVED",
+        statusLabel: REQUEST_STATUS_LABELS.RECEIVED,
+        timeline: buildFallbackTimeline("RECEIVED")
+      };
+
   res.status(201).json({
     success: true,
-    data: requests[0] || {
-      id: requestId,
-      warrantyId,
-      lookupValue,
-      status: "RECEIVED",
-      statusLabel: REQUEST_STATUS_LABELS.RECEIVED,
-      timeline: buildFallbackTimeline("RECEIVED")
-    }
+    data: createdData
   });
 });
 
@@ -937,7 +1072,13 @@ export const updateAdminWarrantyRequest = asyncHandler(async (req: Request, res:
   const requestId = Number(req.params.requestId);
   if (!requestId) throw new AppError("Thiếu requestId", 400);
 
-  const status = req.body?.status ? normalizeRequestStatus(req.body.status) : "";
+  const rawRequestedStatus = req.body?.status !== undefined && req.body?.status !== null
+    ? String(req.body.status).trim().toUpperCase()
+    : "";
+  if (rawRequestedStatus && !WARRANTY_LIFECYCLE_STEPS.includes(rawRequestedStatus as any)) {
+    throw new AppError(`Trạng thái bảo hành không hợp lệ: ${rawRequestedStatus}`, 400);
+  }
+  const status = rawRequestedStatus;
   const note = String(req.body?.note || req.body?.technicianNote || "").trim() || null;
   let actorName = String(req.user?.email || "Kỹ thuật viên PC Mall");
   if (req.user?.userId) {
@@ -953,7 +1094,24 @@ export const updateAdminWarrantyRequest = asyncHandler(async (req: Request, res:
   const current = existing[0];
   if (!current) throw new AppError("Không tìm thấy yêu cầu bảo hành", 404);
 
-  const nextStatus = status || current.status;
+  const currentStatus = String(current.status || "RECEIVED").toUpperCase();
+  const nextStatus = status || currentStatus;
+
+  // Enforce forward 6-step RMA lifecycle state machine (no reverting COMPLETED back to RECEIVED)
+  const RMA_STATUS_TRANSITIONS: Record<string, string[]> = {
+    RECEIVED: ["INSPECTING", "REPAIRING", "WAITING_PARTS", "REPLACEMENT", "COMPLETED"],
+    INSPECTING: ["REPAIRING", "WAITING_PARTS", "REPLACEMENT", "COMPLETED"],
+    WAITING_PARTS: ["REPAIRING", "REPLACEMENT", "COMPLETED"],
+    REPAIRING: ["WAITING_PARTS", "REPLACEMENT", "COMPLETED"],
+    REPLACEMENT: ["COMPLETED"],
+    COMPLETED: []
+  };
+  if (nextStatus !== currentStatus) {
+    const allowedNext = RMA_STATUS_TRANSITIONS[currentStatus] || [];
+    if (!allowedNext.includes(nextStatus)) {
+      throw new AppError(`Không thể chuyển trạng thái bảo hành từ ${currentStatus} sang ${nextStatus}`, 400);
+    }
+  }
   const emailMock = `Đã gửi thông báo tới ${current.customerEmail || current.customerPhone || "khách hàng"}: [${REQUEST_STATUS_LABELS[nextStatus]}] ${note || current.lastStaffNote || "Hồ sơ bảo hành của bạn đang được xử lý."}`;
 
   await execute(
@@ -973,6 +1131,25 @@ export const updateAdminWarrantyRequest = asyncHandler(async (req: Request, res:
   }
   await attachFilesToRequest(requestId, files, "STAFF");
   await createWarrantyNotification(current.userId || null, requestId, "Cập nhật bảo hành", `${current.productName}: ${REQUEST_STATUS_LABELS[nextStatus]}`);
+
+  try {
+    const { recordAuditLog } = require("../../services/audit-log.service");
+    await recordAuditLog({
+      actorUserId: req.user?.userId,
+      actorRole: actorRole,
+      action: "WARRANTY_RMA_STATUS_UPDATED",
+      entityType: "WARRANTY_REQUEST",
+      entityId: requestId,
+      description: `Updated RMA #${requestId} from ${currentStatus} to ${nextStatus}`,
+      metadata: {
+        previousStatus: currentStatus,
+        nextStatus,
+        note
+      }
+    });
+  } catch {
+    // non-fatal
+  }
 
   const updated = await getWarrantyRequestsBase("wr.id = ?", [requestId]);
 

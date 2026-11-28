@@ -24,3 +24,23 @@ export async function deleteAdminProduct(productId) {
   const response = await httpClient.delete(`/admin/products/${productId}`);
   return response.data;
 }
+
+export async function getAdminTags() {
+  const response = await httpClient.get("/admin/tags");
+  return response.data;
+}
+
+export async function createAdminTag(payload) {
+  const response = await httpClient.post("/admin/tags", payload);
+  return response.data;
+}
+
+export async function deleteAdminTag(tagId) {
+  const response = await httpClient.delete(`/admin/tags/${tagId}`);
+  return response.data;
+}
+
+export async function setAdminProductTags(productId, tags) {
+  const response = await httpClient.put(`/admin/products/${productId}/tags`, { tags });
+  return response.data;
+}
