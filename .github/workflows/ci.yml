@@ -25,6 +25,7 @@ jobs:
 
     env:
       DATABASE_URL: mysql://root:root@127.0.0.1:3306/cnm_mk_hb
+      TEST_DATABASE_URL: mysql://root:root@127.0.0.1:3306/cnm_mk_hb
       DB_HOST: 127.0.0.1
       DB_PORT: 3306
       DB_USER: root
@@ -54,6 +55,7 @@ jobs:
         run: |
           npm run prisma:generate -w services/api
           npm run prisma:push -w services/api
+          npm run db:migrate -w services/api
 
       - name: Seed production accounts
         run: npm run seed:production -w services/api
@@ -63,6 +65,7 @@ jobs:
 
       - name: Test API
         run: |
+          set -o pipefail
           npm test -w services/api 2>&1 | tee test-output.log || {
             echo "### ❌ Test API Failed Output" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY

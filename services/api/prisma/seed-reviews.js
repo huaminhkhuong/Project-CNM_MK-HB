@@ -103,7 +103,7 @@ async function seedReviews() {
 
       await connection.query(
         `
-          INSERT INTO product_reviews (product_id, user_id, order_id, rating, comment, is_verified_buyer, created_at)
+          INSERT IGNORE INTO product_reviews (product_id, user_id, order_id, rating, comment, is_verified_buyer, created_at)
           VALUES (?, ?, ?, ?, ?, 1, DATE_SUB(NOW(), INTERVAL FLOOR(RAND() * 10 + 1) DAY))
         `,
         [item.productId, customerUserId, deliveredOrderId, item.rating, item.comment]

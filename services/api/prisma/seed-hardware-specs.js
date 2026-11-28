@@ -118,7 +118,14 @@ async function seedHardwareSpecs() {
         else if (nameUpper.includes("B760") || nameUpper.includes("Z790") || nameUpper.includes("H610") || nameUpper.includes("Z690")) socket = "LGA1700";
 
         let ramType = "DDR5";
-        if (nameUpper.includes("DDR4") || socket === "AM4" || socket === "LGA1200") ramType = "DDR4";
+        if (
+          nameUpper.includes("DDR4") ||
+          nameUpper.includes(" D4") ||
+          nameUpper.includes("-D4") ||
+          (nameUpper.includes("H610") && !nameUpper.includes("DDR5") && !nameUpper.includes(" D5")) ||
+          socket === "AM4" ||
+          socket === "LGA1200"
+        ) ramType = "DDR4";
         else if (nameUpper.includes("DDR5") || socket === "AM5") ramType = "DDR5";
 
         let formFactor = "Micro-ATX";

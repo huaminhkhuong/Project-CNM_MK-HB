@@ -1126,7 +1126,13 @@ class PcBuilderService {
       // Nhánh phổ thông / đa dụng: Chọn CPU trước
       if (!excluded.includes("cpu")) {
         const cpuMax = Math.round(budget * (ratios.cpu || 0.18) * multiplier * 1.15);
-        cpuItem = pickBest(cpuPool, cpuMax);
+        // Nếu cấu hình không dùng GPU rời (ví dụ: Văn phòng / Học tập dùng iGPU), ưu tiên CPU có đồ họa tích hợp (loại dòng -F / -KF)
+        const requiresIgpu = !hasGpuNeed;
+        cpuItem = pickBest(
+          cpuPool,
+          cpuMax,
+          requiresIgpu ? (c) => !/\b\d{4,5}k?f\b/i.test(String(c?.name || "")) : undefined
+        );
         if (cpuItem) {
           selectedComponents.cpu = cpuItem;
           cpuSocket = this.getCpuSocket(cpuItem);

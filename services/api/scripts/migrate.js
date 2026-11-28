@@ -205,6 +205,30 @@ async function runCanonicalMigrations() {
       await connection.query("ALTER TABLE warranties ADD INDEX idx_warranties_serial (serial_number)");
       console.log("✅ [Migration] Added idx_warranties_serial to warranties.");
     }
+    if ((await hasTable(connection, "warranties")) && (await hasTable(connection, "product_skus")) && (await hasColumn(connection, "warranties", "sku_id"))) {
+      const [existingSkuFk] = await connection.query(
+        `
+          SELECT CONSTRAINT_NAME
+          FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+          WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'warranties'
+            AND COLUMN_NAME = 'sku_id'
+            AND REFERENCED_TABLE_NAME = 'product_skus'
+        `
+      );
+      if (!Array.isArray(existingSkuFk) || existingSkuFk.length === 0) {
+        await connection.query(
+          "UPDATE warranties SET sku_id = NULL WHERE sku_id IS NOT NULL AND sku_id NOT IN (SELECT id FROM product_skus)"
+        );
+        if (!(await hasIndex(connection, "warranties", "idx_warranties_sku"))) {
+          await connection.query("ALTER TABLE warranties ADD INDEX idx_warranties_sku (sku_id)");
+        }
+        await connection.query(
+          "ALTER TABLE warranties ADD CONSTRAINT fk_warranties_sku FOREIGN KEY (sku_id) REFERENCES product_skus(id) ON DELETE SET NULL ON UPDATE RESTRICT"
+        );
+        console.log("✅ [Migration] Added fk_warranties_sku foreign key to warranties.");
+      }
+    }
 
     // 5. Ensure pc_builds columns
     if (!(await hasColumn(connection, "pc_builds", "share_token"))) {

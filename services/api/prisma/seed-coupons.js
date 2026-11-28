@@ -71,6 +71,19 @@ const CANONICAL_COUPONS = [
     target_ids: null,
     usage_limit: 1000,
     usage_limit_per_user: 3
+  },
+  {
+    code: "PCMALL50K",
+    name: "Ưu đãi PC Mall - Giảm 50.000đ",
+    description: "Giảm ngay 50.000đ cho đơn hàng từ 500.000đ",
+    discount_type: "FIXED_AMOUNT",
+    discount_value: 50000,
+    max_discount_amount: 50000,
+    min_order_value: 500000,
+    target_type: "ALL",
+    target_ids: null,
+    usage_limit: 1000,
+    usage_limit_per_user: 3
   }
 ];
 
