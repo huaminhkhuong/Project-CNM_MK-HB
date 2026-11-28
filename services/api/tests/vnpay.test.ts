@@ -206,9 +206,13 @@ describe("Payment Hardening - VNPay IPN/Return, Mock Guard & Payments SSOT", () 
     // 3. Mock payment endpoints blocked with 403 when mock mode disabled outside test or in production
     const origMockMode = env.paymentMockMode;
     const origNodeEnv = env.nodeEnv;
+    const origTmnForBlock = process.env.VNPAY_TMN_CODE;
+    const origSecForBlock = process.env.VNPAY_HASH_SECRET;
     try {
       env.paymentMockMode = false;
       (env as any).nodeEnv = "development";
+      process.env.VNPAY_TMN_CODE = process.env.VNPAY_TMN_CODE || "CI_TEST_TMN";
+      process.env.VNPAY_HASH_SECRET = process.env.VNPAY_HASH_SECRET || "ci_test_vnpay_secret_1234567890";
 
       const blockedMockPay = await request(app)
         .post(`/api/orders/${vnpayOrderId}/mock-pay`)
@@ -230,6 +234,10 @@ describe("Payment Hardening - VNPay IPN/Return, Mock Guard & Payments SSOT", () 
     } finally {
       env.paymentMockMode = origMockMode;
       (env as any).nodeEnv = origNodeEnv;
+      if (origTmnForBlock === undefined) delete process.env.VNPAY_TMN_CODE;
+      else process.env.VNPAY_TMN_CODE = origTmnForBlock;
+      if (origSecForBlock === undefined) delete process.env.VNPAY_HASH_SECRET;
+      else process.env.VNPAY_HASH_SECRET = origSecForBlock;
     }
 
     // 4. VNPay IPN & Return signature, amount mismatch, failure, and idempotent success verification
@@ -372,6 +380,8 @@ describe("Payment Hardening - VNPay IPN/Return, Mock Guard & Payments SSOT", () 
     const origDbMode = origSettingRows?.[0]?.setting_value || "sandbox";
     const origNodeEnv = env.nodeEnv;
     const origMockMode = env.paymentMockMode;
+    const origTmnForToggle = process.env.VNPAY_TMN_CODE;
+    const origSecForToggle = process.env.VNPAY_HASH_SECRET;
 
     // Create a VNPAY order to test live mode switching
     const orderRes = await request(app)
@@ -389,6 +399,9 @@ describe("Payment Hardening - VNPay IPN/Return, Mock Guard & Payments SSOT", () 
     stockAdjustments.push({ skuId: sku.id, delta: 1 });
 
     try {
+      process.env.VNPAY_TMN_CODE = process.env.VNPAY_TMN_CODE || "CI_TEST_TMN";
+      process.env.VNPAY_HASH_SECRET = process.env.VNPAY_HASH_SECRET || "ci_test_vnpay_secret_1234567890";
+
       // 1. Invalid mode rejected with 400
       const invalidRes = await request(app)
         .patch("/api/admin/system/settings")
@@ -449,6 +462,10 @@ describe("Payment Hardening - VNPay IPN/Return, Mock Guard & Payments SSOT", () 
     } finally {
       (env as any).nodeEnv = origNodeEnv;
       env.paymentMockMode = origMockMode;
+      if (origTmnForToggle === undefined) delete process.env.VNPAY_TMN_CODE;
+      else process.env.VNPAY_TMN_CODE = origTmnForToggle;
+      if (origSecForToggle === undefined) delete process.env.VNPAY_HASH_SECRET;
+      else process.env.VNPAY_HASH_SECRET = origSecForToggle;
       await pool.execute(
         "UPDATE system_settings SET setting_value = ? WHERE setting_key = 'online_payment_mode'",
         [origDbMode]

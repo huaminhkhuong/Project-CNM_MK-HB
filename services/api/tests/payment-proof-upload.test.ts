@@ -212,9 +212,13 @@ describe("Payment Proof Upload API (Step 3)", () => {
     // 6. Legacy /api/payments/:paymentId/confirm & /callback blocked with 403 when mock mode disabled outside test
     const origMock = env.paymentMockMode;
     const origNode = env.nodeEnv;
+    const origTmn = process.env.VNPAY_TMN_CODE;
+    const origSec = process.env.VNPAY_HASH_SECRET;
     try {
       env.paymentMockMode = false;
       (env as any).nodeEnv = "development";
+      process.env.VNPAY_TMN_CODE = process.env.VNPAY_TMN_CODE || "CI_TEST_TMN";
+      process.env.VNPAY_HASH_SECRET = process.env.VNPAY_HASH_SECRET || "ci_test_vnpay_secret_1234567890";
 
       const confirmBlocked = await request(app)
         .post(`/api/payments/${paymentId}/confirm`)
@@ -228,6 +232,10 @@ describe("Payment Proof Upload API (Step 3)", () => {
     } finally {
       env.paymentMockMode = origMock;
       (env as any).nodeEnv = origNode;
+      if (origTmn === undefined) delete process.env.VNPAY_TMN_CODE;
+      else process.env.VNPAY_TMN_CODE = origTmn;
+      if (origSec === undefined) delete process.env.VNPAY_HASH_SECRET;
+      else process.env.VNPAY_HASH_SECRET = origSec;
     }
 
     // 7. Approve proof -> syncs orders (PAID / PROCESSING) + payments (PAID / VIETQR-APPROVED-*) + audit_logs
